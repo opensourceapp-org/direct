@@ -1,16 +1,16 @@
 import Foundation
 
-public struct Profile: Codable, Equatable {
+public struct Profile: Codable, Equatable, Sendable {
     public var name: String
     public var deviceId: String
     public var directId: String
 }
 
-public struct Settings: Codable, Equatable {
+public struct Settings: Codable, Equatable, Sendable {
     public var bootstrapUrl: String?
 }
 
-public struct ContactRecord: Codable, Equatable, Identifiable {
+public struct ContactRecord: Codable, Equatable, Identifiable, Sendable {
     public var directId: String
     public var name: String
     public var bundle: String
@@ -35,12 +35,12 @@ public struct ContactRecord: Codable, Equatable, Identifiable {
     }
 }
 
-public enum Direction: String, Codable {
+public enum Direction: String, Codable, Sendable {
     case outgoing = "OUTGOING"
     case incoming = "INCOMING"
 }
 
-public struct MessageRecord: Codable, Equatable, Identifiable {
+public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var peerId: String
     public var direction: Direction

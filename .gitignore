@@ -26,3 +26,4 @@ native/android/local.properties
 native/ios/DirectCore/.build/
 native/ios/DirectCore/.swiftpm/
 native/ios/*.xcodeproj/
+native/ios/Direct/Info.plist

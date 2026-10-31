@@ -18,14 +18,16 @@ public func wallClockMs() -> Int64 {
 
 /// A one-shot value that several callers can await. Completing twice is ignored.
 @DirectActor
-final class Waiter<T> {
+public final class Waiter<T> {
     private var value: T?
     private var done = false
     private var continuations: [CheckedContinuation<T, Never>] = []
 
-    var isCompleted: Bool { done }
+    public init() {}
 
-    func complete(_ result: T) {
+    public var isCompleted: Bool { done }
+
+    public func complete(_ result: T) {
         guard !done else { return }
         done = true
         value = result
@@ -34,13 +36,13 @@ final class Waiter<T> {
         waiting.forEach { $0.resume(returning: result) }
     }
 
-    func wait() async -> T {
+    public func wait() async -> T {
         if done, let value { return value }
         return await withCheckedContinuation { continuations.append($0) }
     }
 
     /// Waits up to `timeoutMs`; on timeout the waiter completes with `fallback` for everyone.
-    func wait(timeoutMs: Int64, fallback: T) async -> T {
+    public func wait(timeoutMs: Int64, fallback: T) async -> T {
         if done, let value { return value }
         Task { @DirectActor [weak self] in
             await sleepMs(timeoutMs)

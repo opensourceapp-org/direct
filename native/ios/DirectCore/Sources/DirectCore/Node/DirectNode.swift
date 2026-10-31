@@ -1,7 +1,7 @@
 import Foundation
 
 public struct DirectError: Error, Equatable, CustomStringConvertible {
-    public enum Reason: String {
+    public enum Reason: String, Sendable {
         case noIdentity, invalidId, selfId, noBootstrap, bootstrapOffline, notFound, badBundle, notAccepted, blocked, rejected, invalidBootstrap, storage
     }
 
@@ -16,7 +16,7 @@ public struct DirectError: Error, Equatable, CustomStringConvertible {
     public var description: String { message }
 }
 
-public struct Conversation: Equatable, Identifiable {
+public struct Conversation: Equatable, Identifiable, Sendable {
     public let peerId: String
     public let name: String
     public let lastBody: String?
@@ -29,7 +29,7 @@ public struct Conversation: Equatable, Identifiable {
     public var id: String { peerId }
 }
 
-public struct NodeState: Equatable {
+public struct NodeState: Equatable, Sendable {
     public var ready = false
     public var profile: Profile?
     public var bundle: String?

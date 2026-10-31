@@ -17,8 +17,8 @@ public protocol WebSocketEvents: AnyObject {
     func onClosed(_ error: String?)
 }
 
-public struct BootstrapStatus: Equatable {
-    public enum Phase: String { case notConfigured, connecting, open, retrying, stopped }
+public struct BootstrapStatus: Equatable, Sendable {
+    public enum Phase: String, Sendable { case notConfigured, connecting, open, retrying, stopped }
 
     public var phase: Phase
     public var url: String?

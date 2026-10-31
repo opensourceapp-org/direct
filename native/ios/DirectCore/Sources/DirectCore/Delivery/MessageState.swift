@@ -10,7 +10,7 @@ import Foundation
 ///               (an unknown sender's message is stored as a request, and is still accepted)
 /// acknowledged  the recipient accepted the conversation and opened the message, and signed a `read`
 /// failed        expired before any receipt, or the recipient is blocked; a manual retry requeues it
-public enum MessageState: String, Codable, CaseIterable {
+public enum MessageState: String, Codable, CaseIterable, Sendable {
     case queued = "QUEUED"
     case sending = "SENDING"
     case sent = "SENT"
