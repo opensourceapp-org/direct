@@ -16,4 +16,4 @@ Checked before integration. Versions move; this is the decision for this reposit
 | `js-libp2p` and `@waku/sdk` | Not bundled. Current releases expect Node or browser APIs that Hermes does not provide, and pulling them in before a device spike would make the app depend on a stack we cannot run here. `Libp2pTransport` and `WakuTransport` are real adapters with in-process dial and relay doubles. |
 | Kademlia | `KademliaTable` implements XOR distance and k-buckets for discovery records. It is not the libp2p kad-dht wire protocol. |
 
-Expo Go is intentionally not a target. Native networking and SQLCipher are not in that client.
+Expo Go is intentionally not a target. Native networking and SQLCipher are not in that client. The installable Android and iPhone projects are the Capacitor shell in `apps/mobile/android` and `apps/mobile/ios`. They package the browser preview and still need a reachable `pnpm signaling` bootstrap.

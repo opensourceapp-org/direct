@@ -1,8 +1,8 @@
 import Foundation
 import BackgroundTasks
 
-/// iOS background flush. The system may not run this task. DIRECT always
-/// retries the delivery queue again when the app becomes active.
+/// Not registered with the Capacitor shell yet. The installed app retries the
+/// queue while it is open. iOS may still suspend that work.
 enum DeliveryBackgroundTask {
   static let identifier = "app.direct.messaging.delivery"
 

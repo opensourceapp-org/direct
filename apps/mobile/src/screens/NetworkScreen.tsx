@@ -69,8 +69,8 @@ function BootstrapField() {
   return (
     <View style={{ gap: 8 }}>
       <Text variant="label">Bootstrap address</Text>
-      <Text tone="muted">Two phones in different places use one reachable DIRECT address. Leave this empty to use the site you already opened. The bootstrap learns who is online and forwards session descriptions. It does not receive message text.</Text>
-      <Input value={value} onChangeText={setValue} placeholder="wss://your-direct-host/api/direct/signal" />
+      <Text tone="muted">Two phones use one bootstrap. In the browser, leave this empty to use the site you already opened. In the installed app, paste the computer running pnpm signaling, such as ws://192.168.1.20:8787. The bootstrap learns who is online and forwards session descriptions. It does not receive message text.</Text>
+      <Input value={value} onChangeText={setValue} placeholder="ws://192.168.1.20:8787" />
       <Button label="Use this bootstrap" variant="secondary" onPress={() => direct.updatePreferences({ signalingUrl: value.trim() })} />
     </View>
   );

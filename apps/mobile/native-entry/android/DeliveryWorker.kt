@@ -11,9 +11,8 @@ import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
 
 /**
- * Android entry for the same flush the JavaScript delivery engine runs in the
- * foreground. The React Native bridge module `DirectBackground` owns the call
- * into the queue. This file is the native half of that boundary.
+ * Not compiled into the Capacitor shell yet. WorkManager is not a dependency of
+ * the installable project. The installed app retries the queue while it is open.
  */
 class DeliveryWorker(
   context: Context,
@@ -48,8 +47,6 @@ class BootReceiver : BroadcastReceiver() {
 
 object DirectBackgroundBridge {
   fun flush(context: Context): Boolean {
-    // The RN host invokes DeliveryEngine.flush() and returns whether the
-    // runtime was alive to accept the call. A stopped runtime retries later.
     return context.applicationContext != null
   }
 }

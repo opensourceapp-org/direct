@@ -31,6 +31,20 @@ Optional standalone bootstrap, for a host that is not the Vite preview. It excha
 pnpm signaling
 ```
 
+## Install on Android or iPhone
+
+Expo Go cannot install DIRECT. The installable app is a Capacitor shell around the same preview. It is not a separate messaging client.
+
+Build the web assets and copy them into the native projects:
+
+```bash
+pnpm --filter @direct/mobile native:sync
+```
+
+Android: install Android Studio, open `apps/mobile/android`, and run the `app` configuration on a device. iPhone: on a Mac, install Xcode, open `apps/mobile/ios/App/App.xcworkspace`, and run it on a device. This environment cannot produce the iPhone binary.
+
+The installed app does not contain the bootstrap. On the computer, run `pnpm signaling` and allow port 8787. On each phone, open Network and set the bootstrap to `ws://<that-computer>:8787`. Both phones use that same address. They do not need the same Wi-Fi if both can reach that computer. Create an identity on each phone. The sender looks up the other DIRECT ID and sends. The recipient sees a message request and accepts it before replying.
+
 ## What this repository contains
 
 | Area | Role |
@@ -65,6 +79,6 @@ A relay that accepts a payload does not mark the message delivered.
 
 ## Native projects
 
-`apps/mobile/android` and `apps/mobile/ios` contain the background-delivery entry points. They attach to a React Native host when the native projects are generated. They are not a substitute for the browser preview, and they are not claimed to build in this repository yet.
+`apps/mobile/android` and `apps/mobile/ios` are the Capacitor projects that install DIRECT on a phone. `apps/mobile/native-entry` holds the background-flush stubs. Those stubs are not compiled into the shell, and the installed app retries the queue while it is open.
 
 Background work respects the platform. Android schedules a worker. iOS registers a background refresh and always retries when the app becomes active.
