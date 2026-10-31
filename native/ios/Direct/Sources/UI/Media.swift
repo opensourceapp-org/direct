@@ -357,8 +357,12 @@ struct AttachmentBar: View {
         .onChange(of: videoItem) { item in
             Task {
                 guard let item else { return }
-                let data = try? await item.loadTransferable(type: VideoBytes.self)
-                let bytes = data?.data ?? (try? await item.loadTransferable(type: Data.self))
+                let bytes: Data?
+                if let file = try? await item.loadTransferable(type: VideoBytes.self) {
+                    bytes = file.data
+                } else {
+                    bytes = try? await item.loadTransferable(type: Data.self)
+                }
                 guard let bytes else { onError("That video could not be read."); return }
                 do { onVideo(try MediaPrep.video(bytes, mime: "video/mp4").bytes) } catch { onError((error as? PrepError)?.message ?? "That video was not sent.") }
             }
