@@ -1,0 +1,93 @@
+# Native apps
+
+Phones run DIRECT as a native app. Android is Kotlin in `native/android`. iOS is Swift in `native/ios`. Both call the same behavior: a device-held identity, a sealed local queue, and a data channel to the other phone. The bootstrap is only used to publish a public bundle, report presence, and forward WebRTC offers, answers, and ICE candidates. Message text is never written to it.
+
+`apps/mobile` is the browser preview and the TypeScript reference that produced `contracts/`. It is not the app that goes on a phone.
+
+## Signaling server
+
+On a computer both phones can reach:
+
+```bash
+pnpm install
+pnpm signaling
+```
+
+The process listens on `0.0.0.0:8787` (`HOST` and `PORT` override those). It prints one `ws://<LAN address>:8787` line per network interface. `GET /health` returns `{ "ok": true, "service": "direct-signaling" }`.
+
+Open TCP 8787 on that computer's firewall. If the phones are not on the same LAN, use an address both can route to (a public host, or a tunnel that forwards 8787) and put that address on both phones. `localhost`, `127.0.0.1`, and `0.0.0.0` are rejected: on a phone, localhost is the phone.
+
+Both phones must save the same bootstrap, for example `ws://192.168.1.20:8787`. The Network screen normalizes a bare host to `ws://` and port 8787, lowercases the host, and strips a trailing slash. `http://` becomes `ws://` and `https://` becomes `wss://`.
+
+## What each phone does
+
+1. Create an identity. The 32-byte seed is generated on the device. Android stores it with an Android Keystore AES-256-GCM key in `noBackupFilesDir`. iOS stores it in the Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) and, on a device with a Secure Enclave, wraps it to a non-exportable enclave key. The recovery phrase is BIP-39, 24 words, and is shown once.
+2. Set the bootstrap to the address printed by `pnpm signaling`.
+3. On one phone, add the other by DIRECT ID. The lookup reads the public bundle the other phone announced. Pasting that bundle skips the lookup.
+4. Send. The envelope is sealed and queued before any network attempt. If the other phone is closed, the row stays `Queued` and retries with backoff.
+5. The recipient sees a message request. Accepting it sends read receipts. Declining it blocks that DIRECT ID.
+
+Outgoing states, in order: Queued, Sending, Sent (written to the data channel), Delivered (the recipient stored it and signed an `ack`, including when it is still a request), Read (the recipient accepted the conversation and opened it). Failed means the envelope expired or the contact was blocked; tap it to seal a fresh envelope under the same id.
+
+## Android Studio
+
+Requirements: JDK 17 or newer, Android SDK 35, a device or emulator on API 26 or newer.
+
+```bash
+cd native/android
+# local.properties is gitignored; Android Studio writes sdk.dir, or:
+echo "sdk.dir=$ANDROID_HOME" > local.properties
+./gradlew :core:test :app:assembleDebug
+```
+
+Open `native/android` in Android Studio and run the `app` configuration. The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. Cleartext `ws://` is allowed by `network_security_config.xml` so a LAN bootstrap works. Use `wss://` for a public bootstrap and tighten that config.
+
+The app process owns one `DirectNode` on a single-thread dispatcher. Foreground reconnects the bootstrap immediately. Background schedules a WorkManager pass (a one-shot retry and a 15-minute periodic job that requires a network).
+
+## Xcode
+
+Requirements: a Mac with Xcode 16 or newer, and an Apple Developer team for a physical device. The Simulator has no Secure Enclave; secrets then stay in the Keychain only.
+
+Open `native/ios/Direct.xcodeproj`. The project file is in the repository, so there is nothing to generate first. Set the team under Signing & Capabilities, pick a device, and run. Swift Package Manager fetches `DirectCore` from `native/ios/DirectCore` and `stasel/WebRTC` 156.0.0 on the first build.
+
+`App.xcodeproj` was the previous shell and is not part of this tree. A checkout that still has `apps/mobile/ios/App/App.xcodeproj` on disk, without `project.pbxproj` inside it, makes Xcode say the project does not contain a project definition file. Close that window and delete the leftover `apps/mobile/ios` directory. `project.yml` is only for regenerating `Direct.xcodeproj` with XcodeGen after the spec changes.
+
+`Info.plist` allows local networking and cleartext `ws://` for a development bootstrap, and registers `app.direct.messaging.delivery` as a `BGAppRefreshTask`. iOS decides when that task runs. Leaving the app also starts a short background flush. There is no push service, so a suspended or force-quit app cannot receive.
+
+`DirectCore` itself builds on Linux:
+
+```bash
+cd native/ios/DirectCore
+swift test
+```
+
+## Checks that run without a phone
+
+| Check | Command | What it locks |
+| --- | --- | --- |
+| Bootstrap URL rules | Kotlin `ContractTest`, Swift `ContractTests` | `contracts/bootstrap-url.json`, including the loopback refusal |
+| Signaling frames | same | `contracts/signaling.json`. Forbidden frame kinds decode to nothing |
+| Wire bytes | same | `contracts/vectors.json` against the TypeScript packages |
+| Queue persistence | `StorageTest` / `StorageTests` | AES-256-GCM file, atomic replace, wrong key leaves the file untouched |
+| Secret store | same | Seed and store key go through `SecretStore`. A throwing store is not replaced with a plain file |
+| Ack and retry | `DeliveryTest` / `DeliveryTests` | Queued → Sending → Sent → Accepted → Acknowledged, plus timeout, expiry, restart recovery, duplicates |
+| Two devices | `DirectNodeTest` / `DirectNodeTests` | Offline queue, restart, request, accept, reply. The fake bootstrap's log contains no message text |
+
+## Checks that need devices
+
+This repository's CI environment can compile the Android debug APK and run the Kotlin and Swift test suites. It cannot run Xcode, and it has no phones. Before calling a build shipped, do these on two real devices:
+
+1. Install one Android build and one iOS build, or two of either.
+2. Run `pnpm signaling`. Confirm both phones save the identical `ws://<host>:8787` and show Connected.
+3. Create an identity on each. Confirm the seed is absent from app storage you can read (no SharedPreferences, no UserDefaults, no plain file). Confirm the recovery phrase restores the same DIRECT ID on a reinstall.
+4. Put the recipient in airplane mode. Send. Force-quit the sender, reopen it, and confirm the message is still Queued with its text. Turn the recipient on and confirm it arrives as a request, then becomes Delivered, then Read after Accept.
+5. Decline a second request and confirm a later message from that DIRECT ID is not shown.
+6. Capture the bootstrap traffic (the signaling log, or a proxy). Confirm it contains hello, lookup, watch, offer, answer, and ice, and none of the message text.
+7. Move both phones to mobile data. If the data channel stays Queued, the path is symmetric NAT. Add a TURN server you operate to `WebRtcTransport.DEFAULT_ICE` (Android) and `WebRTCTransport.defaultIceServers` (iOS). TURN carries DTLS ciphertext and cannot read it. A public STUN server is the default and is not enough for every network.
+
+## Limits
+
+- The seal is one-shot X25519 + HKDF-SHA256 + AES-256-GCM. It is not the Signal Double Ratchet.
+- The local store is one encrypted snapshot file, not a SQL database.
+- Writing to the data channel is Sent. Delivered requires the recipient's signed `ack`.
+- A closed app cannot receive. Android retries while WorkManager is allowed to run. iOS retries on the next foreground or background refresh.

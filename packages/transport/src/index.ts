@@ -1,0 +1,12 @@
+export { KademliaTable, bucketIndex, compareDistance, xorDistance } from './kademlia';
+export type { KadPeer } from './kademlia';
+export { InProcessLibp2p, Libp2pTransport } from './libp2p';
+export type { Libp2pDialer } from './libp2p';
+export { LocalTransport, MemoryMesh } from './local';
+export type { Mesh } from './local';
+export { TransportRouter } from './router';
+export type { RouterOptions } from './router';
+export type { IncomingHandler, RouteResult, TransportAdapter } from './types';
+export { SignalingBus, WebRTCTransport, assertSignalMessage, virtualPeerConnectionFactory } from './webrtc';
+export type { DataChannelLike, IceCandidate, PeerConnectionFactory, PeerConnectionLike, SessionDescription, SignalingClient, SignalMessage } from './webrtc';
+export { MemoryWakuNode, WakuTransport } from './waku';

@@ -1,0 +1,54 @@
+# Direct.xcodeproj is committed, so Xcode can open it directly.
+# To regenerate after editing this file: brew install xcodegen && xcodegen
+name: Direct
+options:
+  bundleIdPrefix: app.direct
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+packages:
+  DirectCore:
+    path: DirectCore
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    exactVersion: 156.0.0
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    # Set your Apple team ID here, or pick it in Xcode under Signing & Capabilities.
+    DEVELOPMENT_TEAM: ""
+targets:
+  Direct:
+    type: application
+    platform: iOS
+    sources:
+      - path: Direct/Sources
+    info:
+      path: Direct/Info.plist
+      properties:
+        CFBundleDisplayName: DIRECT
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [app.direct.messaging.delivery]
+        NSLocalNetworkUsageDescription: DIRECT connects to the bootstrap server and to other phones on your network to set up direct, end-to-end encrypted chats.
+        NSAppTransportSecurity:
+          # The bootstrap is often ws://<LAN IP>:8787 during development. Use wss:// in production
+          # and remove this exception. Message envelopes are end-to-end encrypted either way.
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.direct.messaging
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_BITCODE: NO
+    dependencies:
+      - package: DirectCore
+      - package: WebRTC

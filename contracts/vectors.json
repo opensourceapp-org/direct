@@ -1,0 +1,96 @@
+{
+  "note": "Generated from the TypeScript reference with WRITE_VECTORS=1. Kotlin and Swift must reproduce every deterministic field and open every sealed value.",
+  "ada": {
+    "seedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "name": "Ada",
+    "deviceId": "dev_0000000000000ADA",
+    "mnemonic": "abandon amount liar amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range attend journey unaware",
+    "signingPublic": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+    "agreementSecret": "n7mnxAF3Lz8uTLwwBH-gTzCX7nNcsefRk_1IvoTRcFE",
+    "agreementPublic": "vZ_9Lrc_NXybZIyL38MenifDNbmosEKlr7IrBZ5AgzM",
+    "directId": "dir_AS3NN9TMCD3MR0M5",
+    "did": "did:direct:dir_AS3NN9TMCD3MR0M5",
+    "fingerprint": "DBAD C727 3E03 578E 1A69 B500 7425 51B9",
+    "bundle": "{\"v\":1,\"name\":\"Ada\",\"directId\":\"dir_AS3NN9TMCD3MR0M5\",\"did\":\"did:direct:dir_AS3NN9TMCD3MR0M5\",\"deviceId\":\"dev_0000000000000ADA\",\"signingKey\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"agreementKey\":\"vZ_9Lrc_NXybZIyL38MenifDNbmosEKlr7IrBZ5AgzM\",\"agreementSig\":\"rIjY-wGiRfPEpvOv4teIxUK9yvSLsZyITL4tFUK5slICTnkDlUOlbjuXeoN797SRFABi7B3thRbiaajrSrGvBA\",\"fingerprint\":\"DBAD C727 3E03 578E 1A69 B500 7425 51B9\"}"
+  },
+  "bo": {
+    "seedHex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "name": "Bo",
+    "deviceId": "dev_00000000000000B0",
+    "mnemonic": "cage animal match embark fame bean pass census clinic gesture entire fury adapt october smoke mammal curtain right atom inner record burden wedding unusual",
+    "signingPublic": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+    "agreementSecret": "dj4o_SWfijE3PrqvipDNel5OVkc9tRLpaI5DMw-Jlus",
+    "agreementPublic": "vyjifVC1pc_sg245C8VfjIF9WqmEVMD0NGY9ItZTxUQ",
+    "directId": "dir_4KVETTPBZR80KG1G",
+    "did": "did:direct:dir_4KVETTPBZR80KG1G",
+    "fingerprint": "85A5 CDD0 E7ED 6A0B 4F76 55C1 7A71 7709",
+    "bundle": "{\"v\":1,\"name\":\"Bo\",\"directId\":\"dir_4KVETTPBZR80KG1G\",\"did\":\"did:direct:dir_4KVETTPBZR80KG1G\",\"deviceId\":\"dev_00000000000000B0\",\"signingKey\":\"Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\",\"agreementKey\":\"vyjifVC1pc_sg245C8VfjIF9WqmEVMD0NGY9ItZTxUQ\",\"agreementSig\":\"UA0xJ5fk4fGXp5InBREb5mMKKeUSTUdh3-LRRepN3XJfnd5g1GUE63ulZ-dA0gqwnoWgwsQ2vdwTpMXLoA1tAQ\",\"fingerprint\":\"85A5 CDD0 E7ED 6A0B 4F76 55C1 7A71 7709\"}"
+  },
+  "escapedName": {
+    "name": "Zoë \"Z\" \\ ✓",
+    "bundle": "{\"v\":1,\"name\":\"Zoë \\\"Z\\\" \\\\ ✓\",\"directId\":\"dir_AS3NN9TMCD3MR0M5\",\"did\":\"did:direct:dir_AS3NN9TMCD3MR0M5\",\"deviceId\":\"dev_0000000000000ADA\",\"signingKey\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"agreementKey\":\"vZ_9Lrc_NXybZIyL38MenifDNbmosEKlr7IrBZ5AgzM\",\"agreementSig\":\"QDwnEjEYzfQq02ERRCBD2YEmXtx1hSlxB_hiWRs45Ti-v-XTbvwO9xVKy9etiTh7meSkIuXno9f-fFnd2NpBCA\",\"fingerprint\":\"DBAD C727 3E03 578E 1A69 B500 7425 51B9\"}"
+  },
+  "seal": {
+    "to": "bo",
+    "aad": "vector-aad",
+    "plaintext": "Hello from Ada",
+    "sealed": "AWpJbiFCESl-Ek2QzMaFe3OX1WblTtx2FGDWfgrpMLx-YcBSd-H923ytwCSnVCBv-fHN_iUfFrmzMwSWBQclTrWZUSOrtxmvCZrD"
+  },
+  "envelopes": {
+    "now": 1790000001000,
+    "message": {
+      "body": "Hello from Ada",
+      "json": "{\"v\":1,\"id\":\"msg_vector\",\"type\":\"message\",\"from\":\"dir_AS3NN9TMCD3MR0M5\",\"to\":\"dir_4KVETTPBZR80KG1G\",\"deviceId\":\"dev_0000000000000ADA\",\"createdAt\":1790000000000,\"expiresAt\":1790604800000,\"ciphertext\":\"ATrEGhXDNR3wGqRyTFC4ln8BomOuP9sgWz9hfRyr5KJV_frtRx3vXB2WgaRmxiJmS4egfgnJgktgn8q5Ob-KKqllqQPbbCbxCTMC\",\"signature\":\"pgB9qh0VKGRjnRMO_e93Y5Mzk-kGDWmHzJdbEX7J5X1TwnZ3X92fL1nMbGlcK9F5rnxgjY5TPXC36YOZ7CbAAg\"}"
+    },
+    "ack": {
+      "receipt": "ack:msg_vector",
+      "json": "{\"v\":1,\"id\":\"ack_vector\",\"type\":\"ack\",\"from\":\"dir_4KVETTPBZR80KG1G\",\"to\":\"dir_AS3NN9TMCD3MR0M5\",\"deviceId\":\"dev_00000000000000B0\",\"createdAt\":1790000000000,\"expiresAt\":1790604800000,\"ciphertext\":\"Af16qtnbWkhiSAwvWa2fwUuLjolMEAzQN8gNWsW9Qk9pXPDIV0MGOixpDDgBD5i0uA8bTnxhEOXlGmm51TPvRV8ICoITJVzei14X\",\"signature\":\"FW35Elh4yMfJSmioqX0LPgYVUbI_XJpXxvQtSDiow2HjQ1NzJri7zvUHMUstxiH3u2H7GWSHPwRpMGpqmuDNDg\"}"
+    },
+    "read": {
+      "receipt": "read:msg_vector",
+      "json": "{\"v\":1,\"id\":\"read_vector\",\"type\":\"read\",\"from\":\"dir_4KVETTPBZR80KG1G\",\"to\":\"dir_AS3NN9TMCD3MR0M5\",\"deviceId\":\"dev_00000000000000B0\",\"createdAt\":1790000000000,\"expiresAt\":1790604800000,\"ciphertext\":\"AU9tDvQcK661Ryf7hacv5KzmqzB62Scax6-U-5USLhA3HQhpljdV4lOxPX1ocEwJUwYVSiRPnVsGAegOknVAEDrxbGN9N-nRi0DbEg\",\"signature\":\"2GvQcINWzbYUjBOUEtDWI76LFjOIZdib9qO5mZfBdebGbzWD-kz2wZRsH9U5Z-BbDzGyRJJyRe_e2hsXMmC9DA\"}"
+    }
+  },
+  "backoff": [
+    {
+      "attempt": 1,
+      "min": 1000,
+      "max": 1200
+    },
+    {
+      "attempt": 2,
+      "min": 2000,
+      "max": 2400
+    },
+    {
+      "attempt": 3,
+      "min": 4000,
+      "max": 4800
+    },
+    {
+      "attempt": 4,
+      "min": 8000,
+      "max": 9600
+    },
+    {
+      "attempt": 5,
+      "min": 16000,
+      "max": 19200
+    },
+    {
+      "attempt": 8,
+      "min": 128000,
+      "max": 153600
+    },
+    {
+      "attempt": 9,
+      "min": 256000,
+      "max": 307200
+    },
+    {
+      "attempt": 12,
+      "min": 300000,
+      "max": 360000
+    }
+  ]
+}

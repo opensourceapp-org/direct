@@ -1,0 +1,13 @@
+appId: app.direct.messaging
+---
+- launchApp
+- assertVisible: "No Middlemen. Just Connection."
+- tapOn: "Continue"
+- tapOn: "Create identity"
+- tapOn:
+    text: "Name"
+- inputText: "Ava"
+- tapOn: "Generate identity"
+- assertVisible: "Write this phrase down."
+- tapOn: "I wrote it down"
+- assertVisible: "Confirm the phrase."
