@@ -33,29 +33,42 @@ pnpm signaling
 
 ## Install on Android or iPhone
 
-Expo Go cannot install DIRECT. The installable app is a Capacitor shell around the same preview. It is not a separate messaging client.
+The phone apps are native. Android is Kotlin in `native/android`. iOS is Swift in `native/ios`. They are not a WebView, not React Native, and not Expo Go. `apps/mobile` stays as the browser preview and the TypeScript reference.
 
-Build the web assets and copy them into the native projects:
+The phone apps do not contain the bootstrap. On a computer both phones can reach:
 
 ```bash
-pnpm --filter @direct/mobile native:sync
+pnpm signaling
 ```
 
-Android: install Android Studio, open `apps/mobile/android`, and run the `app` configuration on a device. iPhone: on a Mac, install Xcode, open `apps/mobile/ios/App/App.xcworkspace`, and run it on a device. This environment cannot produce the iPhone binary.
+That listens on port 8787 and prints `ws://<this computer>:8787`. Allow that port through the firewall. On each phone, open Network and save that same address. `localhost` is rejected, because on a phone it means the phone itself. The phones do not need the same Wi-Fi if both can reach that computer. Create an identity on each phone. The sender looks up the other DIRECT ID and sends. The recipient sees a message request and accepts it before replying.
 
-The installed app does not contain the bootstrap. On the computer, run `pnpm signaling` and allow port 8787. On each phone, open Network and set the bootstrap to `ws://<that-computer>:8787`. Both phones use that same address. They do not need the same Wi-Fi if both can reach that computer. Create an identity on each phone. The sender looks up the other DIRECT ID and sends. The recipient sees a message request and accepts it before replying.
+Android: install Android Studio, open `native/android`, and run the `app` configuration (API 26 or newer). From a terminal, `cd native/android && ./gradlew :app:assembleDebug` writes `app/build/outputs/apk/debug/app-debug.apk`.
+
+iPhone: on a Mac, install Xcode and XcodeGen, then:
+
+```bash
+cd native/ios
+xcodegen
+open Direct.xcodeproj
+```
+
+Pick your team, then run on a device. The steps, the background-work limits, and the two-phone checklist are in [docs/native.md](docs/native.md).
 
 ## What this repository contains
 
 | Area | Role |
 | --- | --- |
-| `apps/mobile` | React Native application, design system, screens, encrypted SQLite repositories |
+| `native/android` | Kotlin app. Keystore secrets, OkHttp bootstrap socket, WebRTC data channel, WorkManager retries, Compose UI |
+| `native/ios` | Swift app and the `DirectCore` package. Keychain secrets, URLSession socket, WebRTC data channel, background refresh, SwiftUI |
+| `contracts` | Bootstrap URL rules, signaling frames, and wire vectors shared by TypeScript, Kotlin, and Swift |
+| `apps/mobile` | Browser preview and the React Native screens used to exercise the TypeScript packages |
 | `packages/crypto` | Identity, recovery phrase, signatures, and sealed messages using audited primitives |
 | `packages/protocol` | Envelopes, acknowledgements, expiry, backoff, and the delivery engine |
 | `packages/transport` | `TransportAdapter`, router, local mesh, WebRTC, libp2p dial boundary, Waku-style relay, Kademlia table |
 | `packages/shared` | Identifiers, encoding, and log redaction |
 | `infrastructure` | Signaling server and notes for bootstrap, TURN, and relay hosts |
-| `docs` | Architecture, protocol, and security notes |
+| `docs` | Architecture, protocol, security notes, and the native device checklist |
 
 The interface never calls WebRTC, libp2p, Waku, SQLite, or private keys directly. Screens talk to `DirectController`.
 
@@ -73,12 +86,10 @@ A relay that accepts a payload does not mark the message delivered.
 - Identity is an Ed25519 signing key. The DIRECT ID is derived from that public key. The DID is `did:direct:<DIRECT ID>` and does not use a blockchain.
 - The agreement key is X25519. A recovery phrase encodes the 32-byte seed with BIP-39. Rotating the agreement key does not change the DIRECT ID.
 - Each message is sealed to the recipient with a fresh X25519 key, HKDF-SHA256, and AES-256-GCM. The libraries are `@noble/curves`, `@noble/hashes`, and `@noble/ciphers`.
-- This is not an implementation of the Signal Double Ratchet. Native builds are expected to satisfy that requirement with `react-native-libsignal-client` behind the existing `PeerCipher` boundary. The pure-JS seal is the path that runs in tests and in the browser preview.
-- The local database is SQL, sealed with AES-256-GCM before it is written. Private keys stay in the key store, not in SQLite. iOS Keychain and Android Keystore are the production key stores; this browser profile uses IndexedDB and says so in Settings.
+- This is not an implementation of the Signal Double Ratchet. The phone apps and the TypeScript packages use the same one-shot seal: a fresh X25519 key, HKDF-SHA256, and AES-256-GCM. Android uses BouncyCastle and JCA. iOS uses CryptoKit. The TypeScript packages use `@noble/curves`, `@noble/hashes`, and `@noble/ciphers`.
+- The phone apps keep the identity seed in the Android Keystore or the iOS Keychain. The local queue is one AES-256-GCM file, replaced atomically. The browser preview keeps its database in IndexedDB and says so in Settings.
 - Logs drop message text, phrases, and keys.
 
 ## Native projects
 
-`apps/mobile/android` and `apps/mobile/ios` are the Capacitor projects that install DIRECT on a phone. `apps/mobile/native-entry` holds the background-flush stubs. Those stubs are not compiled into the shell, and the installed app retries the queue while it is open.
-
-Background work respects the platform. Android schedules a worker. iOS registers a background refresh and always retries when the app becomes active.
+`native/android` and `native/ios` are the apps that run on a phone. Each process owns one node. Foreground reconnects the bootstrap immediately. Android schedules the outbox with WorkManager. iOS registers a background refresh and retries again when the app becomes active. A suspended app cannot receive, because there is no push service. Details and the two-phone checklist are in [docs/native.md](docs/native.md).

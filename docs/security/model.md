@@ -15,7 +15,7 @@ DIRECT's promise is limited and specific.
 
 The per-message seal provides confidentiality, integrity, and forward secrecy for the sender's ephemeral key. It does not provide the post-compromise healing of the Double Ratchet. Do not describe this preview as a Signal-protocol implementation.
 
-A browser profile is a weaker key store than the iOS Keychain or the Android Keystore. Same-origin script can read IndexedDB. Treat the browser preview as a way to run the product, not as the production key store.
+The phone apps keep the identity seed in the Android Keystore or the iOS Keychain (wrapped by a Secure Enclave key where the device has one). The browser preview is a weaker store: same-origin script can read IndexedDB. Treat that preview as a way to exercise the TypeScript packages, not as the production key store.
 
 The recovery phrase restores the signing seed and the agreement key derived from it. Agreement keys rotated later live only on that device.
 
