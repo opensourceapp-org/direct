@@ -163,9 +163,17 @@ enum MediaPrep {
 
 struct VideoBytes: Transferable {
     let data: Data
+
     static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(contentType: .movie) { received in
-            VideoBytes(data: try Data(contentsOf: received.file))
+        // `contentType` binds the first closure to export. Import has to be named,
+        // and `Data(contentsOf:)` without options is async on newer SDKs.
+        FileRepresentation(contentType: .movie) { item in
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("direct-video-\(UUID().uuidString).mp4")
+            try item.data.write(to: url, options: .atomic)
+            return SentTransferredFile(url)
+        } importing: { received in
+            let bytes = try Data(contentsOf: received.file, options: [])
+            return VideoBytes(data: bytes)
         }
     }
 }
