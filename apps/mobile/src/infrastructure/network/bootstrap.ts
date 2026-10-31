@@ -3,13 +3,7 @@ import type { SignalingClient, SignalMessage } from '@direct/transport';
 const OFFER_WAIT_MS = 500;
 const LOOKUP_WAIT_MS = 4_000;
 
-function installedApp(): boolean {
-  const cap = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  return Boolean(cap?.isNativePlatform?.());
-}
-
 export function defaultBootstrapUrl(): string {
-  if (installedApp()) return '';
   if (typeof location === 'undefined' || !location.host) return '';
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${scheme}//${location.host}/api/direct/signal`;

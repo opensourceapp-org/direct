@@ -26,7 +26,6 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['react-native-svg', 'react-native-safe-area-context', 'react-native-screens'],
   },
-  base: process.env.CAPACITOR === '1' ? './' : '/',
   server: {
     host: true,
     port: 5173,
