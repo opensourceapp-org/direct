@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "description": "Frames exchanged between a DIRECT device and the bootstrap. The bootstrap keeps public bundles and presence and forwards WebRTC negotiation. It never receives message text or sealed envelopes.",
+  "transport": "WebSocket text frames, one JSON object per frame",
+  "defaultPort": 8787,
+  "webPreviewPath": "/api/direct/signal",
+  "directIdPattern": "^dir_[0-9A-HJKMNP-TV-Z]{16}$",
+  "limits": {
+    "bundleMinChars": 32,
+    "bundleMaxChars": 8192,
+    "signalMaxChars": 65536,
+    "requestIdMaxChars": 80,
+    "watchMaxIds": 256,
+    "presenceGraceMs": 120000
+  },
+  "rules": [
+    "A device sends hello on every socket open and whenever its bundle changes.",
+    "hello.bundle must contain the exact substring \"directId\":\"<from>\".",
+    "offer, answer, and ice are forwarded only when from equals the DIRECT ID that this socket announced.",
+    "An offer to a DIRECT ID without a live socket returns unreachable. answer and ice are dropped.",
+    "lookup returns a bundle while the socket is live and for presenceGraceMs after it closes.",
+    "watch replaces the socket's watch list and immediately reports presence for each DIRECT ID.",
+    "Any other kind is dropped, including message, envelope, deliver, and text."
+  ],
+  "clientToHub": {
+    "hello": {
+      "kind": "hello",
+      "from": "dir_0123456789ABCDEF",
+      "bundle": "{\"v\":1,\"name\":\"Ada\",\"directId\":\"dir_0123456789ABCDEF\",\"note\":\"public bundle\"}"
+    },
+    "lookup": {
+      "kind": "lookup",
+      "requestId": "req-1",
+      "directId": "dir_ABCDEFGHJKMNPQRS"
+    },
+    "watch": {
+      "kind": "watch",
+      "ids": ["dir_ABCDEFGHJKMNPQRS"]
+    },
+    "offer": {
+      "kind": "offer",
+      "to": "dir_ABCDEFGHJKMNPQRS",
+      "from": "dir_0123456789ABCDEF",
+      "description": { "type": "offer", "sdp": "v=0" }
+    },
+    "answer": {
+      "kind": "answer",
+      "to": "dir_0123456789ABCDEF",
+      "from": "dir_ABCDEFGHJKMNPQRS",
+      "description": { "type": "answer", "sdp": "v=0" }
+    },
+    "ice": {
+      "kind": "ice",
+      "to": "dir_ABCDEFGHJKMNPQRS",
+      "from": "dir_0123456789ABCDEF",
+      "candidate": { "candidate": "candidate:1 1 udp 2122260223 192.168.1.20 54321 typ host", "sdpMid": "0", "sdpMLineIndex": 0 }
+    }
+  },
+  "hubToClient": {
+    "lookupPresent": {
+      "kind": "lookup",
+      "requestId": "req-1",
+      "directId": "dir_ABCDEFGHJKMNPQRS",
+      "present": true,
+      "bundle": "{\"v\":1,\"name\":\"Bo\",\"directId\":\"dir_ABCDEFGHJKMNPQRS\",\"note\":\"public bundle\"}"
+    },
+    "lookupAbsent": {
+      "kind": "lookup",
+      "requestId": "req-2",
+      "directId": "dir_0123456789ABCDEH",
+      "present": false,
+      "bundle": null
+    },
+    "unreachable": {
+      "kind": "unreachable",
+      "to": "dir_0123456789ABCDEH"
+    },
+    "presenceOnline": {
+      "kind": "presence",
+      "directId": "dir_ABCDEFGHJKMNPQRS",
+      "online": true
+    },
+    "presenceOffline": {
+      "kind": "presence",
+      "directId": "dir_ABCDEFGHJKMNPQRS",
+      "online": false
+    }
+  },
+  "forbidden": [
+    { "kind": "message", "to": "dir_ABCDEFGHJKMNPQRS", "from": "dir_0123456789ABCDEF", "body": "hello" },
+    { "kind": "envelope", "to": "dir_ABCDEFGHJKMNPQRS", "from": "dir_0123456789ABCDEF", "ciphertext": "AQ" },
+    { "kind": "deliver", "to": "dir_ABCDEFGHJKMNPQRS", "from": "dir_0123456789ABCDEF", "payload": "AQ" }
+  ]
+}

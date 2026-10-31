@@ -128,6 +128,7 @@ test('a bundle stays findable for two minutes after the phone drops, then expire
   bob.close();
   alice.receive(JSON.stringify({ kind: 'lookup', requestId: 'r1', directId: BOB }));
   expect(alice.sent.at(-1)).toMatchObject({ present: true, bundle: bundle(BOB) });
+  alice.receive(JSON.stringify({ kind: 'hello', from: ALICE, bundle: bundle(ALICE) }));
   alice.receive(JSON.stringify({ kind: 'offer', to: BOB, from: ALICE }));
   expect(alice.sent.at(-1)).toMatchObject({ kind: 'unreachable', to: BOB });
   now += 120_001;
@@ -151,6 +152,7 @@ test('an http presence hello is visible to a websocket lookup', () => {
   expect(hub.remember(ALICE, bundle(ALICE))).toBe(true);
   const bob = localSocket();
   hub.attach(bob);
+  bob.receive(JSON.stringify({ kind: 'hello', from: BOB, bundle: bundle(BOB) }));
   bob.receive(JSON.stringify({ kind: 'offer', to: ALICE, from: BOB }));
   expect(alice.sent.some((message) => message.kind === 'offer')).toBe(true);
   bob.close();

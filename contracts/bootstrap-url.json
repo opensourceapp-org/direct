@@ -1,0 +1,30 @@
+{
+  "description": "How a typed bootstrap address is normalized. Both phones must end up with the same url. A bare host or ws:// without a port uses 8787. Loopback is rejected because on a phone it points at the phone itself.",
+  "defaultPort": 8787,
+  "cases": [
+    { "input": "192.168.1.20", "url": "ws://192.168.1.20:8787" },
+    { "input": "  ws://192.168.1.20:8787  ", "url": "ws://192.168.1.20:8787" },
+    { "input": "ws://192.168.1.20", "url": "ws://192.168.1.20:8787" },
+    { "input": "192.168.1.20:9000", "url": "ws://192.168.1.20:9000" },
+    { "input": "WS://Laptop.Local:8787/", "url": "ws://laptop.local:8787" },
+    { "input": "ws://10.0.2.2:8787", "url": "ws://10.0.2.2:8787" },
+    { "input": "wss://direct.example.com", "url": "wss://direct.example.com" },
+    { "input": "wss://direct.example.com/api/direct/signal", "url": "wss://direct.example.com/api/direct/signal" },
+    { "input": "http://192.168.1.20:8787", "url": "ws://192.168.1.20:8787" },
+    { "input": "https://direct.example.com/", "url": "wss://direct.example.com" },
+    { "input": "ws://[fd00::20]:8787", "url": "ws://[fd00::20]:8787" },
+    { "input": "", "error": "empty" },
+    { "input": "   ", "error": "empty" },
+    { "input": "ws://localhost:8787", "error": "loopback" },
+    { "input": "127.0.0.1:8787", "error": "loopback" },
+    { "input": "ws://[::1]:8787", "error": "loopback" },
+    { "input": "ws://0.0.0.0:8787", "error": "loopback" },
+    { "input": "ftp://192.168.1.20", "error": "scheme" },
+    { "input": "ws://:8787", "error": "host" },
+    { "input": "ws://my host:8787", "error": "host" },
+    { "input": "ws://192.168.1.20:99999", "error": "port" },
+    { "input": "ws://192.168.1.20:", "error": "port" },
+    { "input": "ws://user:secret@192.168.1.20:8787", "error": "userinfo" },
+    { "input": "ws://192.168.1.20:8787/?x=1", "error": "query" }
+  ]
+}

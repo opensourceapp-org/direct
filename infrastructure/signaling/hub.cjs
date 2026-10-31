@@ -1,16 +1,21 @@
 const DIRECT_ID = /^dir_[0-9A-HJKMNP-TV-Z]{16}$/;
 const MAX_BUNDLE = 8192;
 const MAX_SIGNAL = 64 * 1024;
+const MAX_FRAME = MAX_SIGNAL + MAX_BUNDLE;
+const MAX_WATCH = 256;
 const GRACE_MS = 120_000;
 
 /**
  * In-memory rendezvous for devices that are not on the same network.
- * Holds the latest public bundle per DIRECT ID and forwards session descriptions.
+ * Holds the latest public bundle per DIRECT ID, tells watchers when a DIRECT ID
+ * comes online or drops, and forwards WebRTC session descriptions and ICE candidates.
  * A bundle stays findable for two minutes after the socket drops so a lookup
- * still succeeds while the phone reconnects. Message plaintext is never accepted here.
+ * still succeeds while the phone reconnects. Message text and envelopes are never
+ * accepted or forwarded here; see contracts/signaling.json.
  */
 function createSignalHub(options = {}) {
   const peers = new Map();
+  const watchers = new Map();
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const onHello = typeof options.onHello === 'function' ? options.onHello : null;
 
@@ -35,6 +40,13 @@ function createSignalHub(options = {}) {
     }
   }
 
+  function announce(id, online) {
+    const listeners = watchers.get(id);
+    if (!listeners) return;
+    const frame = JSON.stringify({ kind: 'presence', directId: id, online });
+    for (const listener of listeners) listener(frame);
+  }
+
   /** Record a public bundle with no live socket, or refresh one that already has a socket. */
   function remember(id, bundle) {
     if (!valid(id, bundle)) return false;
@@ -52,15 +64,28 @@ function createSignalHub(options = {}) {
   function attach(socket) {
     let selfId = '';
     let token = 0;
+    let watching = new Set();
 
     const send = (text) => {
       if (socket.readyState === 1) socket.send(text);
     };
 
+    const unwatch = () => {
+      for (const id of watching) {
+        const listeners = watchers.get(id);
+        if (!listeners) continue;
+        listeners.delete(send);
+        if (listeners.size === 0) watchers.delete(id);
+      }
+      watching = new Set();
+    };
+
     const onMessage = (raw) => {
+      const textFrame = String(raw);
+      if (textFrame.length > MAX_FRAME) return;
       let message;
       try {
-        message = JSON.parse(String(raw));
+        message = JSON.parse(textFrame);
       } catch {
         return;
       }
@@ -70,10 +95,13 @@ function createSignalHub(options = {}) {
         const id = message.from;
         const bundle = message.bundle;
         if (!valid(id, bundle)) return;
+        if (selfId && selfId !== id) return;
+        const wasOnline = Boolean(peers.get(id)?.send);
         selfId = id;
         token += 1;
         peers.set(id, { bundle, send, token, closedAt: 0 });
         if (onHello) onHello(id, bundle);
+        if (!wasOnline) announce(id, true);
         return;
       }
 
@@ -95,8 +123,23 @@ function createSignalHub(options = {}) {
         return;
       }
 
+      if (message.kind === 'watch') {
+        if (!Array.isArray(message.ids)) return;
+        const ids = message.ids.filter((id) => typeof id === 'string' && DIRECT_ID.test(id)).slice(0, MAX_WATCH);
+        unwatch();
+        watching = new Set(ids);
+        for (const id of watching) {
+          const listeners = watchers.get(id) ?? new Set();
+          listeners.add(send);
+          watchers.set(id, listeners);
+          send(JSON.stringify({ kind: 'presence', directId: id, online: Boolean(peers.get(id)?.send) }));
+        }
+        return;
+      }
+
       if (message.kind !== 'offer' && message.kind !== 'answer' && message.kind !== 'ice') return;
       if (typeof message.to !== 'string' || typeof message.from !== 'string') return;
+      if (!selfId || message.from !== selfId) return;
       const encoded = JSON.stringify(message);
       if (encoded.length > MAX_SIGNAL) return;
       const target = peers.get(message.to);
@@ -108,10 +151,12 @@ function createSignalHub(options = {}) {
     };
 
     const onClose = () => {
+      unwatch();
       if (!selfId) return;
       const current = peers.get(selfId);
       if (current && current.send === send && current.token === token) {
         peers.set(selfId, { bundle: current.bundle, send: null, token, closedAt: now() });
+        announce(selfId, false);
       }
     };
 
@@ -127,4 +172,4 @@ function createSignalHub(options = {}) {
   return { attach, remember };
 }
 
-module.exports = { createSignalHub };
+module.exports = { createSignalHub, DIRECT_ID, GRACE_MS, MAX_SIGNAL, MAX_BUNDLE, MAX_WATCH };

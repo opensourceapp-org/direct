@@ -3,6 +3,7 @@ module.exports = {
   testEnvironment: 'node',
   testMatch: [
     '<rootDir>/packages/**/*.test.ts',
+    '<rootDir>/contracts/**/*.test.ts',
     '<rootDir>/apps/mobile/src/**/*.test.ts',
     '<rootDir>/apps/mobile/src/**/*.test.tsx',
   ],
