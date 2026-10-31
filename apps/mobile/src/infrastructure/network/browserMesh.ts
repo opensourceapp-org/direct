@@ -85,6 +85,10 @@ export class BrowserMesh implements Mesh {
     };
   }
 
+  close(): void {
+    this.channel?.close();
+  }
+
   online(peerId: string): boolean {
     const at = this.peers.get(peerId);
     return Boolean(at && Date.now() - at < FRESH_MS);

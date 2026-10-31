@@ -34,4 +34,6 @@ test('a private window and a normal window on the same address discover each oth
   expect(alice.online(bobId)).toBe(true);
   stopAlice();
   stopBob();
+  alice.close();
+  bob.close();
 });

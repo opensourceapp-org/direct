@@ -19,12 +19,14 @@ import type { IdentityKeys, PublicBundle } from '@direct/crypto';
 import { DeliveryEngine } from '@direct/protocol';
 import type { ContactPublic, LocalIdentity } from '@direct/protocol';
 import { createLogger, text, utf8 } from '@direct/shared';
-import { KademliaTable, LocalTransport, TransportRouter } from '@direct/transport';
+import { KademliaTable, LocalTransport, TransportRouter, WebRTCTransport } from '@direct/transport';
 import { openEncryptedDatabase } from '../infrastructure/persistence/database';
 import { DirectRepository, publicKeyBytes, publicKeyMaterial } from '../infrastructure/persistence/repositories';
 import type { ContactRecord, IdentityRecord } from '../infrastructure/persistence/repositories';
 import { openBrowserBlobs, openBrowserVault } from '../infrastructure/keystore/indexedDb';
 import type { KeyVault } from '@direct/crypto';
+import { DirectBootstrap, resolveBootstrapUrl } from '../infrastructure/network/bootstrap';
+import { browserPeerConnectionFactory } from '../infrastructure/network/browserRtc';
 import { BrowserMesh } from '../infrastructure/network/browserMesh';
 import { ChannelRelay } from '../infrastructure/network/channelRelay';
 import { loadPreferences, savePreferences } from '../infrastructure/preferences';
@@ -41,6 +43,8 @@ export class DirectController {
   private engine: DeliveryEngine | null = null;
   private unregister: (() => void) | null = null;
   private localLink: LocalTransport | null = null;
+  private bootstrap: DirectBootstrap | null = null;
+  private rtc: WebRTCTransport | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   readonly mesh: BrowserMesh;
   readonly relay: ChannelRelay;
@@ -173,8 +177,13 @@ export class DirectController {
   async addByDirectId(directId: string): Promise<void> {
     const id = directId.trim().replace(/^dir_/i, 'dir_').toUpperCase().replace(/^DIR_/, 'dir_');
     await this.mesh.sync();
+    await this.waitForBootstrap();
+    if (!this.discovered.has(id)) {
+      const published = await this.bootstrap?.lookup(id);
+      if (published) this.ingestBundle(published);
+    }
     const bundle = this.discovered.get(id);
-    if (!bundle) throw new Error('No reachable device has published that DIRECT ID on this address. Keep both windows open here. A different port is a different network.');
+    if (!bundle) throw new Error('No phone on this bootstrap is publishing that DIRECT ID. Keep DIRECT open on both phones, on this same address or the same bootstrap URL. They do not need the same Wi-Fi.');
     this.saveContact(bundle, false);
     await this.repo.save();
     this.refresh();
@@ -251,6 +260,7 @@ export class DirectController {
     this.relay.configure({ enabled: this.preferences.relayEnabled, storage: this.preferences.relayStorage });
     this.router.setRelayEnabled(this.preferences.relayEnabled);
     savePreferences(this.preferences);
+    if (patch.signalingUrl !== undefined) this.bootstrap?.reconnect();
     if (this.preferences.relayEnabled) this.relay.attach(this.repo.getIdentity()?.directId ?? '');
     this.refresh();
   }
@@ -258,13 +268,15 @@ export class DirectController {
   refresh(): void {
     const record = this.repo.getIdentity();
     const contacts = this.repo.listContacts();
-    const peerTransport: Record<string, 'direct' | 'relay' | 'offline' | 'connecting'> = {};
+    const peerTransport: Record<string, 'direct' | 'relay' | 'offline' | 'connecting' | 'present'> = {};
     for (const contact of contacts) {
-      peerTransport[contact.directId] = this.mesh.online(contact.directId)
+      peerTransport[contact.directId] = this.rtc?.isConnected(contact.directId)
         ? 'direct'
-        : this.preferences.relayEnabled && (this.relay.live(contact.directId) || this.preferences.relayStorage)
-          ? 'relay'
-          : 'offline';
+        : this.mesh.online(contact.directId)
+          ? 'present'
+          : this.preferences.relayEnabled && (this.relay.live(contact.directId) || this.preferences.relayStorage)
+            ? 'relay'
+            : 'offline';
     }
     const opened = useAppStore.getState().openedDirectId;
     const messages = { ...useAppStore.getState().messages };
@@ -327,10 +339,19 @@ export class DirectController {
   private activate(keys: IdentityKeys, record: IdentityRecord): void {
     this.keys = keys;
     this.unregister?.();
+    this.rtc?.close();
+    this.bootstrap?.stop();
     void this.localLink?.disconnect(record.directId);
     const local = new LocalTransport(record.directId, this.mesh);
     this.localLink = local;
-    this.router.useDirect([local]);
+    const bootstrap = new DirectBootstrap(() => resolveBootstrapUrl(this.preferences.signalingUrl));
+    this.bootstrap = bootstrap;
+    bootstrap.start(record.directId);
+    const rtc = typeof RTCPeerConnection === 'undefined'
+      ? null
+      : new WebRTCTransport(record.directId, bootstrap, browserPeerConnectionFactory, 6_000);
+    this.rtc = rtc;
+    this.router.useDirect(rtc ? [rtc, local] : [local]);
     const identity = (): LocalIdentity | null => {
       if (!this.keys) return null;
       const current = this.repo.getIdentity();
@@ -355,8 +376,10 @@ export class DirectController {
             network: {
               ...useAppStore.getState().network,
               attempts,
-              lastSuccess: result.kind === 'direct' ? Date.now() : useAppStore.getState().network.lastSuccess,
-              activeTransport: result.kind === 'direct' ? 'Local mesh' : result.kind === 'relay' ? 'Distributed relay' : useAppStore.getState().network.activeTransport,
+              lastSuccess: result.kind === 'direct' && result.transport === 'webrtc' ? Date.now() : useAppStore.getState().network.lastSuccess,
+              activeTransport: result.kind === 'direct'
+                ? (result.transport === 'webrtc' ? 'WebRTC' : 'Sealed mailbox')
+                : result.kind === 'relay' ? 'Distributed relay' : useAppStore.getState().network.activeTransport,
             },
           });
           return result;
@@ -369,9 +392,15 @@ export class DirectController {
       logger: createLogger(),
       onChange: () => this.refresh(),
     });
-    this.unregister = local.subscribe((peer, payload) => {
+    const receive = (peer: string, payload: Uint8Array) => {
       void this.engine?.receive(payload, peer).then(() => this.repo.save());
-    });
+    };
+    const stopLocal = local.subscribe(receive);
+    const stopRtc = rtc?.subscribe(receive);
+    this.unregister = () => {
+      stopLocal();
+      stopRtc?.();
+    };
     this.relay.subscribe((peer, payload) => {
       void this.engine?.receive(payload, peer).then(() => this.repo.save());
     });
@@ -383,7 +412,9 @@ export class DirectController {
     const record = this.repo.getIdentity();
     if (!record || !this.keys) return;
     const identity = toPublicIdentity(this.keys, record.displayName, record.deviceId);
-    this.mesh.publishBundle(encodeBundle(createBundle(identity)));
+    const bundle = encodeBundle(createBundle(identity));
+    this.mesh.publishBundle(bundle);
+    this.bootstrap?.announce(bundle);
   }
 
   private start(): void {
@@ -468,12 +499,15 @@ export class DirectController {
   private networkView(): NetworkView {
     const connection = (navigator as Navigator & { connection?: { effectiveType?: string; type?: string } }).connection;
     const peers = this.mesh.knownPeers().length;
+    const directPeers = this.repo.listContacts().filter((contact) => this.rtc?.isConnected(contact.directId)).length;
+    const bootstrap = this.bootstrap;
     return {
       online: typeof navigator === 'undefined' ? true : navigator.onLine,
-      directAvailable: true,
-      activeTransport: peers > 0 ? 'Local mesh' : 'Idle',
-      discovery: 'Kademlia table on this device',
-      peers,
+      directAvailable: this.rtc !== null || peers > 0,
+      activeTransport: directPeers > 0 ? 'WebRTC' : peers > 0 ? 'Sealed mailbox' : 'Idle',
+      discovery: !bootstrap ? 'Waiting for an identity' : bootstrap.state === 'open' ? 'Shared bootstrap' : 'Connecting to bootstrap',
+      bootstrap: bootstrap?.state === 'open' ? bootstrap.currentUrl : bootstrap ? `Reconnecting · ${bootstrap.currentUrl || 'waiting for an address'}` : 'Not started',
+      peers: Math.max(peers, directPeers),
       relay: !this.preferences.relayEnabled ? 'Off' : this.preferences.relayStorage ? 'On · temporary storage' : 'On · live only',
       lastSuccess: useAppStore.getState().network.lastSuccess,
       networkType: connection?.type || connection?.effectiveType || 'Unknown',
@@ -481,6 +515,18 @@ export class DirectController {
       kadPeers: this.kad.size,
       libp2p: 'Interface ready. js-libp2p is not bundled: Hermes does not provide the Node APIs current kad-dht transports expect.',
     };
+  }
+
+  private waitForBootstrap(): Promise<void> {
+    const started = Date.now();
+    return new Promise((resolve) => {
+      const timer = setInterval(() => {
+        if (!this.bootstrap || this.bootstrap.state === 'open' || Date.now() - started > 3_000) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 50);
+    });
   }
 
   private refreshPeer(directId: string, status: 'connecting'): void {

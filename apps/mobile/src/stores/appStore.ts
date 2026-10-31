@@ -20,6 +20,7 @@ export type NetworkView = {
   directAvailable: boolean;
   activeTransport: string;
   discovery: string;
+  bootstrap: string;
   peers: number;
   relay: string;
   lastSuccess: number | null;
@@ -37,7 +38,7 @@ type AppState = {
   contacts: ContactRecord[];
   messages: Record<string, MessageRow[]>;
   openedDirectId: string | null;
-  peerTransport: Record<string, 'direct' | 'relay' | 'offline' | 'connecting'>;
+  peerTransport: Record<string, 'direct' | 'relay' | 'offline' | 'connecting' | 'present'>;
   preferences: Preferences;
   network: NetworkView;
   setBooting: (booting: boolean, bootError?: string | null) => void;
@@ -49,6 +50,7 @@ const emptyNetwork: NetworkView = {
   directAvailable: true,
   activeTransport: 'Local mesh',
   discovery: 'Listening',
+  bootstrap: 'Not started',
   peers: 0,
   relay: 'Off',
   lastSuccess: null,

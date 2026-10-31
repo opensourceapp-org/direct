@@ -475,14 +475,15 @@ export function StatusIndicator({ tone = 'neutral' }: { tone?: 'neutral' | 'succ
   return <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />;
 }
 
-export function ConnectionIndicator({ status }: { status: 'direct' | 'relay' | 'offline' | 'connecting' }) {
+export function ConnectionIndicator({ status }: { status: 'direct' | 'relay' | 'offline' | 'connecting' | 'present' }) {
   const label = {
     direct: 'Connected directly',
+    present: 'On this bootstrap',
     relay: 'Distributed relay',
     offline: 'Recipient unavailable',
     connecting: 'Connecting',
   }[status];
-  const tone = status === 'direct' ? 'success' : status === 'relay' ? 'accent' : status === 'connecting' ? 'warning' : 'neutral';
+  const tone = status === 'direct' ? 'success' : status === 'present' || status === 'relay' ? 'accent' : status === 'connecting' ? 'warning' : 'neutral';
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       <StatusIndicator tone={tone} />

@@ -92,7 +92,10 @@ class VirtualPeerConnection implements PeerConnectionLike {
 
   async setLocalDescription(): Promise<void> {
     VirtualPeerConnection.peers.set(this.id, this);
-    queueMicrotask(() => this.onicecandidate?.({ candidate: null }));
+    queueMicrotask(() => {
+      this.onicecandidate?.({ candidate: { candidate: `candidate:${this.id}` } });
+      this.onicecandidate?.({ candidate: null });
+    });
   }
 
   async setRemoteDescription(description: SessionDescription): Promise<void> {
@@ -131,12 +134,17 @@ export class WebRTCTransport implements TransportAdapter {
   private readonly connections = new Map<string, PeerConnectionLike>();
   private handler: IncomingHandler | null = null;
 
+  private readonly iceQueue = new Map<string, IceCandidate[]>();
+  private readonly remoteReady = new Set<string>();
+  private unsubscribe: (() => void) | null = null;
+
   constructor(
     private readonly selfId: string,
     private readonly signaling: SignalingClient,
     private readonly factory: PeerConnectionFactory,
+    private readonly openTimeoutMs = 400,
   ) {
-    this.signaling.onMessage((message) => {
+    this.unsubscribe = this.signaling.onMessage((message) => {
       void this.onSignal(message);
     });
   }
@@ -148,16 +156,19 @@ export class WebRTCTransport implements TransportAdapter {
   async connect(peerId: string): Promise<boolean> {
     if (this.isConnected(peerId)) return true;
     if (peerId === this.selfId) return false;
+    this.remoteReady.delete(peerId);
+    this.iceQueue.delete(peerId);
     try {
       const connection = this.factory();
       this.connections.set(peerId, connection);
       const channel = connection.createDataChannel('direct');
       this.bindChannel(peerId, channel);
+      this.watchIce(peerId, connection);
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
       assertSignalMessage({ to: peerId, from: this.selfId, kind: 'offer', description: offer });
       await this.signaling.send({ to: peerId, from: this.selfId, kind: 'offer', description: offer });
-      return await this.waitUntilOpen(peerId, 400);
+      return await this.waitUntilOpen(peerId, this.openTimeoutMs);
     } catch {
       return false;
     }
@@ -174,6 +185,14 @@ export class WebRTCTransport implements TransportAdapter {
     this.channels.delete(peerId);
     this.connections.get(peerId)?.close();
     this.connections.delete(peerId);
+    this.iceQueue.delete(peerId);
+    this.remoteReady.delete(peerId);
+  }
+
+  close(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    for (const peerId of [...this.connections.keys()]) void this.disconnect(peerId);
   }
 
   subscribe(handler: IncomingHandler): () => void {
@@ -199,18 +218,44 @@ export class WebRTCTransport implements TransportAdapter {
     if (message.kind === 'offer' && message.description) {
       const connection = this.factory();
       this.connections.set(message.from, connection);
+      this.remoteReady.delete(message.from);
+      this.watchIce(message.from, connection);
       connection.ondatachannel = (event) => this.bindChannel(message.from, event.channel);
       await connection.setRemoteDescription(message.description);
+      this.remoteReady.add(message.from);
+      await this.flushIce(message.from);
       const answer = await connection.createAnswer();
       await connection.setLocalDescription(answer);
       await this.signaling.send({ to: message.from, from: this.selfId, kind: 'answer', description: answer });
     }
     if (message.kind === 'answer' && message.description) {
       await this.connections.get(message.from)?.setRemoteDescription(message.description);
+      this.remoteReady.add(message.from);
+      await this.flushIce(message.from);
     }
     if (message.kind === 'ice' && message.candidate) {
+      if (!this.remoteReady.has(message.from)) {
+        const queued = this.iceQueue.get(message.from) ?? [];
+        queued.push(message.candidate);
+        this.iceQueue.set(message.from, queued);
+        return;
+      }
       await this.connections.get(message.from)?.addIceCandidate(message.candidate);
     }
+  }
+
+  private watchIce(peerId: string, connection: PeerConnectionLike): void {
+    connection.onicecandidate = (event) => {
+      if (!event.candidate) return;
+      void this.signaling.send({ to: peerId, from: this.selfId, kind: 'ice', candidate: event.candidate });
+    };
+  }
+
+  private async flushIce(peerId: string): Promise<void> {
+    const queued = this.iceQueue.get(peerId) ?? [];
+    this.iceQueue.delete(peerId);
+    const connection = this.connections.get(peerId);
+    for (const candidate of queued) await connection?.addIceCandidate(candidate);
   }
 
   private waitUntilOpen(peerId: string, timeoutMs: number): Promise<boolean> {

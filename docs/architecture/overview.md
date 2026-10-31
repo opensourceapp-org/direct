@@ -29,3 +29,5 @@ Modules:
 | Synchronization | Refresh public UI state after each durable change |
 
 `TransportAdapter` is implemented by `WebRTCTransport`, `Libp2pTransport`, `WakuTransport`, and `LocalTransport`. `TransportRouter` tries an existing direct session, then a new direct session, then the relay if it is enabled, and otherwise returns `queued`.
+
+Phones that are not on the same network share one bootstrap. The bootstrap remembers which public bundle is online and forwards WebRTC offers, answers, and ICE candidates. A sealed mailbox on that same host can move ciphertext when the data channel does not open. Neither store is a message database, and neither path counts as delivery until the recipient signs an acknowledgement.

@@ -13,7 +13,11 @@ pnpm dev
 
 Open the printed local URL. The preview uses the same React Native components as the mobile app, rendered with React Native Web.
 
-Create an identity on this device. Open a second window, including a private window, on that same URL and add its DIRECT ID from Contacts. Do not start a second server on another port: that is a separate network. Messages between those two windows are encrypted, queued, and marked delivered only after a signed acknowledgement.
+Create an identity on this device. A second phone, in another place, opens the same reachable DIRECT address and looks up the DIRECT ID from Contacts. The phones do not need the same Wi-Fi. That address runs a bootstrap at `/api/direct/signal`: it keeps the latest public bundle for each online DIRECT ID and forwards WebRTC session descriptions. It does not receive message text.
+
+If the direct data channel cannot open, the same host can still hand sealed ciphertext through a short-lived mailbox. That handoff stays pending until the recipient's device signs an acknowledgement.
+
+A second `pnpm dev` on another port is a different bootstrap. Point both phones at one address, or set the same bootstrap URL on the Network screen. Two windows on one address, including a private window, still find each other.
 
 ```bash
 pnpm test
@@ -21,7 +25,7 @@ pnpm typecheck
 pnpm --filter @direct/mobile build
 ```
 
-Optional WebRTC signaling, which exchanges session descriptions and nothing else:
+Optional standalone bootstrap, for a host that is not the Vite preview. It exchanges public bundles and session descriptions, and nothing else:
 
 ```bash
 pnpm signaling

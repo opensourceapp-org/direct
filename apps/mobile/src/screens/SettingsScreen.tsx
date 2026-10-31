@@ -130,7 +130,7 @@ function PrivacySection() {
       <Text variant="title">Privacy</Text>
       <Text>Logs record message identifiers and statuses. They do not record message text, recovery phrases, or private keys.</Text>
       <Text>The local database is sealed with AES-256-GCM. On iOS and Android the database key is intended for the Keychain and the Keystore. This browser keeps that key in the browser profile.</Text>
-      <Text>There is no central message store.</Text>
+      <Text>There is no central message store. A shared bootstrap can see which public identity is online and can forward a WebRTC session description. It does not receive message text.</Text>
     </View>
   );
 }

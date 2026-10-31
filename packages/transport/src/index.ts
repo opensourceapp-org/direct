@@ -8,5 +8,5 @@ export { TransportRouter } from './router';
 export type { RouterOptions } from './router';
 export type { IncomingHandler, RouteResult, TransportAdapter } from './types';
 export { SignalingBus, WebRTCTransport, assertSignalMessage, virtualPeerConnectionFactory } from './webrtc';
-export type { PeerConnectionFactory, SignalingClient, SignalMessage } from './webrtc';
+export type { DataChannelLike, IceCandidate, PeerConnectionFactory, PeerConnectionLike, SessionDescription, SignalingClient, SignalMessage } from './webrtc';
 export { MemoryWakuNode, WakuTransport } from './waku';

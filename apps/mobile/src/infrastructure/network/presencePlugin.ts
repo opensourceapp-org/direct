@@ -1,5 +1,43 @@
+import { existsSync } from 'node:fs';
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import type { Plugin } from 'vite';
+import { WebSocketServer } from 'ws';
 import { PresenceBoard } from './presenceBoard';
+
+type SignalHub = {
+  attach(socket: {
+    readyState: number;
+    send(data: string): void;
+    ping?: () => void;
+    on(event: 'message', listener: (raw: unknown) => void): void;
+    on(event: 'close', listener: () => void): void;
+  }): void;
+};
+
+type UpgradeServer = {
+  on(event: 'upgrade', listener: (request: IncomingMessage, socket: Duplex, head: Buffer) => void): void;
+};
+
+const servers = new WeakSet<UpgradeServer>();
+
+function attachSignal(httpServer: UpgradeServer | null | undefined): void {
+  if (!httpServer || servers.has(httpServer)) return;
+  servers.add(httpServer);
+  const fromPackage = path.resolve(process.cwd(), '../../infrastructure/signaling/hub.cjs');
+  const fromRepo = path.resolve(process.cwd(), 'infrastructure/signaling/hub.cjs');
+  const hubPath = existsSync(fromPackage) ? fromPackage : fromRepo;
+  const { createSignalHub } = createRequire(path.join(process.cwd(), 'package.json'))(hubPath) as { createSignalHub: () => SignalHub };
+  const hub = createSignalHub();
+  const sockets = new WebSocketServer({ noServer: true });
+  httpServer.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const pathname = new URL(request.url ?? '/', 'http://direct.local').pathname;
+    if (pathname !== '/api/direct/signal') return;
+    sockets.handleUpgrade(request, socket, head, (ws) => hub.attach(ws));
+  });
+}
 
 type Incoming = {
   method?: string;
@@ -34,6 +72,7 @@ export function directPresencePlugin(): Plugin {
   return {
     name: 'direct-presence',
     configureServer(server) {
+      attachSignal(server.httpServer);
       server.middlewares.use('/api/direct/mesh', (request, response, next) => {
         const url = new URL(request.url ?? '/', 'http://direct.local');
         const here = url.pathname === '/' || url.pathname === '/api/direct/mesh';
@@ -63,6 +102,9 @@ export function directPresencePlugin(): Plugin {
         }
         next();
       });
+    },
+    configurePreviewServer(server) {
+      attachSignal(server.httpServer);
     },
   };
 }

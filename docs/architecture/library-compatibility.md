@@ -12,7 +12,7 @@ Checked before integration. Versions move; this is the decision for this reposit
 | `sql.js` | Used for the runnable database so migrations, foreign keys, and transactions can be tested here. The file is sealed with AES-256-GCM. |
 | `@op-engineering/op-sqlite` with SQLCipher | Intended native database. It requires a native build and conflicts with other SQLite pods. Not linked in this preview. |
 | `react-native-keychain` | Intended Keychain and Keystore adapter. Not linked in the browser preview. IndexedDB is labeled as such in Settings. |
-| `react-native-webrtc` / browser `RTCPeerConnection` | `WebRTCTransport` is written against a small peer-connection interface and tested with an in-process connection. A browser factory can be attached when a signaling URL is configured. |
+| `react-native-webrtc` / browser `RTCPeerConnection` | `WebRTCTransport` is written against a small peer-connection interface and tested with an in-process connection. The browser preview attaches `RTCPeerConnection` with public STUN when a bootstrap socket is open. |
 | `js-libp2p` and `@waku/sdk` | Not bundled. Current releases expect Node or browser APIs that Hermes does not provide, and pulling them in before a device spike would make the app depend on a stack we cannot run here. `Libp2pTransport` and `WakuTransport` are real adapters with in-process dial and relay doubles. |
 | Kademlia | `KademliaTable` implements XOR distance and k-buckets for discovery records. It is not the libp2p kad-dht wire protocol. |
 

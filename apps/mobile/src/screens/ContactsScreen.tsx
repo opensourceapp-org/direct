@@ -22,7 +22,7 @@ export function ContactsScreen() {
       </View>
       <Divider />
       {contacts.length === 0 ? (
-        <EmptyState title="No contacts" body="Add someone with a QR bundle or a DIRECT ID published on this network. There is no central directory." />
+        <EmptyState title="No contacts" body="Add someone with a QR bundle or a DIRECT ID published on this bootstrap. There is no central directory." />
       ) : (
         <ScrollView>
           {contacts.map((contact) => (
@@ -75,7 +75,7 @@ export function AddContactScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: theme.background }} contentContainerStyle={{ padding: 20, gap: 16, maxWidth: 640 }}>
       <Text variant="title">Add a contact</Text>
-      <Text tone="muted">Look up a DIRECT ID from another window open on this same address, including a private window. A second port will not see it. You can also paste the identity bundle from their QR code.</Text>
+      <Text tone="muted">Look up a DIRECT ID from another phone that has DIRECT open on this same bootstrap. The phones can be on different networks. You can also paste the identity bundle from their QR code.</Text>
       <Text variant="label">DIRECT ID</Text>
       <Input value={directId} onChangeText={setDirectId} placeholder="dir_…" />
       <Button label="Look up" onPress={() => void addId()} disabled={!directId.trim()} />

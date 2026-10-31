@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Divider, StatusIndicator, Text } from '../components/ui/system';
+import { Button, Divider, Input, StatusIndicator, Text } from '../components/ui/system';
+import { useDirect } from '../app/context';
 import { useAppStore } from '../stores/appStore';
 import { useTheme } from '../theme/ThemeProvider';
 import { formatWhen } from '../app/format';
@@ -12,6 +14,7 @@ export function NetworkScreen() {
     { label: 'Direct connection', value: network.directAvailable ? 'Available' : 'Unavailable', tone: 'success' },
     { label: 'Active transport', value: network.activeTransport, tone: 'neutral' },
     { label: 'Peer discovery', value: network.discovery, tone: 'neutral' },
+    { label: 'Bootstrap', value: network.bootstrap, tone: network.discovery === 'Shared bootstrap' ? 'success' : 'neutral' },
     { label: 'Connected peers', value: String(network.peers), tone: network.peers > 0 ? 'success' : 'neutral' },
     { label: 'Kademlia records', value: String(network.kadPeers), tone: 'neutral' },
     { label: 'Relay', value: network.relay, tone: network.relay.startsWith('Off') ? 'neutral' : 'accent' },
@@ -49,10 +52,26 @@ export function NetworkScreen() {
         </View>
         <Text variant="meta" tone="muted">Filled bars are successful direct or relay handoffs. A handoff is not an acknowledgement.</Text>
       </View>
+      <BootstrapField />
       <View style={{ gap: 6 }}>
         <Text variant="label">libp2p</Text>
         <Text tone="muted">{network.libp2p}</Text>
       </View>
     </ScrollView>
+  );
+}
+
+function BootstrapField() {
+  const direct = useDirect();
+  const saved = useAppStore((state) => state.preferences.signalingUrl);
+  const [value, setValue] = useState(saved);
+  useEffect(() => setValue(saved), [saved]);
+  return (
+    <View style={{ gap: 8 }}>
+      <Text variant="label">Bootstrap address</Text>
+      <Text tone="muted">Two phones in different places use one reachable DIRECT address. Leave this empty to use the site you already opened. The bootstrap learns who is online and forwards session descriptions. It does not receive message text.</Text>
+      <Input value={value} onChangeText={setValue} placeholder="wss://your-direct-host/api/direct/signal" />
+      <Button label="Use this bootstrap" variant="secondary" onPress={() => direct.updatePreferences({ signalingUrl: value.trim() })} />
+    </View>
   );
 }
