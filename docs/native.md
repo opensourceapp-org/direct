@@ -48,14 +48,9 @@ The app process owns one `DirectNode` on a single-thread dispatcher. Foreground 
 
 Requirements: a Mac with Xcode 16 or newer, and an Apple Developer team for a physical device. The Simulator has no Secure Enclave; secrets then stay in the Keychain only.
 
-```bash
-brew install xcodegen
-cd native/ios
-xcodegen
-open Direct.xcodeproj
-```
+Open `native/ios/Direct.xcodeproj`. The project file is in the repository, so there is nothing to generate first. Set the team under Signing & Capabilities, pick a device, and run. Swift Package Manager fetches `DirectCore` from `native/ios/DirectCore` and `stasel/WebRTC` 156.0.0 on the first build.
 
-Set the team under Signing & Capabilities, pick a device, and run. Swift Package Manager fetches `DirectCore` (local) and `stasel/WebRTC` 156.0.0. `Direct.xcodeproj` is generated and is not committed.
+`App.xcodeproj` was the previous shell and is not part of this tree. A checkout that still has `apps/mobile/ios/App/App.xcodeproj` on disk, without `project.pbxproj` inside it, makes Xcode say the project does not contain a project definition file. Close that window and delete the leftover `apps/mobile/ios` directory. `project.yml` is only for regenerating `Direct.xcodeproj` with XcodeGen after the spec changes.
 
 `Info.plist` allows local networking and cleartext `ws://` for a development bootstrap, and registers `app.direct.messaging.delivery` as a `BGAppRefreshTask`. iOS decides when that task runs. Leaving the app also starts a short background flush. There is no push service, so a suspended or force-quit app cannot receive.
 

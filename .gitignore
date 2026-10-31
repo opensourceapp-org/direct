@@ -25,5 +25,5 @@ native/android/*/build/
 native/android/local.properties
 native/ios/DirectCore/.build/
 native/ios/DirectCore/.swiftpm/
-native/ios/*.xcodeproj/
-native/ios/Direct/Info.plist
+native/ios/*.xcodeproj/xcuserdata/
+native/ios/*.xcodeproj/project.xcworkspace/xcuserdata/

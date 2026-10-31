@@ -1,5 +1,5 @@
-# Generate the Xcode project on a Mac:  brew install xcodegen && cd native/ios && xcodegen
-# The generated Direct.xcodeproj is not committed.
+# Direct.xcodeproj is committed, so Xcode can open it directly.
+# To regenerate after editing this file: brew install xcodegen && xcodegen
 name: Direct
 options:
   bundleIdPrefix: app.direct

@@ -45,15 +45,11 @@ That listens on port 8787 and prints `ws://<this computer>:8787`. Allow that por
 
 Android: install Android Studio, open `native/android`, and run the `app` configuration (API 26 or newer). From a terminal, `cd native/android && ./gradlew :app:assembleDebug` writes `app/build/outputs/apk/debug/app-debug.apk`.
 
-iPhone: on a Mac, install Xcode and XcodeGen, then:
+iPhone: on a Mac, open `native/ios/Direct.xcodeproj` (File → Open, or double-click that file). Pick your team under Signing & Capabilities, then run on a device. Xcode 16 or newer.
 
-```bash
-cd native/ios
-xcodegen
-open Direct.xcodeproj
-```
+Do not open `App.xcodeproj`. That was the old shell. If a leftover `apps/mobile/ios` folder is still on disk, delete it. Opening that `App.xcodeproj` shows “does not contain a project definition file” because `project.pbxproj` is gone on purpose.
 
-Pick your team, then run on a device. The steps, the background-work limits, and the two-phone checklist are in [docs/native.md](docs/native.md).
+The steps, the background-work limits, and the two-phone checklist are in [docs/native.md](docs/native.md).
 
 ## What this repository contains
 
