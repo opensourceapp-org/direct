@@ -189,6 +189,23 @@ export class DirectController {
     this.refresh();
   }
 
+  async acceptRequest(directId: string): Promise<void> {
+    const contact = this.repo.getContact(directId);
+    if (!contact) return;
+    this.repo.setContactAccepted(directId, true);
+    await this.repo.save();
+    await this.openConversation(directId);
+  }
+
+  async declineRequest(directId: string): Promise<void> {
+    this.repo.blockContact(directId, Date.now());
+    await this.repo.save();
+    if (useAppStore.getState().openedDirectId === directId) {
+      useAppStore.getState().setSnapshot({ openedDirectId: null });
+    }
+    this.refresh();
+  }
+
   async setVerified(directId: string, verified: boolean): Promise<void> {
     this.repo.setContactVerified(directId, verified);
     await this.repo.save();
@@ -209,12 +226,14 @@ export class DirectController {
 
   async send(directId: string, body: string): Promise<void> {
     const engine = this.engine;
+    const saved = this.repo.getContact(directId);
     const contact = this.contactPublic(directId);
-    if (!engine || !contact) throw new Error('That contact is not on this device.');
+    if (!engine || !contact || !saved) throw new Error('That contact is not on this device.');
+    if (!saved.accepted) throw new Error('Accept the message request before replying.');
     this.refreshPeer(directId, 'connecting');
     const fresh = this.discovered.get(directId);
-    if (fresh && fresh.agreementKey !== this.repo.getContact(directId)?.agreementPublic) {
-      this.saveContact(fresh, this.repo.getContact(directId)?.verified ?? false);
+    if (fresh && fresh.agreementKey !== saved.agreementPublic) {
+      this.saveContact(fresh, saved.verified, saved.accepted);
     }
     try {
       await engine.sendText({ recipient: this.contactPublic(directId) ?? contact, body });
@@ -229,7 +248,7 @@ export class DirectController {
     this.repo.clearUnread(conversationId);
     const engine = this.engine;
     const contact = this.contactPublic(directId);
-    if (engine && contact) {
+    if (engine && contact && this.repo.getContact(directId)?.accepted) {
       const unread = this.repo.listMessages(conversationId).filter((message) => message.direction === 'incoming' && message.status !== 'read');
       await engine.markRead(contact, unread.map((message) => message.id));
     }
@@ -393,7 +412,7 @@ export class DirectController {
       onChange: () => this.refresh(),
     });
     const receive = (peer: string, payload: Uint8Array) => {
-      void this.engine?.receive(payload, peer).then(() => this.repo.save());
+      void this.acceptPayload(peer, payload);
     };
     const stopLocal = local.subscribe(receive);
     const stopRtc = rtc?.subscribe(receive);
@@ -402,7 +421,7 @@ export class DirectController {
       stopRtc?.();
     };
     this.relay.subscribe((peer, payload) => {
-      void this.engine?.receive(payload, peer).then(() => this.repo.save());
+      void this.acceptPayload(peer, payload);
     });
     this.relay.attach(record.directId);
     this.repo.touchDevice(record.deviceId, Date.now());
@@ -429,7 +448,32 @@ export class DirectController {
     void this.engine?.flush();
   }
 
-  private saveContact(bundle: PublicBundle, verified: boolean): void {
+  private async acceptPayload(peer: string, payload: Uint8Array): Promise<void> {
+    await this.noteSender(peer);
+    await this.engine?.receive(payload, peer);
+    await this.repo.save();
+    this.refresh();
+  }
+
+  private async noteSender(peerId: string): Promise<void> {
+    if (!peerId || peerId === 'relay' || peerId === this.repo.getIdentity()?.directId) return;
+    if (this.repo.getContact(peerId)) return;
+    if (!this.discovered.has(peerId)) await this.mesh.sync();
+    if (!this.discovered.has(peerId)) {
+      await this.waitForBootstrap();
+      try {
+        const published = await this.bootstrap?.lookup(peerId);
+        if (published) this.ingestBundle(published);
+      } catch {
+        return;
+      }
+    }
+    const bundle = this.discovered.get(peerId);
+    if (!bundle) return;
+    this.saveContact(bundle, false, false);
+  }
+
+  private saveContact(bundle: PublicBundle, verified: boolean, accepted = true): void {
     const self = this.repo.getIdentity();
     if (self && bundle.directId === self.directId) throw new Error('This DIRECT ID belongs to this device.');
     const existing = this.repo.getContact(bundle.directId);
@@ -445,6 +489,7 @@ export class DirectController {
       deviceId: bundle.deviceId,
       verified: existing ? existing.verified && existing.fingerprint === bundle.fingerprint : verified,
       blocked: false,
+      accepted: Boolean(accepted || existing?.accepted),
       createdAt: existing?.createdAt ?? Date.now(),
     });
     this.repo.recordSession(bundle.directId, bundle.agreementKey, Date.now());
@@ -488,7 +533,7 @@ export class DirectController {
       });
       const existing = this.repo.getContact(bundle.directId);
       if (existing && existing.agreementPublic !== bundle.agreementKey) {
-        this.saveContact(bundle, existing.verified);
+        this.saveContact(bundle, existing.verified, existing.accepted);
         void this.repo.save();
       }
     } catch {

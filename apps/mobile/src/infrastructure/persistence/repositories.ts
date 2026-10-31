@@ -36,6 +36,7 @@ export type ContactRecord = {
   deviceId: string;
   verified: boolean;
   blocked: boolean;
+  accepted: boolean;
   createdAt: number;
 };
 
@@ -47,6 +48,7 @@ export type ConversationRecord = {
   fingerprint: string;
   verified: boolean;
   blocked: boolean;
+  accepted: boolean;
   preview: string;
   updatedAt: number;
   unread: number;
@@ -179,8 +181,8 @@ export class DirectRepository implements DeliveryStore {
     this.db.run(
       `INSERT INTO contacts (
         id, direct_id, did, display_name, public_key, signing_public_key,
-        agreement_signature, fingerprint, device_id, verified, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        agreement_signature, fingerprint, device_id, verified, accepted, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(direct_id) DO UPDATE SET
         display_name = excluded.display_name,
         did = excluded.did,
@@ -189,7 +191,8 @@ export class DirectRepository implements DeliveryStore {
         agreement_signature = excluded.agreement_signature,
         fingerprint = excluded.fingerprint,
         device_id = excluded.device_id,
-        verified = CASE WHEN contacts.fingerprint = excluded.fingerprint THEN contacts.verified ELSE 0 END`,
+        verified = CASE WHEN contacts.fingerprint = excluded.fingerprint THEN contacts.verified ELSE 0 END,
+        accepted = CASE WHEN excluded.accepted = 1 OR contacts.accepted = 1 THEN 1 ELSE 0 END`,
       [
         contact.id,
         contact.directId,
@@ -201,6 +204,7 @@ export class DirectRepository implements DeliveryStore {
         contact.fingerprint,
         contact.deviceId,
         contact.verified ? 1 : 0,
+        contact.accepted ? 1 : 0,
         contact.createdAt,
       ],
     );
@@ -227,6 +231,10 @@ export class DirectRepository implements DeliveryStore {
 
   setContactVerified(directId: string, verified: boolean): void {
     this.db.run('UPDATE contacts SET verified = ? WHERE direct_id = ?', [verified ? 1 : 0, directId]);
+  }
+
+  setContactAccepted(directId: string, accepted: boolean): void {
+    this.db.run('UPDATE contacts SET accepted = ? WHERE direct_id = ?', [accepted ? 1 : 0, directId]);
   }
 
   blockContact(directId: string, at: number): void {
@@ -259,7 +267,7 @@ export class DirectRepository implements DeliveryStore {
     return this.db.all(
       `SELECT conversations.id, conversations.contact_id, conversations.updated_at, conversations.unread_count,
               conversations.last_message_preview, contacts.direct_id, contacts.display_name, contacts.fingerprint,
-              contacts.verified, CASE WHEN blocked_contacts.contact_id IS NULL THEN 0 ELSE 1 END AS blocked,
+              contacts.verified, contacts.accepted, CASE WHEN blocked_contacts.contact_id IS NULL THEN 0 ELSE 1 END AS blocked,
               (SELECT status FROM messages WHERE messages.conversation_id = conversations.id AND messages.kind = 'user' ORDER BY created_at DESC LIMIT 1) AS last_status,
               (SELECT transport FROM messages WHERE messages.conversation_id = conversations.id AND messages.kind = 'user' ORDER BY created_at DESC LIMIT 1) AS last_transport
        FROM conversations
@@ -274,6 +282,7 @@ export class DirectRepository implements DeliveryStore {
       fingerprint: asString(row, 'fingerprint'),
       verified: asNumber(row, 'verified') === 1,
       blocked: asNumber(row, 'blocked') === 1,
+      accepted: asNumber(row, 'accepted') === 1,
       preview: asString(row, 'last_message_preview'),
       updatedAt: asNumber(row, 'updated_at'),
       unread: asNumber(row, 'unread_count'),
@@ -460,6 +469,7 @@ function mapContact(row: Record<string, SqlValue>): ContactRecord {
     deviceId: asString(row, 'device_id'),
     verified: asNumber(row, 'verified') === 1,
     blocked: asNumber(row, 'blocked') === 1,
+    accepted: asNumber(row, 'accepted') === 1,
     createdAt: asNumber(row, 'created_at'),
   };
 }

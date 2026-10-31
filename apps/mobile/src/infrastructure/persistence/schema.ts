@@ -35,6 +35,7 @@ CREATE TABLE contacts (
   fingerprint TEXT NOT NULL,
   device_id TEXT NOT NULL,
   verified INTEGER NOT NULL DEFAULT 0,
+  accepted INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
 

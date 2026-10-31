@@ -133,7 +133,7 @@ export async function openEncryptedDatabase(options: {
 
 function migrate(raw: SqlDatabase, now: number): void {
   raw.run('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
-  const current = Number((() => {
+  let current = Number((() => {
     const statement = raw.prepare('SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations');
     statement.bind([]);
     statement.step();
@@ -141,15 +141,35 @@ function migrate(raw: SqlDatabase, now: number): void {
     statement.free();
     return version;
   })());
-  if (current >= 1) return;
-  raw.run('BEGIN');
-  try {
-    raw.exec(SCHEMA_V1);
-    raw.run('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)', [1, now]);
-    raw.run('COMMIT');
-  } catch (error) {
-    raw.run('ROLLBACK');
-    throw error;
+  if (current < 1) {
+    raw.run('BEGIN');
+    try {
+      raw.exec(SCHEMA_V1);
+      raw.run('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)', [1, now]);
+      raw.run('COMMIT');
+      current = 1;
+    } catch (error) {
+      raw.run('ROLLBACK');
+      throw error;
+    }
+  }
+  if (current < 2) {
+    raw.run('BEGIN');
+    try {
+      const columns = raw.prepare('PRAGMA table_info(contacts)');
+      columns.bind([]);
+      const names: string[] = [];
+      while (columns.step()) names.push(String(columns.getAsObject().name ?? ''));
+      columns.free();
+      if (!names.includes('accepted')) {
+        raw.run('ALTER TABLE contacts ADD COLUMN accepted INTEGER NOT NULL DEFAULT 1');
+      }
+      raw.run('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)', [2, now]);
+      raw.run('COMMIT');
+    } catch (error) {
+      raw.run('ROLLBACK');
+      throw error;
+    }
   }
 }
 

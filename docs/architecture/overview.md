@@ -16,7 +16,7 @@ Modules:
 | Device management | Record this device and mark it revoked |
 | Contacts | Verify bundles, block, remove |
 | Conversations | Local threads and unread counts |
-| Messaging | Compose and read messages |
+| Messaging | Compose and read messages. An unknown sender is stored as a request until accepted |
 | Encryption | Seal, open, sign, verify |
 | Peer discovery | Accept signed bundles and file them in a Kademlia table |
 | Networking | Report path, peers, relay, and network type |

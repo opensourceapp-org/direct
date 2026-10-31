@@ -13,7 +13,8 @@ import type { RootStackParamList } from '../navigation/types';
 export function ContactsScreen() {
   const theme = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const contacts = useAppStore((state) => state.contacts);
+  const saved = useAppStore((state) => state.contacts);
+  const contacts = saved.filter((contact) => contact.accepted);
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
       <View style={{ paddingHorizontal: 16, paddingTop: 18, paddingBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>

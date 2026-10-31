@@ -30,6 +30,31 @@ async function freshRepo() {
   return { vault, blobs, repo: new DirectRepository(db) };
 }
 
+test('an unknown sender is kept as a message request until accepted', async () => {
+  const { repo } = await freshRepo();
+  const peer = toPublicIdentity(createIdentityMaterial().keys, 'Bo', 'dev_bo');
+  repo.upsertContact({
+    id: 'contact_bo',
+    directId: peer.directId,
+    did: peer.did,
+    displayName: 'Bo',
+    agreementPublic: bytesToBase64Url(peer.agreementPublic),
+    signingPublic: bytesToBase64Url(peer.signingPublic),
+    agreementSignature: bytesToBase64Url(peer.agreementSignature),
+    fingerprint: peer.fingerprint,
+    deviceId: peer.deviceId,
+    verified: false,
+    blocked: false,
+    accepted: false,
+    createdAt: 11,
+  });
+  const conversationId = repo.ensureConversation(peer.directId, 'hello', 12, true);
+  expect(repo.listConversations()[0]).toMatchObject({ id: conversationId, accepted: false, preview: 'hello' });
+  repo.setContactAccepted(peer.directId, true);
+  expect(repo.getContact(peer.directId)?.accepted).toBe(true);
+  expect(repo.listConversations()[0]?.accepted).toBe(true);
+});
+
 test('sqlite persists an identity and rolls back a broken message insert', async () => {
   const { repo } = await freshRepo();
   const material = createIdentityMaterial();
@@ -114,6 +139,7 @@ test('the database file is encrypted and reopens only with the same key', async 
       deviceId: peer.deviceId,
       verified: true,
       blocked: false,
+      accepted: true,
       createdAt: 11,
     });
     const conversationId = repo.ensureConversation(peer.directId, canary, 12, false);
@@ -177,6 +203,7 @@ test('two encrypted databases deliver directly and keep the message after acknow
         deviceId: peer.deviceId,
         verified: false,
         blocked: false,
+        accepted: true,
         createdAt: 31,
       });
     });

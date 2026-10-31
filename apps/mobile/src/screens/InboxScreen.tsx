@@ -19,13 +19,17 @@ export function InboxScreen() {
   const opened = useAppStore((state) => state.openedDirectId);
   const peerTransport = useAppStore((state) => state.peerTransport);
   const [query, setQuery] = useState('');
+  const visible = useMemo(
+    () => conversations.filter((conversation) => conversation.accepted || !conversation.blocked),
+    [conversations],
+  );
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return conversations;
-    return conversations.filter((conversation) =>
+    if (!needle) return visible;
+    return visible.filter((conversation) =>
       `${conversation.displayName} ${conversation.directId} ${conversation.preview}`.toLowerCase().includes(needle),
     );
-  }, [conversations, query]);
+  }, [visible, query]);
 
   const open = (directId: string) => {
     useAppStore.getState().setSnapshot({ openedDirectId: directId });
@@ -47,9 +51,9 @@ export function InboxScreen() {
         <Divider />
         {filtered.length === 0 ? (
           <EmptyState
-            title={conversations.length === 0 ? 'No conversations yet' : 'No matches'}
-            body={conversations.length === 0 ? 'Add a contact with a DIRECT ID or a QR bundle. Messages stay on this device until the other person is reachable.' : 'Try a name, DIRECT ID, or part of a message.'}
-            action={conversations.length === 0 ? <Button label="Add a contact" variant="secondary" onPress={() => navigation.navigate('Contacts')} /> : undefined}
+            title={visible.length === 0 ? 'No conversations yet' : 'No matches'}
+            body={visible.length === 0 ? 'A message sent to you appears here before you add that person. Accept the request to reply.' : 'Try a name, DIRECT ID, or part of a message.'}
+            action={visible.length === 0 ? <Button label="Add a contact" variant="secondary" onPress={() => navigation.navigate('Contacts')} /> : undefined}
           />
         ) : (
           <ScrollView>
@@ -76,6 +80,7 @@ export function InboxScreen() {
                     <View style={{ flex: 1, gap: 2 }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
                         <Text variant="label" style={{ flex: 1 }} numberOfLines={1}>{conversation.displayName || conversation.directId}</Text>
+                        {conversation.accepted ? null : <Text variant="meta" tone="accent">Request</Text>}
                         <Text variant="meta" tone="muted">{conversation.updatedAt ? formatWhen(conversation.updatedAt) : ''}</Text>
                       </View>
                       <Text variant="meta" tone="muted" numberOfLines={1}>{conversation.directId}</Text>

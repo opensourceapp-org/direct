@@ -3,7 +3,7 @@ import { ScrollView, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { ConnectionIndicator, EmptyState, IconButton, Input, MessageBubble, Text, Tooltip } from '../components/ui/system';
+import { Button, ConnectionIndicator, EmptyState, IconButton, Input, MessageBubble, Text, Tooltip } from '../components/ui/system';
 import { Icon } from '../components/ui/icons';
 import { deliveryLabel, formatWhen } from '../app/format';
 import { useDirect } from '../app/context';
@@ -24,6 +24,7 @@ export function Thread({ directId, showBack }: { directId: string; showBack?: bo
   const messages = useAppStore((state) => state.messages[`conv_${directId}`] ?? NO_MESSAGES);
   const status = useAppStore((state) => state.peerTransport[directId] ?? 'offline');
   const contact = contacts.find((item) => item.directId === directId);
+  const request = Boolean(contact && !contact.accepted && !contact.blocked);
   const [draft, setDraft] = useState('');
 
   useEffect(() => {
@@ -32,7 +33,7 @@ export function Thread({ directId, showBack }: { directId: string; showBack?: bo
 
   const send = async () => {
     const body = draft.trim();
-    if (!body) return;
+    if (!body || request) return;
     setDraft('');
     try {
       await direct.send(directId, body);
@@ -41,6 +42,10 @@ export function Thread({ directId, showBack }: { directId: string; showBack?: bo
       toast(error instanceof Error ? error.message : 'Message was not queued.');
     }
   };
+
+  if (contact?.blocked && !contact.accepted) {
+    return <EmptyState title="Request declined" body="Further messages from this DIRECT ID are ignored." />;
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
@@ -53,7 +58,7 @@ export function Thread({ directId, showBack }: { directId: string; showBack?: bo
         <View style={{ flex: 1, gap: 2 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Text variant="heading">{contact?.displayName || directId}</Text>
-            {contact?.verified ? <Text variant="meta" tone="success">Verified</Text> : <Text variant="meta" tone="muted">Unverified</Text>}
+            {request ? <Text variant="meta" tone="accent">Message request</Text> : contact?.verified ? <Text variant="meta" tone="success">Verified</Text> : <Text variant="meta" tone="muted">Unverified</Text>}
           </View>
           <ConnectionIndicator status={status} />
         </View>
@@ -71,6 +76,15 @@ export function Thread({ directId, showBack }: { directId: string; showBack?: bo
           />
         ))}
       </ScrollView>
+      {request ? (
+        <View style={{ gap: 10, padding: 12, borderTopWidth: 1, borderColor: theme.border }}>
+          <Text tone="muted">This message is on your device. Accept the request to reply. Until then, a reply cannot be sent.</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Button label="Accept" onPress={() => void direct.acceptRequest(directId)} />
+            <Button label="Decline" variant="secondary" onPress={() => void direct.declineRequest(directId).then(() => navigation.navigate('Inbox'))} />
+          </View>
+        </View>
+      ) : (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderTopWidth: 1, borderColor: theme.border }}>
         <Tooltip label="Attachments are not available yet">
           <IconButton label="Attachment" disabled onPress={() => undefined}>
@@ -84,6 +98,7 @@ export function Thread({ directId, showBack }: { directId: string; showBack?: bo
           <Icon name="send" color={theme.foreground} />
         </IconButton>
       </View>
+      )}
     </View>
   );
 }

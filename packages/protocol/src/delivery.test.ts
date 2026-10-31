@@ -77,6 +77,58 @@ test('direct delivery waits for a verified acknowledgement and keeps the message
   expect(bobStore.messages.filter((message) => message.kind === 'user')).toHaveLength(1);
 });
 
+test('a recipient stores the message after the sender becomes known, without dropping the sender queue', async () => {
+  const mesh = new MemoryMesh();
+  const aliceWho = identity('Ava');
+  const bobWho = identity('Bo');
+  const aliceStore = new MemoryDeliveryStore();
+  const bobStore = new MemoryDeliveryStore();
+  const clock = { t: 5_000, now() { return this.t; } };
+  let sequence = 0;
+  const ids = { next: (prefix: string) => `${prefix}_${sequence++}` };
+  let bobKnowsAlice = false;
+  const aliceTransport = new LocalTransport(aliceWho.local.directId, mesh);
+  const bobTransport = new LocalTransport(bobWho.local.directId, mesh);
+  const route = (transport: LocalTransport) => ({
+    send: (peerId: string, payload: Uint8Array) => transport.connect(peerId).then(async (ok) => {
+      if (!ok) return { kind: 'queued' as const };
+      await transport.send(peerId, payload);
+      return { kind: 'direct' as const, transport: 'local' };
+    }),
+  });
+  const alice = new DeliveryEngine({
+    store: aliceStore,
+    router: route(aliceTransport),
+    identity: () => aliceWho.local,
+    contact: (id) => (id === bobWho.contact.directId ? bobWho.contact : null),
+    clock,
+    ids,
+    random: () => 0,
+  });
+  const bob = new DeliveryEngine({
+    store: bobStore,
+    router: route(bobTransport),
+    identity: () => bobWho.local,
+    contact: (id) => (bobKnowsAlice && id === aliceWho.contact.directId ? aliceWho.contact : null),
+    clock,
+    ids,
+    random: () => 0,
+  });
+  aliceTransport.subscribe((peer, payload) => { void alice.receive(payload, peer); });
+  bobTransport.subscribe((peer, payload) => { void bob.receive(payload, peer); });
+
+  const sent = await alice.sendText({ recipient: bobWho.contact, body: 'Are you there?' });
+  expect(bobStore.messages.filter((message) => message.kind === 'user')).toHaveLength(0);
+  expect(aliceStore.getMessage(sent.id)?.status).toBe('pending');
+  expect(aliceStore.getQueueByMessage(sent.id)).not.toBeNull();
+
+  bobKnowsAlice = true;
+  clock.t += 1_000;
+  await alice.flush();
+  expect(bobStore.messages.filter((message) => message.kind === 'user')[0]?.body).toBe('Are you there?');
+  expect(aliceStore.getMessage(sent.id)?.status).toBe('delivered');
+});
+
 test('an unavailable recipient stays pending and is not deleted', async () => {
   const aliceWho = identity('Ava');
   const bobWho = identity('Bo');
