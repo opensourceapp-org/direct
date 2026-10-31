@@ -21,6 +21,7 @@ export function httpLoopback(): MeshLoopback | null {
     async hello(peerId, bundle) {
       const response = await fetch(MESH_URL, {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ op: 'hello', peerId, bundle }),
       });
@@ -29,13 +30,14 @@ export function httpLoopback(): MeshLoopback | null {
     async deliver(from, to, payload) {
       const response = await fetch(MESH_URL, {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ op: 'deliver', from, to, payload }),
       });
       return response.ok;
     },
     async pull(peerId) {
-      const response = await fetch(`${MESH_URL}?peer=${encodeURIComponent(peerId)}`);
+      const response = await fetch(`${MESH_URL}?peer=${encodeURIComponent(peerId)}&t=${Date.now()}`, { cache: 'no-store' });
       if (!response.ok) return { peers: [], mail: [] };
       return response.json() as Promise<{ peers: { peerId: string; bundle: string; at: number }[]; mail: { from: string; payload: string }[] }>;
     },

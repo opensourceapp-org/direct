@@ -176,14 +176,22 @@ export class DirectController {
 
   async addByDirectId(directId: string): Promise<void> {
     const id = directId.trim().replace(/^dir_/i, 'dir_').toUpperCase().replace(/^DIR_/, 'dir_');
+    if (!/^dir_[0-9A-HJKMNP-TV-Z]{16}$/.test(id)) {
+      throw new Error('A DIRECT ID looks like dir_ followed by 16 letters and numbers.');
+    }
     await this.mesh.sync();
-    await this.waitForBootstrap();
-    if (!this.discovered.has(id)) {
-      const published = await this.bootstrap?.lookup(id);
+    if (!this.discovered.has(id)) await this.waitForBootstrap();
+    const deadline = Date.now() + 2_500;
+    while (!this.discovered.has(id) && this.bootstrap?.state === 'open' && Date.now() < deadline) {
+      const published = await this.bootstrap.lookup(id);
       if (published) this.ingestBundle(published);
+      if (this.discovered.has(id)) break;
+      await this.mesh.sync();
+      if (this.discovered.has(id)) break;
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
     const bundle = this.discovered.get(id);
-    if (!bundle) throw new Error('No phone on this bootstrap is publishing that DIRECT ID. Keep DIRECT open on both phones, on this same address or the same bootstrap URL. They do not need the same Wi-Fi.');
+    if (!bundle) throw new Error(this.missingDirectIdMessage(id));
     this.saveContact(bundle, false);
     await this.repo.save();
     this.refresh();
@@ -562,11 +570,24 @@ export class DirectController {
     };
   }
 
+  private missingDirectIdMessage(id: string): string {
+    const bootstrap = this.bootstrap;
+    const url = bootstrap?.currentUrl ?? '';
+    if (!bootstrap || !url) {
+      return 'This phone has no bootstrap yet. On both phones, open Network and set the same address, such as ws://192.168.1.20:8787, while pnpm signaling is running on that computer.';
+    }
+    if (bootstrap.state !== 'open') {
+      return `DIRECT is not connected to the bootstrap at ${url}. Use that same address on both phones.`;
+    }
+    return `No phone on ${url} is publishing ${id}. Keep DIRECT open on the other phone, on this same bootstrap.`;
+  }
+
   private waitForBootstrap(): Promise<void> {
     const started = Date.now();
     return new Promise((resolve) => {
       const timer = setInterval(() => {
-        if (!this.bootstrap || this.bootstrap.state === 'open' || Date.now() - started > 3_000) {
+        const bootstrap = this.bootstrap;
+        if (!bootstrap || bootstrap.state === 'open' || !bootstrap.currentUrl || Date.now() - started > 3_000) {
           clearInterval(timer);
           resolve();
         }

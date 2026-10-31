@@ -1,14 +1,53 @@
 const DIRECT_ID = /^dir_[0-9A-HJKMNP-TV-Z]{16}$/;
 const MAX_BUNDLE = 8192;
 const MAX_SIGNAL = 64 * 1024;
+const GRACE_MS = 120_000;
 
 /**
  * In-memory rendezvous for devices that are not on the same network.
  * Holds the latest public bundle per DIRECT ID and forwards session descriptions.
- * Message plaintext is never accepted here.
+ * A bundle stays findable for two minutes after the socket drops so a lookup
+ * still succeeds while the phone reconnects. Message plaintext is never accepted here.
  */
-function createSignalHub() {
+function createSignalHub(options = {}) {
   const peers = new Map();
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  const onHello = typeof options.onHello === 'function' ? options.onHello : null;
+
+  function valid(id, bundle) {
+    return typeof id === 'string'
+      && DIRECT_ID.test(id)
+      && typeof bundle === 'string'
+      && bundle.length >= 32
+      && bundle.length <= MAX_BUNDLE
+      && bundle.includes(`"directId":"${id}"`);
+  }
+
+  function visible(peer, at) {
+    if (!peer) return false;
+    if (peer.send) return true;
+    return at - peer.closedAt < GRACE_MS;
+  }
+
+  function sweep(at) {
+    for (const [id, peer] of peers) {
+      if (!peer.send && at - peer.closedAt >= GRACE_MS) peers.delete(id);
+    }
+  }
+
+  /** Record a public bundle with no live socket, or refresh one that already has a socket. */
+  function remember(id, bundle) {
+    if (!valid(id, bundle)) return false;
+    const current = peers.get(id);
+    const send = current && current.send ? current.send : null;
+    peers.set(id, {
+      bundle,
+      send,
+      token: current ? current.token : 0,
+      closedAt: send ? 0 : now(),
+    });
+    return true;
+  }
 
   function attach(socket) {
     let selfId = '';
@@ -30,12 +69,11 @@ function createSignalHub() {
       if (message.kind === 'hello') {
         const id = message.from;
         const bundle = message.bundle;
-        if (typeof id !== 'string' || !DIRECT_ID.test(id)) return;
-        if (typeof bundle !== 'string' || bundle.length < 32 || bundle.length > MAX_BUNDLE) return;
-        if (!bundle.includes(`"directId":"${id}"`)) return;
+        if (!valid(id, bundle)) return;
         selfId = id;
         token += 1;
-        peers.set(id, { bundle, send, token });
+        peers.set(id, { bundle, send, token, closedAt: 0 });
+        if (onHello) onHello(id, bundle);
         return;
       }
 
@@ -43,13 +81,16 @@ function createSignalHub() {
         const requestId = message.requestId;
         const directId = message.directId;
         if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 80) return;
+        const at = now();
+        sweep(at);
         const peer = typeof directId === 'string' ? peers.get(directId) : undefined;
+        const shown = visible(peer, at) ? peer : undefined;
         send(JSON.stringify({
           kind: 'lookup',
           requestId,
           directId: typeof directId === 'string' ? directId : '',
-          present: Boolean(peer),
-          bundle: peer ? peer.bundle : null,
+          present: Boolean(shown),
+          bundle: shown ? shown.bundle : null,
         }));
         return;
       }
@@ -59,7 +100,7 @@ function createSignalHub() {
       const encoded = JSON.stringify(message);
       if (encoded.length > MAX_SIGNAL) return;
       const target = peers.get(message.to);
-      if (target) {
+      if (target && target.send) {
         target.send(encoded);
         return;
       }
@@ -69,7 +110,9 @@ function createSignalHub() {
     const onClose = () => {
       if (!selfId) return;
       const current = peers.get(selfId);
-      if (current && current.send === send && current.token === token) peers.delete(selfId);
+      if (current && current.send === send && current.token === token) {
+        peers.set(selfId, { bundle: current.bundle, send: null, token, closedAt: now() });
+      }
     };
 
     socket.on('message', onMessage);
@@ -81,7 +124,7 @@ function createSignalHub() {
     socket.on('close', () => clearInterval(beat));
   }
 
-  return { attach };
+  return { attach, remember };
 }
 
 module.exports = { createSignalHub };
