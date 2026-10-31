@@ -13,7 +13,7 @@ pnpm dev
 
 Open the printed local URL. The preview uses the same React Native components as the mobile app, rendered with React Native Web.
 
-Create an identity on this device. A second browser profile on the same machine can publish its DIRECT ID over the local mesh; add that ID from Contacts. Messages between those two devices are encrypted, queued, and marked delivered only after a signed acknowledgement.
+Create an identity on this device. Open a second window, including a private window, on that same URL and add its DIRECT ID from Contacts. Do not start a second server on another port: that is a separate network. Messages between those two windows are encrypted, queued, and marked delivered only after a signed acknowledgement.
 
 ```bash
 pnpm test

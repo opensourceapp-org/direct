@@ -171,8 +171,10 @@ export class DirectController {
   }
 
   async addByDirectId(directId: string): Promise<void> {
-    const bundle = this.discovered.get(directId.trim());
-    if (!bundle) throw new Error('No reachable device has published that DIRECT ID.');
+    const id = directId.trim().replace(/^dir_/i, 'dir_').toUpperCase().replace(/^DIR_/, 'dir_');
+    await this.mesh.sync();
+    const bundle = this.discovered.get(id);
+    if (!bundle) throw new Error('No reachable device has published that DIRECT ID on this address. Keep both windows open here. A different port is a different network.');
     this.saveContact(bundle, false);
     await this.repo.save();
     this.refresh();

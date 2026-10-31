@@ -1,9 +1,10 @@
 import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { directPresencePlugin } from './src/infrastructure/network/presencePlugin';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), directPresencePlugin()],
   resolve: {
     alias: [
       {

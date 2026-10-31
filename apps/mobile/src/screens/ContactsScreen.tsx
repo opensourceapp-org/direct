@@ -75,7 +75,7 @@ export function AddContactScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: theme.background }} contentContainerStyle={{ padding: 20, gap: 16, maxWidth: 640 }}>
       <Text variant="title">Add a contact</Text>
-      <Text tone="muted">A DIRECT ID only works when that device has published its signed bundle on this network. Otherwise paste the identity bundle from their QR code.</Text>
+      <Text tone="muted">Look up a DIRECT ID from another window open on this same address, including a private window. A second port will not see it. You can also paste the identity bundle from their QR code.</Text>
       <Text variant="label">DIRECT ID</Text>
       <Input value={directId} onChangeText={setDirectId} placeholder="dir_…" />
       <Button label="Look up" onPress={() => void addId()} disabled={!directId.trim()} />
