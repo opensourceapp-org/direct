@@ -8,6 +8,8 @@ import app.direct.core.crypto.PublicBundle
 import app.direct.core.delivery.DeliveryEngine
 import app.direct.core.delivery.DeliveryRejected
 import app.direct.core.protocol.Envelopes
+import app.direct.core.protocol.MediaNotes
+import app.direct.core.protocol.ProfileCards
 import app.direct.core.signaling.BootstrapClient
 import app.direct.core.signaling.BootstrapStatus
 import app.direct.core.signaling.BootstrapUrl
@@ -100,9 +102,12 @@ class DirectNode(
     private val online = HashSet<String>()
     private var foreground = true
     private var networkAvailable = true
+    private var mediaDir: File? = null
 
     suspend fun start() = onNode {
         if (_state.value.ready) return@onNode
+        val mediaParent = storeFile?.parentFile ?: File(System.getProperty("java.io.tmpdir"))
+        mediaDir = File(mediaParent, "direct-media-" + (storeFile?.nameWithoutExtension ?: "memory")).apply { mkdirs() }
         try {
             store = if (storeFile == null) LocalStore.inMemory() else LocalStore.open(storeFile, vault.storageKey())
         } catch (error: Exception) {
@@ -194,7 +199,9 @@ class DirectNode(
     }
 
     /** Adds a contact from the bundle in their QR code, with no bootstrap involved. */
-    suspend fun addContactBundle(serialized: String): ContactRecord = onNode {
+    suspend fun addContactBundle(serialized: String): ContactRecord = onNode { addBundle(serialized) }
+
+    private fun addBundle(serialized: String): ContactRecord {
         val self = keys ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
         val bundle = try {
             Bundles.parse(serialized)
@@ -202,7 +209,7 @@ class DirectNode(
             throw DirectException(DirectException.Reason.BAD_BUNDLE, error.message ?: "That identity bundle could not be verified.")
         }
         if (bundle.directId == self.directId) throw DirectException(DirectException.Reason.SELF, "This DIRECT ID belongs to this phone.")
-        saveContact(bundle, accepted = true)
+        return saveContact(bundle, accepted = true)
     }
 
     suspend fun send(peerId: String, body: String): MessageRecord = onNode {
@@ -217,6 +224,62 @@ class DirectNode(
         publish()
         wake.trySend(Unit)
         message
+    }
+
+    /** Photo, video, GIF, sticker, or voice note. The bytes are sealed and queued on this phone. */
+    suspend fun sendMedia(peerId: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String): MessageRecord = onNode {
+        val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+        if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+        if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before replying.")
+        val message = try {
+            requireEngine().queueMedia(peerId, kind, mime, name, bytes, caption)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "Attachment was not queued.")
+        }
+        publish()
+        wake.trySend(Unit)
+        message
+    }
+
+    suspend fun readMedia(messageId: String): ByteArray? = onNode {
+        val name = store.message(messageId)?.mediaFile ?: return@onNode null
+        val file = mediaDir?.let { File(it, name) } ?: return@onNode null
+        if (!file.exists()) null else file.readBytes()
+    }
+
+    suspend fun setStatus(text: String) = onNode {
+        val profile = store.profile ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+        store.profile = profile.copy(status = text.trim().take(80))
+        store.save()
+        publish()
+    }
+
+    suspend fun setAvatar(jpeg: ByteArray) = onNode {
+        val profile = store.profile ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+        if (jpeg.size > MediaNotes.MAX_AVATAR_BYTES || jpeg.size < 3 || jpeg[0] != 0xFF.toByte() || jpeg[1] != 0xD8.toByte()) {
+            throw DirectException(DirectException.Reason.REJECTED, "Choose a smaller JPEG photo.")
+        }
+        store.profile = profile.copy(avatarJpegBase64 = Encoding.base64Url(jpeg))
+        store.save()
+        publish()
+    }
+
+    suspend fun clearAvatar() = onNode {
+        val profile = store.profile ?: return@onNode
+        store.profile = profile.copy(avatarJpegBase64 = null)
+        store.save()
+        publish()
+    }
+
+    /** Adds the signed bundle inside a QR or share card, and keeps the unsigned status and photo for display. */
+    suspend fun addFromShare(text: String): ContactRecord = onNode {
+        val card = ProfileCards.parse(text)
+        val contact = addBundle(card.bundle)
+        val avatar = card.avatarJpeg?.takeIf { it.size in 1..MediaNotes.MAX_AVATAR_BYTES && it.size >= 2 && it[0] == 0xFF.toByte() }
+        store.putContact(contact.copy(about = card.status.trim().take(80), avatarJpegBase64 = avatar?.let(Encoding::base64Url) ?: contact.avatarJpegBase64))
+        store.save()
+        publish()
+        store.contact(contact.directId) ?: contact
     }
 
     suspend fun acceptRequest(peerId: String) = onNode {
@@ -326,7 +389,7 @@ class DirectNode(
         transport?.closeAll()
         keys = identity
         val profile = store.profile ?: return
-        engine = DeliveryEngine(store, { keys?.let { it to profile.deviceId } }, linksProxy, clock, random, ttlMs).also { it.recover() }
+        engine = DeliveryEngine(store, { keys?.let { it to profile.deviceId } }, linksProxy, clock, random, ttlMs, mediaDirectory = mediaDir).also { it.recover() }
         transport = transportFactory(bootstrap, identity.directId, scope).also { it.setListener(listener) }
         bootstrap.announce(identity.directId, Bundles.create(identity, profile.name, profile.deviceId).encode())
         refreshWatch()
@@ -414,6 +477,8 @@ class DirectNode(
             accepted = accepted || existing?.accepted == true,
             blocked = existing?.blocked == true,
             createdAt = existing?.createdAt ?: clock(),
+            about = existing?.about.orEmpty(),
+            avatarJpegBase64 = existing?.avatarJpegBase64,
         )
         store.putContact(contact)
         store.save()
@@ -457,7 +522,7 @@ class DirectNode(
             Conversation(
                 peerId = contact.directId,
                 name = contact.name,
-                lastBody = thread.lastOrNull()?.body,
+                lastBody = thread.lastOrNull()?.let { message -> message.body.ifBlank { MediaNotes.label(message.mediaKind) } },
                 lastAt = thread.lastOrNull()?.createdAt ?: contact.createdAt,
                 unread = thread.count { it.direction == Direction.INCOMING && !it.read },
                 request = !contact.accepted && !contact.blocked,

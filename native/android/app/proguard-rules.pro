@@ -6,5 +6,7 @@
 # kotlinx.serialization for the encrypted local store.
 -keepclassmembers class app.direct.core.store.** { *** Companion; *** serializer(...); }
 -keep,includedescriptorclasses class app.direct.core.store.**$$serializer { *; }
+-keep class com.google.zxing.** { *; }
+-dontwarn com.google.zxing.**
 -dontwarn okhttp3.internal.platform.**
 -dontwarn org.conscrypt.**

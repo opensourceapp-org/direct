@@ -90,6 +90,7 @@ public final class DirectNode {
     private var online = Set<String>()
     private var foreground = true
     private var networkAvailable = true
+    private var mediaDir: URL?
     private var cachedBundle: (key: String, value: String)?
     private lazy var links = Links(node: self)
     private lazy var listener = Listener(node: self)
@@ -117,6 +118,11 @@ public final class DirectNode {
 
     public func start() async {
         guard !state.ready else { return }
+        let parent = storeFile?.deletingLastPathComponent() ?? FileManager.default.temporaryDirectory
+        let stem = storeFile?.deletingPathExtension().lastPathComponent ?? "memory"
+        let directory = parent.appendingPathComponent("direct-media-\(stem)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        mediaDir = directory
         do {
             store = try storeFile.map { try LocalStore.open(file: $0, key: try vault.storageKey()) } ?? LocalStore.inMemory()
         } catch {
@@ -250,6 +256,71 @@ public final class DirectNode {
         return message
     }
 
+    /// Photo, video, GIF, sticker, or voice note. The bytes are sealed and queued on this phone.
+    @discardableResult
+    public func sendMedia(_ peerId: String, kind: String, mime: String, name: String, bytes: Data, caption: String) throws -> MessageRecord {
+        guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
+        guard !contact.blocked else { throw DirectError(.blocked, "This contact is blocked.") }
+        guard contact.accepted else { throw DirectError(.notAccepted, "Accept the message request before replying.") }
+        let message: MessageRecord
+        do {
+            message = try requireEngine().queueMedia(peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+        return message
+    }
+
+    public func readMedia(_ messageId: String) -> Data? {
+        guard let name = store.message(messageId)?.mediaFile, let mediaDir else { return nil }
+        return try? Data(contentsOf: mediaDir.appendingPathComponent(name))
+    }
+
+    public func setStatus(_ text: String) throws {
+        guard var profile = store.profile else { throw DirectError(.noIdentity, "Create your identity first.") }
+        profile.status = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        store.profile = profile
+        try store.save()
+        publish()
+    }
+
+    public func setAvatar(_ jpeg: Data) throws {
+        guard var profile = store.profile else { throw DirectError(.noIdentity, "Create your identity first.") }
+        guard jpeg.count >= 3, jpeg.count <= MediaNotes.maxAvatarBytes, jpeg[0] == 0xFF, jpeg[1] == 0xD8 else {
+            throw DirectError(.rejected, "Choose a smaller JPEG photo.")
+        }
+        profile.avatarJpegBase64 = Encoding.base64Url(jpeg)
+        store.profile = profile
+        try store.save()
+        publish()
+    }
+
+    public func clearAvatar() throws {
+        guard var profile = store.profile else { return }
+        profile.avatarJpegBase64 = nil
+        store.profile = profile
+        try store.save()
+        publish()
+    }
+
+    /// Adds the signed bundle inside a QR or share card, and keeps the unsigned status and photo for display.
+    @discardableResult
+    public func addFromShare(_ text: String) throws -> ContactRecord {
+        let card = ProfileCards.parse(text)
+        let contact = try addContactBundle(card.bundle)
+        var updated = contact
+        updated.about = String(card.status.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        if let avatar = card.avatarJpeg, avatar.count >= 3, avatar.count <= MediaNotes.maxAvatarBytes, avatar[0] == 0xFF, avatar[1] == 0xD8 {
+            updated.avatarJpegBase64 = Encoding.base64Url(avatar)
+        }
+        store.putContact(updated)
+        try store.save()
+        publish()
+        return store.contact(contact.directId) ?? updated
+    }
+
     public func acceptRequest(_ peerId: String) throws {
         guard var contact = store.contact(peerId) else { return }
         contact.accepted = true
@@ -360,7 +431,7 @@ public final class DirectNode {
         engine = DeliveryEngine(
             store: store,
             identity: { [weak self] in self?.keys.map { ($0, deviceId) } },
-            links: links, clock: clock, random: random, ttlMs: ttlMs
+            links: links, clock: clock, random: random, ttlMs: ttlMs, mediaDirectory: mediaDir
         )
         try? engine?.recover()
         let next = transportFactory(bootstrap, identity.directId)
@@ -449,7 +520,9 @@ public final class DirectNode {
             verified: existing?.verified == true && existing?.fingerprint == bundle.fingerprint,
             accepted: accepted || existing?.accepted == true,
             blocked: existing?.blocked == true,
-            createdAt: existing?.createdAt ?? clock()
+            createdAt: existing?.createdAt ?? clock(),
+            about: existing?.about ?? "",
+            avatarJpegBase64: existing?.avatarJpegBase64
         )
         store.putContact(contact)
         try store.save()
@@ -508,7 +581,9 @@ public final class DirectNode {
             return Conversation(
                 peerId: contact.directId,
                 name: contact.name,
-                lastBody: thread.last?.body,
+                lastBody: thread.last.flatMap { message in
+                    message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? MediaNotes.label(message.mediaKind) : message.body
+                },
                 lastAt: thread.last?.createdAt ?? contact.createdAt,
                 unread: thread.filter { $0.direction == .incoming && !$0.read }.count,
                 request: !contact.accepted && !contact.blocked,

@@ -33,6 +33,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>DIRECT uses the camera to scan another phone's profile QR code.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>DIRECT uses the microphone to record a voice message that is sealed on this phone and sent directly to the other phone.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>DIRECT reads a photo, video, or GIF you choose so it can be sealed on this phone and sent directly to the other phone.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>DIRECT connects to the bootstrap server and to other phones on your network to set up direct, end-to-end encrypted chats.</string>
 	<key>UIApplicationSceneManifest</key>

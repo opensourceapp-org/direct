@@ -34,11 +34,13 @@ import app.direct.core.delivery.MessageState
 import app.direct.core.signaling.BootstrapStatus
 
 object Ink {
-    val foreground = Color(0xFF111111)
-    val muted = Color(0xFF6B6B6B)
-    val border = Color(0xFFE6E6E6)
-    val surface = Color(0xFFF7F7F7)
-    val background = Color.White
+    val foreground = Color(0xFF1A1916)
+    val muted = Color(0xFF6E6A62)
+    val border = Color(0xFFE4DFD6)
+    val surface = Color.White
+    val background = Color(0xFFF3F1EC)
+    val accent = Color(0xFF0E6B45)
+    val accentSoft = Color(0xFFE5F2EB)
     val success = Color(0xFF1F7A4D)
     val warning = Color(0xFFB26B00)
     val danger = Color(0xFFB3261E)
@@ -48,7 +50,7 @@ object Ink {
 fun DirectTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
-            primary = Ink.foreground,
+            primary = Ink.accent,
             onPrimary = Color.White,
             background = Ink.background,
             surface = Ink.background,
@@ -77,7 +79,7 @@ fun PrimaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) =
     onClick = onClick,
     enabled = enabled,
     shape = RoundedCornerShape(8.dp),
-    colors = ButtonDefaults.buttonColors(containerColor = Ink.foreground, contentColor = Color.White),
+    colors = ButtonDefaults.buttonColors(containerColor = Ink.accent, contentColor = Color.White, disabledContainerColor = Ink.border, disabledContentColor = Ink.muted),
     modifier = Modifier.fillMaxWidth().height(48.dp),
 ) { Text(label, fontWeight = FontWeight.Medium) }
 

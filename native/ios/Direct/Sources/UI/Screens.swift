@@ -1,8 +1,10 @@
 import DirectCore
+import PhotosUI
 import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @AppStorage("direct.intro.seen") private var introSeen = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -14,6 +16,11 @@ struct RootView: View {
                     Text("Local data is locked").font(.headline)
                     Muted(error)
                 }.padding()
+            } else if model.showIntro || (model.state.profile == nil && !introSeen) {
+                IntroView(creating: model.state.profile == nil) {
+                    introSeen = true
+                    model.showIntro = false
+                }
             } else if model.state.profile == nil {
                 OnboardingView()
             } else {
@@ -121,6 +128,7 @@ struct ChatsView: View {
             ForEach(model.state.conversations) { conversation in
                 NavigationLink(value: conversation.peerId) {
                     HStack {
+                        Avatar(name: conversation.name, jpeg: model.state.contacts.first { $0.directId == conversation.peerId }?.avatarJpegBase64)
                         StatusDot(color: model.state.connected.contains(conversation.peerId) ? Ink.success : model.state.online.contains(conversation.peerId) ? Ink.accent : Ink.muted)
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -174,9 +182,7 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(messages) { message in
-                            Bubble(message: message).id(message.id).onTapGesture {
-                                if message.state == .failed { model.retry(message.id) }
-                            }
+                            MediaBubble(message: message).id(message.id)
                         }
                     }
                     .padding()
@@ -199,15 +205,25 @@ struct ChatView: View {
             } else if contact?.blocked == true {
                 Muted("Blocked. Messages from this DIRECT ID are dropped.").padding()
             } else {
-                HStack(alignment: .bottom) {
-                    Field(placeholder: "Message", text: $draft)
-                    Button {
-                        model.send(peerId, draft)
-                        draft = ""
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill").font(.title)
+                VStack(spacing: 8) {
+                    AttachmentBar(
+                        onPhoto: { model.sendMedia(peerId: peerId, kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0, caption: draft); draft = "" },
+                        onVideo: { model.sendMedia(peerId: peerId, kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0, caption: draft); draft = "" },
+                        onGif: { model.sendMedia(peerId: peerId, kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0, caption: draft); draft = "" },
+                        onSticker: { model.sendMedia(peerId: peerId, kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: ""); draft = "" },
+                        onVoice: { model.sendMedia(peerId: peerId, kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0, caption: draft); draft = "" },
+                        onError: { model.toast = $0 }
+                    )
+                    HStack(alignment: .bottom) {
+                        Field(placeholder: "Message", text: $draft)
+                        Button {
+                            model.send(peerId, draft)
+                            draft = ""
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill").font(.title)
+                        }
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding()
             }
@@ -249,23 +265,34 @@ struct Bubble: View {
 struct ContactsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var input = ""
+    @State private var scanning = false
 
     var body: some View {
         List {
             Section {
+                Button("Scan a QR code") { scanning = true }.tint(Ink.accent)
                 Field(placeholder: "dir_… or a pasted identity bundle", text: $input, monospaced: true)
                 PrimaryButton(title: "Add contact", enabled: !input.isEmpty) {
-                    model.addContact(input) { input = "" }
+                    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.hasPrefix("{") {
+                        model.addFromShare(trimmed) { input = "" }
+                    } else {
+                        model.addContact(trimmed) { input = "" }
+                    }
                 }
-                Muted("A DIRECT ID is looked up on the bootstrap, so the other phone must be open with the same bootstrap address. A pasted bundle works with no bootstrap at all.")
+                Muted("A DIRECT ID is looked up on the bootstrap, so the other phone must be open with the same bootstrap address. A QR code or pasted card works with no bootstrap at all.")
             }
             .listRowBackground(Ink.surface)
             Section("Contacts") {
                 ForEach(model.state.contacts) { contact in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
+                            Avatar(name: contact.name, jpeg: contact.avatarJpegBase64)
                             StatusDot(color: model.state.online.contains(contact.directId) ? Ink.success : Ink.muted)
-                            Text(contact.name).font(.headline)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(contact.name).font(.headline)
+                                if !contact.about.isEmpty { Text(contact.about).font(.caption).foregroundStyle(Ink.muted) }
+                            }
                             if contact.verified { Image(systemName: "checkmark.seal.fill").foregroundStyle(Ink.success) }
                             if contact.blocked { Text("Blocked").font(.caption).foregroundStyle(Ink.danger) }
                             if !contact.accepted { Text("Request").font(.caption).foregroundStyle(Ink.warning) }
@@ -283,6 +310,18 @@ struct ContactsView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle("Contacts")
+        .sheet(isPresented: $scanning) {
+            NavigationStack {
+                QrScannerView { text in
+                    scanning = false
+                    model.addFromShare(text)
+                }
+                .ignoresSafeArea()
+                .navigationTitle("Scan QR")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { scanning = false } } }
+            }
+        }
     }
 }
 
@@ -315,20 +354,59 @@ struct NetworkView: View {
 
 struct IdentityView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var status = ""
+    @State private var photoItem: PhotosPickerItem?
+    @State private var showQr = false
+    @State private var share = false
 
     var body: some View {
         List {
             if let profile = model.state.profile {
                 Section {
+                    HStack(spacing: 16) {
+                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64)
+                        VStack(alignment: .leading, spacing: 8) {
+                            PhotosPicker(selection: $photoItem, matching: .images) {
+                                Text("Profile photo").foregroundStyle(Ink.accent)
+                            }
+                            if profile.avatarJpegBase64 != nil {
+                                Button("Remove photo") { model.clearAvatar() }.foregroundStyle(Ink.danger)
+                            }
+                        }
+                    }
+                    TextField("Status", text: $status)
+                    Button("Save status") { model.setStatus(status) }.tint(Ink.accent)
                     Text(profile.name).font(.title3.bold())
                     Text(profile.directId).font(.system(.body, design: .monospaced)).textSelection(.enabled)
                     Button("Copy DIRECT ID") { model.copy(profile.directId, label: "DIRECT ID") }.tint(Ink.accent)
                     if let bundle = model.state.bundle {
+                        let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
+                        Button(showQr ? "Hide QR code" : "Show QR code") { showQr.toggle() }.tint(Ink.accent)
+                        if showQr, let image = MediaPrep.qrImage(card) {
+                            Image(uiImage: image).interpolation(.none).resizable().scaledToFit().frame(maxWidth: 240)
+                            Muted("The QR code is your signed identity, plus the status and a small photo. The status and photo are for display. They are not part of the signature.")
+                        }
+                        Button("Share profile") { share = true }.tint(Ink.accent)
                         Button("Copy identity bundle") { model.copy(bundle, label: "Identity bundle") }.tint(Ink.accent)
-                        Muted("The bundle holds only public keys. Share it to add each other without a bootstrap.")
+                        Muted("Share sends the same card as the QR code, as text another DIRECT phone can add.")
                     }
+                    Button("How DIRECT works") { model.showIntro = true }.tint(Ink.accent)
                 }
                 .listRowBackground(Ink.surface)
+                .onAppear { status = profile.status }
+                .onChange(of: profile.status) { status = $0 }
+                .onChange(of: photoItem) { item in
+                    Task {
+                        guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                        do { model.setAvatar(try MediaPrep.avatar(data)) } catch { model.toast = (error as? PrepError)?.message ?? "That photo could not be used." }
+                    }
+                }
+                .sheet(isPresented: $share) {
+                    if let bundle = model.state.bundle {
+                        let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
+                        ShareSheet(items: [card])
+                    }
+                }
                 Section("Recovery") {
                     Button("Show recovery phrase") { model.showPhrase() }.tint(Ink.warning)
                     Muted("The private key never leaves this phone's Keychain. The phrase is the only backup.")

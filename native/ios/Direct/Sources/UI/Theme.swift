@@ -1,5 +1,6 @@
 import DirectCore
 import SwiftUI
+import UIKit
 
 enum Ink {
     static let background = Color(red: 0.04, green: 0.05, blue: 0.07)
@@ -78,6 +79,26 @@ struct Field: View {
             .padding(12)
             .background(Ink.background, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Ink.line))
+    }
+}
+
+struct Avatar: View {
+    let name: String
+    let jpeg: String?
+
+    var body: some View {
+        Group {
+            if let data = jpeg.flatMap({ Encoding.fromBase64Url($0) }), let image = UIImage(data: data) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Text(String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
+                    .font(.headline)
+                    .foregroundStyle(Ink.accent)
+            }
+        }
+        .frame(width: 44, height: 44)
+        .background(Ink.accent.opacity(0.18))
+        .clipShape(Circle())
     }
 }
 

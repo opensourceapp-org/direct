@@ -87,6 +87,9 @@ This repository's CI environment can compile the Android debug APK and run the K
 
 ## Limits
 
+- Photos, video, GIFs, stickers, and voice notes are sealed in the same envelopes as text, in chunks, up to 6 MB. The bootstrap never sees those bytes. Video is not transcoded: a file over 6 MB is refused.
+- A QR code or the share button carries the signed identity bundle plus an optional status and a small photo. The status and photo are display-only. They are not part of the signature. Scanning one adds the contact without a bootstrap lookup.
+- The first launch shows a short explanation of how two phones talk. It is not shown again after the person finishes it.
 - The seal is one-shot X25519 + HKDF-SHA256 + AES-256-GCM. It is not the Signal Double Ratchet.
 - The local store is one encrypted snapshot file, not a SQL database.
 - Writing to the data channel is Sent. Delivered requires the recipient's signed `ack`.

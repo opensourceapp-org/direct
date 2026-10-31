@@ -35,6 +35,9 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIBackgroundModes: [fetch]
         BGTaskSchedulerPermittedIdentifiers: [app.direct.messaging.delivery]
+        NSCameraUsageDescription: DIRECT uses the camera to scan another phone's profile QR code.
+        NSMicrophoneUsageDescription: DIRECT uses the microphone to record a voice message that is sealed on this phone and sent directly to the other phone.
+        NSPhotoLibraryUsageDescription: DIRECT reads a photo, video, or GIF you choose so it can be sealed on this phone and sent directly to the other phone.
         NSLocalNetworkUsageDescription: DIRECT connects to the bootstrap server and to other phones on your network to set up direct, end-to-end encrypted chats.
         NSAppTransportSecurity:
           # The bootstrap is often ws://<LAN IP>:8787 during development. Use wss:// in production

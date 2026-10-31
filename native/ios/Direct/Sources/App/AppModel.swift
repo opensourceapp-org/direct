@@ -8,6 +8,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var state = NodeState()
     @Published var toast: String?
     @Published var newPhrase: String?
+    @Published var showIntro = false
 
     private var started = false
 
@@ -78,6 +79,25 @@ final class AppModel: ObservableObject {
     }
 
     func send(_ peerId: String, _ body: String) { run { try $0.send(peerId, body) } }
+
+    func sendMedia(peerId: String, kind: String, mime: String, name: String, bytes: Data, caption: String) {
+        run { try $0.sendMedia(peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption) }
+    }
+
+    func setStatus(_ text: String) { run { try $0.setStatus(text) } }
+    func setAvatar(_ jpeg: Data) { run { try $0.setAvatar(jpeg) } }
+    func clearAvatar() { run { try $0.clearAvatar() } }
+
+    func addFromShare(_ text: String, done: @escaping @MainActor () -> Void = {}) {
+        run { _ = try $0.addFromShare(text); await MainActor.run { done() } }
+    }
+
+    func loadMedia(_ id: String, done: @escaping @MainActor (Data?) -> Void) {
+        Task { @DirectActor in
+            let data = Runtime.shared.node.readMedia(id)
+            await MainActor.run { done(data) }
+        }
+    }
     func open(_ peerId: String) { run { try $0.openConversation(peerId) } }
     func retry(_ messageId: String) { run { try $0.retry(messageId) } }
     func accept(_ peerId: String) { run { try $0.acceptRequest(peerId) } }
