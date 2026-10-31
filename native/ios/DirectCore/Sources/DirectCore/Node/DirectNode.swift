@@ -1,0 +1,533 @@
+import Foundation
+
+public struct DirectError: Error, Equatable, CustomStringConvertible {
+    public enum Reason: String {
+        case noIdentity, invalidId, selfId, noBootstrap, bootstrapOffline, notFound, badBundle, notAccepted, blocked, rejected, invalidBootstrap, storage
+    }
+
+    public let reason: Reason
+    public let message: String
+
+    public init(_ reason: Reason, _ message: String) {
+        self.reason = reason
+        self.message = message
+    }
+
+    public var description: String { message }
+}
+
+public struct Conversation: Equatable, Identifiable {
+    public let peerId: String
+    public let name: String
+    public let lastBody: String?
+    public let lastAt: Int64
+    public let unread: Int
+    /// An unknown sender's message waiting for Accept or Decline.
+    public let request: Bool
+    public let blocked: Bool
+
+    public var id: String { peerId }
+}
+
+public struct NodeState: Equatable {
+    public var ready = false
+    public var profile: Profile?
+    public var bundle: String?
+    public var bootstrapUrl: String?
+    public var bootstrap = BootstrapStatus(phase: .notConfigured, url: nil)
+    public var contacts: [ContactRecord] = []
+    public var conversations: [Conversation] = []
+    public var messages: [String: [MessageRecord]] = [:]
+    public var online: Set<String> = []
+    public var connected: Set<String> = []
+    public var pending = 0
+    public var foreground = true
+    public var networkAvailable = true
+    public var storageError: String?
+
+    public init() {}
+}
+
+/// Everything DIRECT does on one device, with no UI and no platform types.
+/// iOS supplies the Keychain secret store, the URLSession WebSocket, and the WebRTC transport.
+@DirectActor
+public final class DirectNode {
+    public typealias TransportFactory = @DirectActor (BootstrapClient, String) -> PeerTransport
+
+    public struct Timing {
+        public var connectWaitMs: Int64 = 3_000
+        public var lookupRetryMs: Int64 = 2_500
+        public var idleWakeMs: Int64 = 30_000
+        public var minWakeMs: Int64 = 50
+        public var bootstrap = BootstrapClient.Timing()
+        public init() {}
+    }
+
+    public private(set) var state = NodeState() {
+        didSet { if state != oldValue { onState?(state) } }
+    }
+
+    /// Called on `DirectActor` after every change. The UI hops to the main actor.
+    public var onState: ((NodeState) -> Void)?
+
+    private let secrets: SecretStore
+    private let storeFile: URL?
+    private let transportFactory: TransportFactory
+    private let clock: () -> Int64
+    private let random: () -> Double
+    private let ttlMs: Int64
+    private let timing: Timing
+    private let vault: IdentityVault
+    private let bootstrap: BootstrapClient
+    private let wake = WakeSignal()
+
+    private var store = LocalStore.inMemory()
+    private var keys: IdentityKeys?
+    private var engine: DeliveryEngine?
+    private var transport: PeerTransport?
+    private var loop: Task<Void, Never>?
+    private var closed = false
+    private var online = Set<String>()
+    private var foreground = true
+    private var networkAvailable = true
+    private var cachedBundle: (key: String, value: String)?
+    private lazy var links = Links(node: self)
+    private lazy var listener = Listener(node: self)
+
+    public init(
+        secrets: SecretStore,
+        storeFile: URL?,
+        sockets: WebSocketFactory,
+        transportFactory: @escaping TransportFactory,
+        clock: @escaping () -> Int64 = wallClockMs,
+        random: @escaping () -> Double = { Double.random(in: 0..<1) },
+        ttlMs: Int64 = DeliveryEngine.defaultTtlMs,
+        timing: Timing = Timing()
+    ) {
+        self.secrets = secrets
+        self.storeFile = storeFile
+        self.transportFactory = transportFactory
+        self.clock = clock
+        self.random = random
+        self.ttlMs = ttlMs
+        self.timing = timing
+        vault = IdentityVault(secrets)
+        bootstrap = BootstrapClient(sockets: sockets, timing: timing.bootstrap)
+    }
+
+    public func start() async {
+        guard !state.ready else { return }
+        do {
+            store = try storeFile.map { try LocalStore.open(file: $0, key: try vault.storageKey()) } ?? LocalStore.inMemory()
+        } catch {
+            state.ready = true
+            state.storageError = "The local store could not be opened with this device's key. Nothing was erased."
+            return
+        }
+        if let loaded = try? vault.load(), let profile = store.profile, profile.directId == loaded.directId {
+            activate(loaded)
+        }
+        bootstrap.addStatusHandler { [weak self] status in
+            if status.isOpen { self?.wake.fire() }
+            self?.publish()
+        }
+        bootstrap.onPresence = { [weak self] id, isOnline in self?.presence(id, isOnline) }
+        bootstrap.configure(store.settings.bootstrapUrl)
+        bootstrap.start()
+        state.ready = true
+        loop = Task { @DirectActor [weak self] in await self?.runLoop() }
+        publish()
+    }
+
+    /// Creates a new identity, stores the seed in the Keychain, and returns the recovery phrase.
+    public func createIdentity(_ displayName: String) throws -> String {
+        let name = try cleanName(displayName)
+        let (created, phrase) = try vault.create()
+        store.profile = Profile(name: name, deviceId: Encoding.newDeviceId(), directId: created.directId)
+        try store.save()
+        activate(created)
+        publish()
+        return phrase
+    }
+
+    public func restoreIdentity(_ phrase: String, displayName: String) throws {
+        let name = try cleanName(displayName)
+        let restored: IdentityKeys
+        do {
+            restored = try vault.restore(phrase)
+        } catch let error as IdentityError {
+            throw DirectError(.rejected, error.message)
+        }
+        store.profile = Profile(name: name, deviceId: Encoding.newDeviceId(), directId: restored.directId)
+        try store.save()
+        activate(restored)
+        publish()
+    }
+
+    public func recoveryPhrase() throws -> String? { try vault.recoveryPhrase() }
+
+    /// Normalizes and saves the bootstrap address. Both phones must end up with the same value.
+    @discardableResult
+    public func setBootstrap(_ input: String) throws -> String {
+        switch BootstrapUrl.normalize(input) {
+        case let .failure(error):
+            throw DirectError(.invalidBootstrap, error.message)
+        case let .success(url):
+            store.settings.bootstrapUrl = url
+            try store.save()
+            bootstrap.configure(url)
+            publish()
+            return url
+        }
+    }
+
+    @discardableResult
+    public func addContact(_ input: String) async throws -> ContactRecord {
+        guard let me = keys else { throw DirectError(.noIdentity, "Create your identity first.") }
+        guard let directId = DirectIds.normalize(input) else {
+            throw DirectError(.invalidId, "A DIRECT ID looks like dir_ followed by 16 letters and numbers.")
+        }
+        guard directId != me.directId else { throw DirectError(.selfId, "This DIRECT ID belongs to this phone.") }
+        if var existing = store.contact(directId) {
+            existing.accepted = true
+            existing.blocked = false
+            store.putContact(existing)
+            try store.save()
+            refreshWatch()
+            publish()
+            return existing
+        }
+        guard let url = bootstrap.url else {
+            throw DirectError(.noBootstrap, "Set the bootstrap first. Use the same address on both phones, such as ws://192.168.1.20:8787, while the signaling server is running.")
+        }
+        if !bootstrap.status.isOpen {
+            bootstrap.reconnectNow()
+            _ = await bootstrap.waitUntilOpen(timeoutMs: timing.connectWaitMs)
+        }
+        guard bootstrap.status.isOpen else {
+            throw DirectError(.bootstrapOffline, "This phone is not connected to the bootstrap at \(url). Check that the signaling server is running and that both phones use this address.")
+        }
+        var published: String?
+        let deadline = clock() + timing.lookupRetryMs
+        while published == nil {
+            published = await bootstrap.lookup(directId)
+            if published != nil || clock() >= deadline || !bootstrap.status.isOpen { break }
+            await sleepMs(300)
+        }
+        guard let published else {
+            throw DirectError(.notFound, "No phone on \(url) is publishing \(directId). Open DIRECT on the other phone with this same bootstrap address.")
+        }
+        return try saveContact(try verifiedBundle(published, expected: directId), accepted: true)
+    }
+
+    /// Adds a contact from the bundle in their QR code, with no bootstrap involved.
+    @discardableResult
+    public func addContactBundle(_ serialized: String) throws -> ContactRecord {
+        guard let me = keys else { throw DirectError(.noIdentity, "Create your identity first.") }
+        let bundle: PublicBundle
+        do {
+            bundle = try Bundles.parse(serialized)
+        } catch {
+            throw DirectError(.badBundle, (error as? IdentityError)?.message ?? "That identity bundle could not be verified.")
+        }
+        guard bundle.directId != me.directId else { throw DirectError(.selfId, "This DIRECT ID belongs to this phone.") }
+        return try saveContact(bundle, accepted: true)
+    }
+
+    @discardableResult
+    public func send(_ peerId: String, _ body: String) throws -> MessageRecord {
+        guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
+        guard !contact.blocked else { throw DirectError(.blocked, "This contact is blocked.") }
+        guard contact.accepted else { throw DirectError(.notAccepted, "Accept the message request before replying.") }
+        let message: MessageRecord
+        do {
+            message = try requireEngine().queueText(peerId, body)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+        return message
+    }
+
+    public func acceptRequest(_ peerId: String) throws {
+        guard var contact = store.contact(peerId) else { return }
+        contact.accepted = true
+        contact.blocked = false
+        store.putContact(contact)
+        try store.save()
+        try requireEngine().markRead(peerId)
+        refreshWatch()
+        publish()
+        wake.fire()
+    }
+
+    /// Declining blocks the sender. Later envelopes from that DIRECT ID are dropped unread.
+    public func declineRequest(_ peerId: String) throws { try block(peerId) }
+
+    public func block(_ peerId: String) throws {
+        guard var contact = store.contact(peerId) else { return }
+        contact.blocked = true
+        store.putContact(contact)
+        try store.save()
+        try engine?.rejectPeer(peerId)
+        transport?.close(peerId)
+        refreshWatch()
+        publish()
+    }
+
+    public func removeContact(_ peerId: String) throws {
+        try engine?.rejectPeer(peerId)
+        store.removeContact(peerId)
+        try store.save()
+        transport?.close(peerId)
+        refreshWatch()
+        publish()
+    }
+
+    public func setVerified(_ peerId: String, _ verified: Bool) throws {
+        guard var contact = store.contact(peerId) else { return }
+        contact.verified = verified
+        store.putContact(contact)
+        try store.save()
+        publish()
+    }
+
+    /// Opening an accepted conversation sends read receipts, which move the sender to acknowledged.
+    public func openConversation(_ peerId: String) throws {
+        if try requireEngine().markRead(peerId) > 0 { wake.fire() }
+        publish()
+    }
+
+    public func retry(_ messageId: String) throws {
+        if try requireEngine().retry(messageId) { wake.fire() }
+        publish()
+    }
+
+    public func onForeground() {
+        foreground = true
+        if !bootstrap.status.isOpen { bootstrap.reconnectNow() }
+        publish()
+        wake.fire()
+    }
+
+    public func onBackground() {
+        foreground = false
+        try? store.save()
+        publish()
+    }
+
+    public func onNetworkAvailable() {
+        networkAvailable = true
+        bootstrap.reconnectNow()
+        publish()
+        wake.fire()
+    }
+
+    public func onNetworkLost() {
+        networkAvailable = false
+        publish()
+    }
+
+    /// One bounded delivery pass for a background task (BGTaskScheduler or WorkManager).
+    /// Waits for the bootstrap, flushes, then waits for receipts until `budgetMs` runs out.
+    /// Returns the number of messages still waiting for a receipt.
+    public func backgroundFlush(budgetMs: Int64) async -> Int {
+        await start()
+        let until = clock() + budgetMs
+        _ = await bootstrap.waitUntilOpen(timeoutMs: budgetMs / 3)
+        try? await engine?.flush()
+        publish()
+        while clock() < until, engine?.awaitingReceipt() == true { await sleepMs(500) }
+        try? store.save()
+        return engine?.pendingCount() ?? 0
+    }
+
+    public func close() {
+        closed = true
+        loop?.cancel()
+        wake.fire()
+        transport?.closeAll()
+        bootstrap.stop()
+        try? store.save()
+    }
+
+    private func activate(_ identity: IdentityKeys) {
+        transport?.closeAll()
+        keys = identity
+        guard let profile = store.profile else { return }
+        let deviceId = profile.deviceId
+        engine = DeliveryEngine(
+            store: store,
+            identity: { [weak self] in self?.keys.map { ($0, deviceId) } },
+            links: links, clock: clock, random: random, ttlMs: ttlMs
+        )
+        try? engine?.recover()
+        let next = transportFactory(bootstrap, identity.directId)
+        next.setListener(listener)
+        transport = next
+        if let bundle = currentBundle() { bootstrap.announce(directId: identity.directId, bundle: bundle) }
+        refreshWatch()
+        wake.fire()
+    }
+
+    private final class Links: PeerLinks {
+        weak var node: DirectNode?
+        init(node: DirectNode) { self.node = node }
+
+        func isConnected(_ peerId: String) -> Bool { node?.transport?.isConnected(peerId) == true }
+
+        func connect(_ peerId: String) async -> Bool {
+            guard let node, node.networkAvailable, let transport = node.transport else { return false }
+            if !node.bootstrap.status.isOpen, !transport.isConnected(peerId) { return false }
+            return await transport.connect(peerId)
+        }
+
+        func send(_ peerId: String, _ payload: Data) async -> Bool {
+            await node?.transport?.send(peerId, payload) == true
+        }
+    }
+
+    private final class Listener: PeerListener {
+        weak var node: DirectNode?
+        init(node: DirectNode) { self.node = node }
+
+        func onPeerConnected(_ peerId: String) { node?.presence(peerId, true) }
+
+        func onPeerData(_ peerId: String, _ payload: Data) {
+            Task { @DirectActor [weak node] in await node?.incoming(peerId, payload) }
+        }
+
+        func onPeerClosed(_ peerId: String) { node?.publish() }
+    }
+
+    private func incoming(_ peerId: String, _ payload: Data) async {
+        guard let me = keys, let header = Envelopes.peek(payload), header.from == peerId, header.to == me.directId else { return }
+        if store.contact(peerId) == nil {
+            // Unknown sender: they are online right now, so their signed bundle is on the bootstrap.
+            // Store the message as a request. If the lookup fails, no ack is sent and the sender retries.
+            guard let published = await bootstrap.lookup(peerId), let bundle = try? verifiedBundle(published, expected: peerId) else { return }
+            if store.contact(peerId) == nil { _ = try? saveContact(bundle, accepted: false) }
+        }
+        _ = try? requireEngine().receive(peerId, payload)
+        publish()
+        wake.fire()
+    }
+
+    private func presence(_ peerId: String, _ isOnline: Bool) {
+        if isOnline {
+            online.insert(peerId)
+            try? engine?.peerOnline(peerId)
+            wake.fire()
+        } else {
+            online.remove(peerId)
+        }
+        publish()
+    }
+
+    private func runLoop() async {
+        while !closed, !Task.isCancelled {
+            try? await engine?.flush()
+            publish()
+            let wait: Int64
+            if let next = engine?.nextWakeAt() {
+                wait = min(max(next - clock(), timing.minWakeMs), timing.idleWakeMs)
+            } else {
+                wait = timing.idleWakeMs
+            }
+            await wake.wait(timeoutMs: wait)
+        }
+    }
+
+    private func saveContact(_ bundle: PublicBundle, accepted: Bool) throws -> ContactRecord {
+        let existing = store.contact(bundle.directId)
+        let contact = ContactRecord(
+            directId: bundle.directId,
+            name: bundle.name.isEmpty ? bundle.directId : bundle.name,
+            bundle: bundle.encode(),
+            fingerprint: bundle.fingerprint,
+            verified: existing?.verified == true && existing?.fingerprint == bundle.fingerprint,
+            accepted: accepted || existing?.accepted == true,
+            blocked: existing?.blocked == true,
+            createdAt: existing?.createdAt ?? clock()
+        )
+        store.putContact(contact)
+        try store.save()
+        refreshWatch()
+        publish()
+        return contact
+    }
+
+    private func verifiedBundle(_ serialized: String, expected: String) throws -> PublicBundle {
+        let bundle: PublicBundle
+        do {
+            bundle = try Bundles.parse(serialized)
+        } catch {
+            throw DirectError(.badBundle, (error as? IdentityError)?.message ?? "That identity bundle could not be verified.")
+        }
+        guard bundle.directId == expected else { throw DirectError(.badBundle, "The bootstrap returned a bundle for a different DIRECT ID.") }
+        return bundle
+    }
+
+    private func refreshWatch() {
+        bootstrap.watch(store.contacts().filter { !$0.blocked }.map(\.directId))
+    }
+
+    private func requireEngine() throws -> DeliveryEngine {
+        guard let engine else { throw DirectError(.noIdentity, "Create your identity first.") }
+        return engine
+    }
+
+    private func cleanName(_ displayName: String) throws -> String {
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw DirectError(.rejected, "Enter a display name.") }
+        guard name.utf16.count <= Bundles.maxNameUtf16 else { throw DirectError(.rejected, "Use 32 characters or fewer.") }
+        return name
+    }
+
+    /// CryptoKit Ed25519 signatures are randomized, so the bundle is signed once per profile.
+    private func currentBundle() -> String? {
+        guard let identity = keys, let profile = store.profile else { return nil }
+        let key = "\(identity.directId)|\(profile.name)|\(profile.deviceId)"
+        if let cachedBundle, cachedBundle.key == key { return cachedBundle.value }
+        guard let encoded = try? Bundles.create(keys: identity, displayName: profile.name, deviceId: profile.deviceId).encode() else { return nil }
+        cachedBundle = (key, encoded)
+        return encoded
+    }
+
+    private func publish() {
+        let identity = keys
+        let contacts = store.contacts()
+        var byPeer: [String: [MessageRecord]] = [:]
+        for message in store.messages() { byPeer[message.peerId, default: []].append(message) }
+        for (peer, list) in byPeer { byPeer[peer] = list.sorted { $0.createdAt < $1.createdAt } }
+        let conversations = contacts.compactMap { contact -> Conversation? in
+            let thread = byPeer[contact.directId] ?? []
+            if contact.blocked && !contact.accepted { return nil }
+            if thread.isEmpty && !contact.accepted { return nil }
+            return Conversation(
+                peerId: contact.directId,
+                name: contact.name,
+                lastBody: thread.last?.body,
+                lastAt: thread.last?.createdAt ?? contact.createdAt,
+                unread: thread.filter { $0.direction == .incoming && !$0.read }.count,
+                request: !contact.accepted && !contact.blocked,
+                blocked: contact.blocked
+            )
+        }.sorted { $0.lastAt > $1.lastAt }
+        var next = state
+        next.profile = identity != nil ? store.profile : nil
+        next.bundle = identity != nil ? currentBundle() : nil
+        next.bootstrapUrl = store.settings.bootstrapUrl
+        next.bootstrap = bootstrap.status
+        next.contacts = contacts.sorted { $0.name.lowercased() < $1.name.lowercased() }
+        next.conversations = conversations
+        next.messages = byPeer
+        next.online = online
+        next.connected = transport?.connectedPeers() ?? []
+        next.pending = engine?.pendingCount() ?? 0
+        next.foreground = foreground
+        next.networkAvailable = networkAvailable
+        state = next
+    }
+}
