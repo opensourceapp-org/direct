@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A bootstrap on your own network is usually ws://<computer>:8787, which is cleartext.
+    It only carries public bundles, presence, and WebRTC negotiation. Message envelopes are
+    sealed and travel over the DTLS-encrypted data channel, never over this socket.
+    For a bootstrap on the internet, use wss:// and this exception is not used.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
