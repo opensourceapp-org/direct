@@ -112,7 +112,7 @@ final class WebRTCTransport: PeerTransport {
         case let .ice(_, from, candidate, sdpMid, sdpMLineIndex):
             guard let session = sessions[from] else { return }
             let ice = RTCIceCandidate(sdp: candidate, sdpMLineIndex: Int32(sdpMLineIndex ?? 0), sdpMid: sdpMid ?? "0")
-            if session.remoteReady { session.connection?.addIceCandidate(ice) { _ in } } else { session.pendingIce.append(ice) }
+            if session.remoteReady { session.connection?.add(ice) { _ in } } else { session.pendingIce.append(ice) }
         default:
             break
         }
@@ -138,7 +138,7 @@ final class WebRTCTransport: PeerTransport {
     }
 
     private func drainIce(_ session: Session) {
-        session.pendingIce.forEach { session.connection?.addIceCandidate($0) { _ in } }
+        session.pendingIce.forEach { session.connection?.add($0) { _ in } }
         session.pendingIce.removeAll()
     }
 
