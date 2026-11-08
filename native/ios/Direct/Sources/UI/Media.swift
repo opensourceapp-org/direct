@@ -131,6 +131,83 @@ enum MediaPrep {
         return withPhoto
     }
 
+    /// Words a person can read. The signed bundle stays inside the QR image.
+    static func profileShareCaption(name: String, status: String, directId: String) -> String {
+        var lines = [name]
+        let about = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !about.isEmpty { lines.append(about) }
+        lines.append("DIRECT ID: \(directId)")
+        lines.append("Scan the QR code in DIRECT to add this phone.")
+        return lines.joined(separator: "\n")
+    }
+
+    /// A picture of the QR code with the name, status, and DIRECT ID written beside it.
+    static func profileCardImage(name: String, status: String, directId: String, qrText: String) -> UIImage? {
+        guard let qr = qrImage(qrText) else { return nil }
+        let width: CGFloat = 900
+        let margin: CGFloat = 64
+        let contentWidth = width - margin * 2
+        let nameFont = UIFont.systemFont(ofSize: 44, weight: .bold)
+        let statusFont = UIFont.systemFont(ofSize: 28, weight: .regular)
+        let labelFont = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        let idFont = UIFont.monospacedSystemFont(ofSize: 22, weight: .regular)
+        let footerFont = UIFont.systemFont(ofSize: 22, weight: .regular)
+        let about = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        let footer = "Scan this code in DIRECT to add this phone."
+
+        func blockHeight(_ text: String, font: UIFont) -> CGFloat {
+            ceil((text as NSString).boundingRect(
+                with: CGSize(width: contentWidth, height: 800),
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: [.font: font],
+                context: nil
+            ).height)
+        }
+
+        let nameHeight = blockHeight(name, font: nameFont)
+        let statusHeight = about.isEmpty ? 0 : blockHeight(about, font: statusFont)
+        let idHeight = blockHeight(directId, font: idFont)
+        let footerHeight = blockHeight(footer, font: footerFont)
+        let qrSize: CGFloat = 620
+        var canvasHeight = margin + nameHeight + 16
+        if !about.isEmpty { canvasHeight += statusHeight + 20 }
+        canvasHeight += 28 + 8 + idHeight + 36 + qrSize + 28 + footerHeight + margin
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: canvasHeight), format: format)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byWordWrapping
+        return renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: canvasHeight))
+            var y = margin
+            func draw(_ text: String, font: UIFont, color: UIColor, box: CGFloat) {
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: font,
+                    .foregroundColor: color,
+                    .paragraphStyle: paragraph,
+                ]
+                (text as NSString).draw(in: CGRect(x: margin, y: y, width: contentWidth, height: box), withAttributes: attributes)
+            }
+            draw(name, font: nameFont, color: .black, box: nameHeight)
+            y += nameHeight + 16
+            if !about.isEmpty {
+                draw(about, font: statusFont, color: UIColor(white: 0.35, alpha: 1), box: statusHeight)
+                y += statusHeight + 20
+            }
+            draw("DIRECT ID", font: labelFont, color: UIColor(white: 0.45, alpha: 1), box: 28)
+            y += 28 + 8
+            draw(directId, font: idFont, color: .black, box: idHeight)
+            y += idHeight + 36
+            qr.draw(in: CGRect(x: (width - qrSize) / 2, y: y, width: qrSize, height: qrSize))
+            y += qrSize + 28
+            draw(footer, font: footerFont, color: UIColor(white: 0.35, alpha: 1), box: footerHeight)
+        }
+    }
+
     static func qrImage(_ text: String) -> UIImage? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(text.utf8)

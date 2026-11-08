@@ -154,7 +154,7 @@ object MediaNotes {
     private fun JsonObject.int(name: String): Int? = (this[name] as? JsonPrimitive)?.intOrNull
 }
 
-/** What a QR code or the share sheet carries: the signed bundle, plus an optional status and photo. */
+/** What a QR code carries: the signed bundle, plus an optional status and photo. The share sheet sends a picture of that code, not this JSON as the message. */
 object ProfileCards {
     data class Card(val bundle: String, val status: String, val avatarJpeg: ByteArray?)
 

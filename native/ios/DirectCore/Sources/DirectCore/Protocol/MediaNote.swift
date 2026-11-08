@@ -154,7 +154,8 @@ public enum MediaNotes {
     }
 }
 
-/// What a QR code or the share sheet carries: the signed bundle, plus an optional status and photo.
+/// What a QR code carries: the signed bundle, plus an optional status and photo.
+/// The share sheet sends a picture of that code, not this JSON as the message.
 public enum ProfileCards {
     public struct Card: Equatable, Sendable {
         public var bundle: String

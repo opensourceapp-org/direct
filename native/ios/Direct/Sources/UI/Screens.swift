@@ -495,7 +495,7 @@ struct IdentityView: View {
                             actionLabel("Copy identity bundle", icon: "doc.on.doc", tint: Ink.accent)
                         }
                         .buttonStyle(.plain)
-                        Muted("Share sends the same card as the QR code, as text another DIRECT phone can add.")
+                        Muted("Share sends a picture of your QR code, with your name, status, and DIRECT ID. The signed identity stays inside the code.")
                     } header: {
                         Text("Share")
                     }
@@ -534,7 +534,12 @@ struct IdentityView: View {
         .sheet(isPresented: $share) {
             if let profile = model.state.profile, let bundle = model.state.bundle {
                 let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
-                ShareSheet(items: [card])
+                let caption = MediaPrep.profileShareCaption(name: profile.name, status: profile.status, directId: profile.directId)
+                if let image = MediaPrep.profileCardImage(name: profile.name, status: profile.status, directId: profile.directId, qrText: card) {
+                    ShareSheet(items: [image, caption])
+                } else {
+                    ShareSheet(items: [caption])
+                }
             }
         }
     }

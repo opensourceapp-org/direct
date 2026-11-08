@@ -436,10 +436,8 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                         }
                     }
                 }
-                SecondaryButton("Share profile") {
-                    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, card)
-                    context.startActivity(Intent.createChooser(send, "Share profile"))
-                }
+                SecondaryButton("Share profile") { shareProfile(context, profile, card) }
+                Muted("Share sends a picture of your QR code, with your name, status, and DIRECT ID. The signed identity stays inside the code.")
             }
             state.bundle?.let { raw -> SecondaryButton("Copy identity bundle") { copy(context, "DIRECT bundle", raw) } }
             SecondaryButton("How DIRECT works") { onHowItWorks() }
