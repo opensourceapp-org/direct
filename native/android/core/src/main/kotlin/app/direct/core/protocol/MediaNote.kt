@@ -3,6 +3,7 @@ package app.direct.core.protocol
 import app.direct.core.Encoding
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -188,18 +189,61 @@ object ProfileCards {
         return Card(trimmed, "", null)
     }
 
-    private fun quote(value: String): String = buildString {
-        append('"')
-        for (char in value) {
-            when (char) {
-                '"' -> append("\\\"")
-                '\\' -> append("\\\\")
-                '\n' -> append("\\n")
-                '\r' -> append("\\r")
-                '\t' -> append("\\t")
-                else -> if (char.code < 0x20) append("\\u%04x".format(char.code)) else append(char)
-            }
+    private fun quote(value: String): String = quoteJson(value)
+}
+
+/**
+ * The display photo and status sealed to a contact. The bootstrap never sees this.
+ * `avatar` null clears the photo. A missing `avatar` leaves the saved photo alone.
+ */
+object ProfileNotes {
+    data class Note(val status: String, val avatarJpeg: ByteArray?, val clearAvatar: Boolean)
+
+    fun encode(status: String, avatarJpeg: ByteArray?): String {
+        val avatar = avatarJpeg?.takeIf { it.size in 3..MediaNotes.MAX_AVATAR_BYTES && it[0] == 0xFF.toByte() && it[1] == 0xD8.toByte() }
+            ?.let(Encoding::base64Url)
+        return buildString {
+            append("{\"v\":1,\"status\":").append(quoteJson(status.trim().take(80)))
+            append(",\"avatar\":")
+            if (avatar == null) append("null") else append(quoteJson(avatar))
+            append('}')
         }
-        append('"')
     }
+
+    fun parse(text: String): Note? {
+        val json = try {
+            Json.parseToJsonElement(text) as? JsonObject
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        val version = (json["v"] as? JsonPrimitive)?.intOrNull ?: (json["v"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+        if (version != 1 || json["status"] !is JsonPrimitive) return null
+        val status = (json["status"] as JsonPrimitive).contentOrNull ?: return null
+        return when (val avatar = json["avatar"]) {
+            null -> Note(status, null, false)
+            is JsonNull -> Note(status, null, true)
+            is JsonPrimitive -> {
+                if (!avatar.isString) return null
+                val bytes = avatar.content.let { runCatching { Encoding.fromBase64Url(it) }.getOrNull() }
+                val jpeg = bytes?.takeIf { it.size in 3..MediaNotes.MAX_AVATAR_BYTES && it[0] == 0xFF.toByte() && it[1] == 0xD8.toByte() }
+                if (jpeg == null) Note(status, null, false) else Note(status, jpeg, false)
+            }
+            else -> null
+        }
+    }
+}
+
+private fun quoteJson(value: String): String = buildString {
+    append('"')
+    for (char in value) {
+        when (char) {
+            '"' -> append("\\\"")
+            '\\' -> append("\\\\")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> if (char.code < 0x20) append("\\u%04x".format(char.code)) else append(char)
+        }
+    }
+    append('"')
 }

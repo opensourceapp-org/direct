@@ -6,13 +6,16 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
+import android.media.ExifInterface
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.math.max
@@ -158,8 +161,7 @@ object MediaPrep {
     }
 
     private fun jpeg(context: Context, uri: Uri, maxEdge: Int, maxBytes: Int, quality: Int = 85): ByteArray {
-        val source = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-            ?: error("That photo could not be read.")
+        val source = oriented(read(context, uri))
         val longest = max(source.width, source.height).coerceAtLeast(1)
         val bitmap = if (longest <= maxEdge) source else {
             val scale = maxEdge.toFloat() / longest
@@ -173,6 +175,34 @@ object MediaPrep {
         }
         if (bytes.size > maxBytes) error("That photo is still over 6 MB after compression.")
         return bytes
+    }
+
+    /** Camera photos store portrait as a landscape bitmap plus an EXIF rotation. Apply that before compressing. */
+    private fun oriented(bytes: ByteArray): Bitmap {
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("That photo could not be read.")
+        val orientation = try {
+            ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } catch (_: Exception) {
+            ExifInterface.ORIENTATION_NORMAL
+        }
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            else -> return decoded
+        }
+        return Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
     }
 
     private fun compress(bitmap: Bitmap, quality: Int): ByteArray {

@@ -308,8 +308,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
     Column(Modifier.fillMaxSize().imePadding()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.Top,
         ) {
             Box(
                 Modifier.size(40.dp).clip(CircleShape).clickable(onClick = back),
@@ -317,8 +316,8 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
             }
-            Avatar(contact?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 36.dp)
-            Column(Modifier.weight(1f).padding(start = 8.dp)) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Avatar(contact?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 56.dp)
                 Label(contact?.name ?: peerId)
                 val status = when {
                     contact == null -> "Not a contact"
@@ -330,6 +329,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                 }
                 Muted(status)
             }
+            Spacer(Modifier.size(40.dp))
         }
         HorizontalDivider(color = Ink.border)
         LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {

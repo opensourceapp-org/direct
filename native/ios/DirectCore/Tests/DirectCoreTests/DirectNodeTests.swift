@@ -170,6 +170,34 @@ final class DirectNodeTests: XCTestCase {
         bo.close()
     }
 
+    func testAProfilePhotoReachesTheOtherPhoneAndCanBeCleared() async throws {
+        let ada = node(MemorySecretStore(), "ada-photo")
+        let bo = node(MemorySecretStore(), "bo-photo")
+        await ada.start()
+        await bo.start()
+        _ = try ada.createIdentity("Ada")
+        _ = try bo.createIdentity("Bo")
+        try ada.setBootstrap("192.168.1.20")
+        try bo.setBootstrap("192.168.1.20")
+        await settle()
+        let adaId = try XCTUnwrap(ada.state.profile?.directId)
+        let boId = try XCTUnwrap(bo.state.profile?.directId)
+        _ = try await ada.addContact(boId)
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xD9])
+        try ada.setAvatar(jpeg)
+        try ada.setStatus("At work")
+        await settle()
+        let seen = try XCTUnwrap(bo.state.contacts.first { $0.directId == adaId })
+        XCTAssertEqual(Encoding.base64Url(jpeg), seen.avatarJpegBase64)
+        XCTAssertEqual("At work", seen.about)
+        XCTAssertFalse(hub.received.contains { Encoding.base64Url(jpeg).contains($0) || $0.contains(Encoding.base64Url(jpeg)) })
+        try ada.clearAvatar()
+        await settle()
+        XCTAssertNil(bo.state.contacts.first { $0.directId == adaId }?.avatarJpegBase64)
+        ada.close()
+        bo.close()
+    }
+
     func testALoopbackBootstrapIsRefusedWithAPhoneSpecificMessage() async throws {
         let ada = node(MemorySecretStore(), "ada4")
         await ada.start()

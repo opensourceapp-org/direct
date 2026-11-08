@@ -1,7 +1,7 @@
 import { base64UrlToBytes, bytesToBase64Url, text, utf8 } from '@direct/shared';
 import type { PeerCipher } from './types';
 
-export type EnvelopeType = 'message' | 'ack' | 'read';
+export type EnvelopeType = 'message' | 'ack' | 'read' | 'profile';
 
 export type Envelope = {
   v: 1;

@@ -7,6 +7,7 @@ import app.direct.core.crypto.PublicBundle
 import app.direct.core.protocol.EnvelopeType
 import app.direct.core.protocol.Envelopes
 import app.direct.core.protocol.MediaNotes
+import app.direct.core.protocol.ProfileNotes
 import app.direct.core.store.ContactRecord
 import app.direct.core.store.Direction
 import app.direct.core.store.LocalStore
@@ -134,6 +135,27 @@ class DeliveryEngine(
             }
         }
         store.save()
+    }
+
+    /**
+     * Seals the current photo and status for each accepted contact.
+     * Queued like a receipt: it is not a chat message, and it leaves the queue once written.
+     */
+    fun shareProfile(peerId: String? = null) {
+        val (keys, deviceId) = identity() ?: return
+        val profile = store.profile ?: return
+        val jpeg = profile.avatarJpegBase64?.let { runCatching { Encoding.fromBase64Url(it) }.getOrNull() }
+        val plain = Encoding.utf8(ProfileNotes.encode(profile.status, jpeg))
+        val now = clock()
+        val targets = store.contacts().filter { it.accepted && !it.blocked && (peerId == null || it.directId == peerId) }
+        for (contact in targets) {
+            val envelope = Envelopes.seal(
+                keys, deviceId, contact.directId, bundleFor(contact).agreementPublic,
+                "profile_${contact.directId}", EnvelopeType.PROFILE, plain, now, ttlMs,
+            )
+            store.putQueued(QueueItem("profile_${contact.directId}", contact.directId, QueueKind.RECEIPT, envelope.encode(), 0, now, now + ttlMs))
+        }
+        if (targets.isNotEmpty()) store.save()
     }
 
     /** The peer just became reachable. Retry everything queued for it without waiting for backoff. */
@@ -289,6 +311,18 @@ class DeliveryEngine(
             return ingestMedia(peerId, contact, mediaPart.first, mediaPart.second, envelope.createdAt)
         }
         val plaintext = Encoding.text(opened)
+        if (envelope.type == EnvelopeType.PROFILE) {
+            val note = ProfileNotes.parse(plaintext) ?: return ReceiveOutcome.IGNORED
+            val jpeg = note.avatarJpeg
+            val avatar = when {
+                note.clearAvatar -> null
+                jpeg != null -> Encoding.base64Url(jpeg)
+                else -> contact.avatarJpegBase64
+            }
+            store.putContact(contact.copy(about = note.status.trim().take(80), avatarJpegBase64 = avatar))
+            store.save()
+            return ReceiveOutcome.STORED
+        }
         if (envelope.type != EnvelopeType.MESSAGE) {
             val (kind, messageId) = plaintext.split(":", limit = 2).let { if (it.size == 2) it[0] to it[1] else return ReceiveOutcome.IGNORED }
             if (kind != envelope.type.wire) return ReceiveOutcome.IGNORED

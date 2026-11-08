@@ -188,6 +188,14 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            VStack(spacing: 4) {
+                Avatar(name: contact?.name ?? "?", jpeg: contact?.avatarJpegBase64, size: 56)
+                Text(contact?.name ?? peerId).font(.headline)
+                Text(presence).font(.caption).foregroundStyle(Ink.muted)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -239,10 +247,19 @@ struct ChatView: View {
                 composer
             }
         }
-        .navigationTitle(contact?.name ?? peerId)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .onAppear { model.open(peerId) }
+    }
+
+    private var presence: String {
+        guard let contact else { return "Not a contact" }
+        if contact.blocked { return "Blocked" }
+        if !contact.accepted { return "Message request" }
+        if model.state.connected.contains(peerId) { return "Connected directly" }
+        if model.state.online.contains(peerId) { return "On the bootstrap" }
+        return "Offline · messages wait on this phone"
     }
 
     private var canSend: Bool {

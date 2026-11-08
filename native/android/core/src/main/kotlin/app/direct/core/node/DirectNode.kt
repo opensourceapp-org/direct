@@ -251,7 +251,9 @@ class DirectNode(
         val profile = store.profile ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
         store.profile = profile.copy(status = text.trim().take(80))
         store.save()
+        engine?.shareProfile()
         publish()
+        wake.trySend(Unit)
     }
 
     suspend fun setAvatar(jpeg: ByteArray) = onNode {
@@ -261,14 +263,18 @@ class DirectNode(
         }
         store.profile = profile.copy(avatarJpegBase64 = Encoding.base64Url(jpeg))
         store.save()
+        engine?.shareProfile()
         publish()
+        wake.trySend(Unit)
     }
 
     suspend fun clearAvatar() = onNode {
         val profile = store.profile ?: return@onNode
         store.profile = profile.copy(avatarJpegBase64 = null)
         store.save()
+        engine?.shareProfile()
         publish()
+        wake.trySend(Unit)
     }
 
     /** Adds the signed bundle inside a QR or share card, keeps the unsigned status and photo, and saves the server address when the card includes one. */
@@ -294,6 +300,7 @@ class DirectNode(
         store.save()
         requireEngine().markRead(peerId)
         refreshWatch()
+        requireEngine().shareProfile(peerId)
         publish()
         wake.trySend(Unit)
     }
@@ -489,7 +496,9 @@ class DirectNode(
         store.putContact(contact)
         store.save()
         refreshWatch()
+        if (contact.accepted && !contact.blocked) engine?.shareProfile(contact.directId)
         publish()
+        wake.trySend(Unit)
         return contact
     }
 

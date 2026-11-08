@@ -200,3 +200,49 @@ public enum ProfileCards {
         return Card(bundle: bundle, status: status, avatarJpeg: avatar, bootstrap: bootstrap)
     }
 }
+
+/// The display photo and status sealed to a contact. The bootstrap never sees this.
+/// `avatar` null clears the photo. A missing `avatar` leaves the saved photo alone.
+public enum ProfileNotes {
+    public struct Note: Equatable, Sendable {
+        public var status: String
+        public var avatarJpeg: Data?
+        public var clearAvatar: Bool
+    }
+
+    public static func encode(status: String, avatarJpeg: Data?) -> String {
+        let trimmed = String(status.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        let avatar: JSON
+        if let jpeg = avatarJpeg, jpeg.count >= 3, jpeg.count <= MediaNotes.maxAvatarBytes, jpeg[0] == 0xFF, jpeg[1] == 0xD8 {
+            avatar = .string(Encoding.base64Url(jpeg))
+        } else {
+            avatar = .null
+        }
+        return JSON.object([
+            ("v", .int(1)),
+            ("status", .string(trimmed)),
+            ("avatar", avatar),
+        ]).serialized()
+    }
+
+    public static func parse(_ text: String) -> Note? {
+        guard let json = JSON.parse(text),
+              case let .number(version)? = json["v"], version == 1,
+              let status = json["status"]?.string else { return nil }
+        switch json["avatar"] {
+        case nil:
+            return Note(status: status, avatarJpeg: nil, clearAvatar: false)
+        case .null?:
+            return Note(status: status, avatarJpeg: nil, clearAvatar: true)
+        case let .string(encoded)?:
+            let bytes = Encoding.fromBase64Url(encoded)
+            let jpeg = bytes.flatMap { data -> Data? in
+                guard data.count >= 3, data.count <= MediaNotes.maxAvatarBytes, data[0] == 0xFF, data[1] == 0xD8 else { return nil }
+                return data
+            }
+            return Note(status: status, avatarJpeg: jpeg, clearAvatar: false)
+        default:
+            return nil
+        }
+    }
+}

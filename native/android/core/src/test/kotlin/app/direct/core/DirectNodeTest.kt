@@ -158,6 +158,35 @@ class DirectNodeTest {
     }
 
     @Test
+    fun `a profile photo reaches the other phone and can be cleared`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-photo")
+        val bo = node(MemorySecretStore(), "bo-photo")
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        ada.setBootstrap("192.168.1.20")
+        bo.setBootstrap("192.168.1.20")
+        settle()
+        val adaId = ada.state.value.profile!!.directId
+        val boId = bo.state.value.profile!!.directId
+        ada.addContact(boId)
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte())
+        ada.setAvatar(jpeg)
+        ada.setStatus("At work")
+        settle()
+        val seen = bo.state.value.contacts.single { it.directId == adaId }
+        assertEquals(Encoding.base64Url(jpeg), seen.avatarJpegBase64)
+        assertEquals("At work", seen.about)
+        assertTrue(hub.received.none { Encoding.base64Url(jpeg) in it }, "the bootstrap never sees the photo")
+        ada.clearAvatar()
+        settle()
+        assertEquals(null, bo.state.value.contacts.single { it.directId == adaId }.avatarJpegBase64)
+        ada.close()
+        bo.close()
+    }
+
+    @Test
     fun `a disconnected bootstrap is reported as offline, not as a missing phone`() = runTest {
         val ada = node(MemorySecretStore(), "ada3")
         ada.start()

@@ -283,7 +283,9 @@ public final class DirectNode {
         profile.status = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
         store.profile = profile
         try store.save()
+        try? engine?.shareProfile()
         publish()
+        wake.fire()
     }
 
     public func setAvatar(_ jpeg: Data) throws {
@@ -294,7 +296,9 @@ public final class DirectNode {
         profile.avatarJpegBase64 = Encoding.base64Url(jpeg)
         store.profile = profile
         try store.save()
+        try? engine?.shareProfile()
         publish()
+        wake.fire()
     }
 
     public func clearAvatar() throws {
@@ -302,7 +306,9 @@ public final class DirectNode {
         profile.avatarJpegBase64 = nil
         store.profile = profile
         try store.save()
+        try? engine?.shareProfile()
         publish()
+        wake.fire()
     }
 
     /// Adds the signed bundle inside a QR or share card, keeps the unsigned status and photo, and saves the server address when the card includes one.
@@ -334,6 +340,7 @@ public final class DirectNode {
         try store.save()
         try requireEngine().markRead(peerId)
         refreshWatch()
+        try? engine?.shareProfile(peerId: peerId)
         publish()
         wake.fire()
     }
@@ -532,7 +539,9 @@ public final class DirectNode {
         store.putContact(contact)
         try store.save()
         refreshWatch()
+        if contact.accepted, !contact.blocked { try? engine?.shareProfile(peerId: contact.directId) }
         publish()
+        wake.fire()
         return contact
     }
 

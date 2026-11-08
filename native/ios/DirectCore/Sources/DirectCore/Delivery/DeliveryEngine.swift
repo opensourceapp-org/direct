@@ -163,6 +163,26 @@ public final class DeliveryEngine {
         try store.save()
     }
 
+    /// Seals the current photo and status for each accepted contact.
+    /// Queued like a receipt: it is not a chat message, and it leaves the queue once written.
+    public func shareProfile(peerId: String? = nil) throws {
+        guard let (keys, deviceId) = identity(), let profile = store.profile else { return }
+        let jpeg = profile.avatarJpegBase64.flatMap(Encoding.fromBase64Url)
+        let plain = Encoding.utf8(ProfileNotes.encode(status: profile.status, avatarJpeg: jpeg))
+        let now = clock()
+        let targets = store.contacts().filter { $0.accepted && !$0.blocked && (peerId == nil || $0.directId == peerId) }
+        for contact in targets {
+            let bundle = try bundleFor(contact)
+            let id = "profile_\(contact.directId)"
+            let envelope = try Envelopes.seal(
+                sender: keys, deviceId: deviceId, recipientId: contact.directId, recipientAgreementPublic: bundle.agreementPublic,
+                id: id, type: .profile, plaintext: plain, createdAt: now, ttlMs: ttlMs
+            )
+            store.putQueued(QueueItem(id: id, peerId: contact.directId, kind: .receipt, payload: envelope.encode(), nextAttemptAt: now, expiresAt: now + ttlMs))
+        }
+        if !targets.isEmpty { try store.save() }
+    }
+
     /// The peer just became reachable. Retry everything queued for it without waiting for backoff.
     public func peerOnline(_ peerId: String) throws {
         let now = clock()
@@ -321,6 +341,19 @@ public final class DeliveryEngine {
             return try ingestMedia(peerId, contact, header, chunk, envelope.createdAt)
         }
         guard let plaintext = String(data: opened, encoding: .utf8) else { return .ignored }
+        if envelope.type == .profile {
+            guard let note = ProfileNotes.parse(plaintext) else { return .ignored }
+            var updated = contact
+            updated.about = String(note.status.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+            if note.clearAvatar {
+                updated.avatarJpegBase64 = nil
+            } else if let jpeg = note.avatarJpeg {
+                updated.avatarJpegBase64 = Encoding.base64Url(jpeg)
+            }
+            store.putContact(updated)
+            try store.save()
+            return .stored
+        }
         if envelope.type != .message {
             let parts = plaintext.split(separator: ":", maxSplits: 1).map(String.init)
             guard parts.count == 2, parts[0] == envelope.type.rawValue,
