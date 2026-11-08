@@ -572,11 +572,23 @@ struct AttachmentBar: View {
 
 struct MediaBubble: View {
     let message: MessageRecord
-    var tail = true
-    var showReceipt = false
+    var tail: Bool
+    var showReceipt: Bool
     @EnvironmentObject private var model: AppModel
     @State private var bytes: Data?
     @State private var videoOpen = false
+    @State private var settled: Bool
+
+    init(message: MessageRecord, tail: Bool = true, showReceipt: Bool = false) {
+        self.message = message
+        self.tail = tail
+        self.showReceipt = showReceipt
+        let age = Date().timeIntervalSince1970 * 1000 - Double(message.createdAt)
+        let justSent = message.direction == .outgoing && age > -2_000 && age < 1_500
+        _bytes = State(initialValue: nil)
+        _videoOpen = State(initialValue: false)
+        _settled = State(initialValue: !justSent)
+    }
 
     var body: some View {
         let outgoing = message.direction == .outgoing
@@ -601,7 +613,15 @@ struct MediaBubble: View {
             }
             if !outgoing { Spacer(minLength: 64) }
         }
-        .onAppear { model.loadMedia(message.id) { bytes = $0 } }
+        .scaleEffect(settled ? 1 : 0.45, anchor: outgoing ? .bottomTrailing : .bottomLeading)
+        .offset(y: settled ? 0 : 22)
+        .onAppear {
+            model.loadMedia(message.id) { bytes = $0 }
+            guard !settled else { return }
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.68)) {
+                settled = true
+            }
+        }
         .onChange(of: message.mediaFile) { _ in model.loadMedia(message.id) { bytes = $0 } }
         .sheet(isPresented: $videoOpen) {
             if let bytes {

@@ -215,7 +215,11 @@ struct ChatView: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: messages.count) { _ in
-                    if let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                    if let last = messages.last {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
                     model.open(peerId)
                 }
             }
@@ -253,11 +257,11 @@ struct ChatView: View {
     private var composer: some View {
         VStack(spacing: 0) {
             AttachmentBar(expanded: $attachments,
-                onPhoto: { model.sendMedia(peerId: peerId, kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0, caption: draft); draft = "" },
-                onVideo: { model.sendMedia(peerId: peerId, kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0, caption: draft); draft = "" },
-                onGif: { model.sendMedia(peerId: peerId, kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0, caption: draft); draft = "" },
-                onSticker: { model.sendMedia(peerId: peerId, kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: ""); draft = "" },
-                onVoice: { model.sendMedia(peerId: peerId, kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0, caption: draft); draft = "" },
+                onPhoto: { sendAttachment(kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0) },
+                onVideo: { sendAttachment(kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0) },
+                onGif: { sendAttachment(kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0) },
+                onSticker: { sendAttachment(kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: "") },
+                onVoice: { sendAttachment(kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0) },
                 onError: { model.toast = $0 }
             )
             HStack(alignment: .bottom, spacing: 8) {
@@ -279,9 +283,7 @@ struct ChatView: View {
                     .padding(.vertical, 10)
                     .background(Ink.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 Button {
-                    model.send(peerId, draft)
-                    draft = ""
-                    withAnimation(.easeOut(duration: 0.2)) { attachments = false }
+                    sendDraft()
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 16, weight: .bold))
@@ -299,6 +301,22 @@ struct ChatView: View {
         .background(Ink.background)
         .overlay(alignment: .top) { Rectangle().fill(Ink.line).frame(height: 0.5) }
         .animation(.easeOut(duration: 0.2), value: attachments)
+    }
+
+    private func sendDraft() {
+        let body = draft
+        draft = ""
+        withAnimation(.easeOut(duration: 0.2)) { attachments = false }
+        SendFeedback.play()
+        model.send(peerId, body)
+    }
+
+    private func sendAttachment(kind: String, mime: String, name: String, bytes: Data, caption: String? = nil) {
+        let text = caption ?? draft
+        draft = ""
+        withAnimation(.easeOut(duration: 0.2)) { attachments = false }
+        SendFeedback.play()
+        model.sendMedia(peerId: peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: text)
     }
 }
 
