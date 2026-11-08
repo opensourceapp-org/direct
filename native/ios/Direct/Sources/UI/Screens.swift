@@ -526,17 +526,18 @@ private struct ServerHelp: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Run this on a computer you control. It only introduces the two phones. It does not store messages, photos, voice notes, or calls.")
+                Text("Clone DIRECT from https://github.com/hyper-realm/direct. On that computer, open the server app. It starts the server, shows the address to share, and lists each phone that connects.")
+                    .foregroundStyle(Ink.muted)
+                helpCode("git clone https://github.com/hyper-realm/direct.git\ncd direct\npnpm install\npnpm server")
+                Text("The server only introduces the two phones. It does not store messages, photos, voice notes, or calls.")
                     .foregroundStyle(Ink.muted)
                 helpBlock("What you need", "A computer both phones can reach, Node.js 22 or newer, pnpm, and this DIRECT project on that computer.")
-                helpBlock("Start it", "In the project folder, leave the terminal open after the second command. Closing it stops the server.")
-                helpCode("pnpm install\npnpm signaling")
-                Text("The terminal prints one address for each network on that computer. Use the one your phones are on, for example:")
+                helpBlock("Start it", "pnpm server opens the Direct server window. Press Start server. The window shows one address for each network on that computer and lists each phone that connects. Closing the window stops the server. The same server can run in a terminal with pnpm signaling. Leave that terminal open. Use the address your phones are on, for example:")
                     .foregroundStyle(Ink.muted)
                 helpCode("ws://192.168.1.20:8787")
                 Text("Allow TCP port 8787 through that computer's firewall. On both phones, open Network, paste that address, and save it. Both phones must save the same address.")
                     .foregroundStyle(Ink.muted)
-                helpBlock("Check that it is running", "On the same network, open this page in a browser. Replace the example with the address the terminal printed.")
+                helpBlock("Check that it is running", "On the same network, open this page in a browser. Replace the example with the address the window or the terminal showed.")
                 helpCode("http://192.168.1.20:8787/health")
                 Text("A working server answers:")
                     .foregroundStyle(Ink.muted)

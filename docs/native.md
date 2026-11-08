@@ -9,7 +9,15 @@ Phones run DIRECT as a native app. Android is Kotlin in `native/android`. iOS is
 On a computer both phones can reach:
 
 ```bash
+git clone https://github.com/hyper-realm/direct.git
+cd direct
 pnpm install
+pnpm server
+```
+
+`pnpm server` opens the desktop app. Start server, then share the `ws://` address it shows. The window lists each phone that connects. `pnpm signaling` runs the same server in the terminal and prints those addresses. The steps are also on the page in `site/index.html`.
+
+```bash
 pnpm signaling
 ```
 

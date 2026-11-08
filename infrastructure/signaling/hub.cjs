@@ -169,7 +169,33 @@ function createSignalHub(options = {}) {
     socket.on('close', () => clearInterval(beat));
   }
 
-  return { attach, remember };
+  function displayName(bundle) {
+    try {
+      const parsed = JSON.parse(bundle);
+      if (parsed && typeof parsed.name === 'string') {
+        const name = parsed.name.trim();
+        if (name) return name.slice(0, 80);
+      }
+    } catch {
+      // A public bundle only has to contain the DIRECT ID. The name is optional.
+    }
+    return '';
+  }
+
+  /** Phones with a live socket. A phone in the two-minute grace window is findable, but not listed. */
+  function roster() {
+    const at = now();
+    sweep(at);
+    const users = [];
+    for (const [directId, peer] of peers) {
+      if (!peer.send) continue;
+      users.push({ directId, name: displayName(peer.bundle) });
+    }
+    users.sort((a, b) => (a.name || a.directId).localeCompare(b.name || b.directId));
+    return users;
+  }
+
+  return { attach, remember, roster };
 }
 
 module.exports = { createSignalHub, DIRECT_ID, GRACE_MS, MAX_SIGNAL, MAX_BUNDLE, MAX_WATCH };
