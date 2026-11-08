@@ -35,21 +35,13 @@ struct IntroView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
-            Button {
+            PrimaryButton(title: isLast ? finishTitle : "Next") {
                 if isLast {
                     onDone()
                 } else {
                     withAnimation(.easeOut(duration: 0.22)) { page += 1 }
                 }
-            } label: {
-                Text(isLast ? finishTitle : "Next")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(Ink.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-            .buttonStyle(ComposerPressStyle())
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
