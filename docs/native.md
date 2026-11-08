@@ -9,7 +9,7 @@ Phones run DIRECT as a native app. Android is Kotlin in `native/android`. iOS is
 On a computer both phones can reach:
 
 ```bash
-git clone https://github.com/hyper-realm/direct.git
+git clone https://github.com/opensourceapp-org/direct.git
 cd direct
 pnpm install
 pnpm server
