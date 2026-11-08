@@ -58,6 +58,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Gif
 import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
@@ -73,6 +74,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.NavigationBar
@@ -104,6 +106,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -461,8 +464,25 @@ private fun NetworkScreen(node: DirectNode, state: NodeState) {
     var address by rememberSaveable(state.bootstrapUrl) { mutableStateOf(state.bootstrapUrl ?: "") }
     var error by remember { mutableStateOf<String?>(null) }
     val (phase, color) = state.bootstrap.describe()
+    var help by rememberSaveable { mutableStateOf(false) }
+    if (help) {
+        BackHandler { help = false }
+        ServerHelp { help = false }
+        return
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Header("Diagnostics", "Network")
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("DIAGNOSTICS", color = Ink.muted, fontSize = 12.sp, letterSpacing = 1.2.sp)
+                Title("Network")
+            }
+            IconButton(onClick = { help = true }) {
+                Icon(Icons.Outlined.HelpOutline, "How to run your own server", tint = Ink.accent)
+            }
+        }
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Card {
                 StatusRow("Bootstrap", phase, color)
@@ -488,6 +508,70 @@ private fun NetworkScreen(node: DirectNode, state: NodeState) {
         }
     }
 }
+
+@Composable
+private fun ServerHelp(onClose: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
+            }
+            Title("Your server")
+        }
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Muted("Run this on a computer you control. It only introduces the two phones. It does not store messages, photos, voice notes, or calls.")
+            HelpBlock(
+                "What you need",
+                "A computer both phones can reach, Node.js 22 or newer, pnpm, and this DIRECT project on that computer.",
+            )
+            HelpBlock("Start it", "In the project folder, leave the terminal open after the second command. Closing it stops the server.")
+            HelpCode("pnpm install\npnpm signaling")
+            Muted("The terminal prints one address for each network on that computer. Use the one your phones are on, for example:")
+            HelpCode("ws://192.168.1.20:8787")
+            Muted("Allow TCP port 8787 through that computer's firewall. On both phones, open Network, paste that address, and save it. Both phones must save the same address.")
+            HelpBlock("Check that it is running", "On the same network, open this page in a browser. Replace the example with the address the terminal printed.")
+            HelpCode("http://192.168.1.20:8787/health")
+            Muted("A working server answers:")
+            HelpCode("{\"ok\":true,\"service\":\"direct-signaling\",\"contract\":1}")
+            Muted("The page at the server root is a short note that this is the DIRECT signaling server.")
+            HelpCode("http://192.168.1.20:8787")
+            HelpBlock("Addresses the phone accepts", "A bare host is saved as ws:// and port 8787. http:// is saved as ws://. https:// is saved as wss://. The host is lowercased, and a trailing slash is removed.")
+            HelpCode("ws://192.168.1.20:8787\n192.168.1.20\nhttp://192.168.1.20:8787\nhttps://signals.example.com")
+            Muted("Do not enter localhost, 127.0.0.1, or 0.0.0.0. On a phone those names mean the phone itself.")
+            HelpBlock("Choose a port", "8787 is the default. The server listens on every network interface of that computer unless you set HOST to one address.")
+            HelpCode("PORT=9000 pnpm signaling\nws://192.168.1.20:9000")
+            HelpBlock(
+                "Phones away from your Wi-Fi",
+                "A 192.168 address only works on that local network. Forward TCP 8787 to this computer, or run the server where both phones can reach it, and save that address. This server speaks plain WebSocket and does not add TLS itself. For a public wss:// address, put a TLS proxy in front of port 8787 and save wss://your.host, or https://your.host.",
+            )
+            HelpBlock(
+                "What it is allowed to see",
+                "Public identity bundles, who is online, and the WebRTC setup that connects the phones. The message itself stays sealed on the phones.",
+            )
+        }
+    }
+}
+
+@Composable
+private fun HelpBlock(title: String, body: String) = Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Label(title)
+    Muted(body)
+}
+
+@Composable
+private fun HelpCode(text: String) = Text(
+    text,
+    fontFamily = FontFamily.Monospace,
+    fontSize = 13.sp,
+    color = Ink.foreground,
+    modifier = Modifier.fillMaxWidth().background(Ink.surface, RoundedCornerShape(10.dp)).border(1.dp, Ink.border, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
+)
 
 @Composable
 private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {

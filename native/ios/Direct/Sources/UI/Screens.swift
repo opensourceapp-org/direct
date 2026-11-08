@@ -477,6 +477,7 @@ struct ContactsView: View {
 struct NetworkView: View {
     @EnvironmentObject private var model: AppModel
     @State private var input = ""
+    @State private var help = false
 
     var body: some View {
         List {
@@ -497,7 +498,83 @@ struct NetworkView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle("Network")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { help = true } label: {
+                    Image(systemName: "questionmark.circle")
+                }
+                .accessibilityLabel("How to run your own server")
+            }
+        }
+        .sheet(isPresented: $help) {
+            NavigationStack {
+                ServerHelp()
+                    .navigationTitle("Your server")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { help = false }
+                        }
+                    }
+            }
+        }
         .onAppear { input = model.state.bootstrapUrl ?? "" }
+    }
+}
+
+private struct ServerHelp: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Run this on a computer you control. It only introduces the two phones. It does not store messages, photos, voice notes, or calls.")
+                    .foregroundStyle(Ink.muted)
+                helpBlock("What you need", "A computer both phones can reach, Node.js 22 or newer, pnpm, and this DIRECT project on that computer.")
+                helpBlock("Start it", "In the project folder, leave the terminal open after the second command. Closing it stops the server.")
+                helpCode("pnpm install\npnpm signaling")
+                Text("The terminal prints one address for each network on that computer. Use the one your phones are on, for example:")
+                    .foregroundStyle(Ink.muted)
+                helpCode("ws://192.168.1.20:8787")
+                Text("Allow TCP port 8787 through that computer's firewall. On both phones, open Network, paste that address, and save it. Both phones must save the same address.")
+                    .foregroundStyle(Ink.muted)
+                helpBlock("Check that it is running", "On the same network, open this page in a browser. Replace the example with the address the terminal printed.")
+                helpCode("http://192.168.1.20:8787/health")
+                Text("A working server answers:")
+                    .foregroundStyle(Ink.muted)
+                helpCode("{\"ok\":true,\"service\":\"direct-signaling\",\"contract\":1}")
+                Text("The page at the server root is a short note that this is the DIRECT signaling server.")
+                    .foregroundStyle(Ink.muted)
+                helpCode("http://192.168.1.20:8787")
+                helpBlock("Addresses the phone accepts", "A bare host is saved as ws:// and port 8787. http:// is saved as ws://. https:// is saved as wss://. The host is lowercased, and a trailing slash is removed.")
+                helpCode("ws://192.168.1.20:8787\n192.168.1.20\nhttp://192.168.1.20:8787\nhttps://signals.example.com")
+                Text("Do not enter localhost, 127.0.0.1, or 0.0.0.0. On a phone those names mean the phone itself.")
+                    .foregroundStyle(Ink.muted)
+                helpBlock("Choose a port", "8787 is the default. The server listens on every network interface of that computer unless you set HOST to one address.")
+                helpCode("PORT=9000 pnpm signaling\nws://192.168.1.20:9000")
+                helpBlock("Phones away from your Wi-Fi", "A 192.168 address only works on that local network. Forward TCP 8787 to this computer, or run the server where both phones can reach it, and save that address. This server speaks plain WebSocket and does not add TLS itself. For a public wss:// address, put a TLS proxy in front of port 8787 and save wss://your.host, or https://your.host.")
+                helpBlock("What it is allowed to see", "Public identity bundles, who is online, and the WebRTC setup that connects the phones. The message itself stays sealed on the phones.")
+            }
+            .font(.subheadline)
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(Ink.background)
+    }
+
+    private func helpBlock(_ title: String, _ body: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline).foregroundStyle(Ink.text)
+            Text(body).foregroundStyle(Ink.muted)
+        }
+    }
+
+    private func helpCode(_ text: String) -> some View {
+        Text(text)
+            .font(.system(.footnote, design: .monospaced))
+            .foregroundStyle(Ink.text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(Ink.surface, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Ink.line))
     }
 }
 
