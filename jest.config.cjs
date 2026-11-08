@@ -1,6 +1,10 @@
 /** @type {import('jest').Config} */
 module.exports = {
   testEnvironment: 'node',
+  modulePathIgnorePatterns: [
+    '<rootDir>/apps/server/build/',
+    '<rootDir>/apps/server/dist/',
+  ],
   testMatch: [
     '<rootDir>/packages/**/*.test.ts',
     '<rootDir>/contracts/**/*.test.ts',

@@ -2,9 +2,16 @@ const { app, BrowserWindow, clipboard, ipcMain } = require('electron');
 const path = require('path');
 const { createRequire } = require('module');
 
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('no-sandbox');
+  app.commandLine.appendSwitch('disable-dev-shm-usage');
+}
+
 function loadServer() {
-  const requireSignaling = createRequire(__filename);
-  const signalingPath = path.resolve(__dirname, '../../../infrastructure/signaling/createServer.cjs');
+  const signalingPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'signaling', 'createServer.cjs')
+    : path.resolve(__dirname, '../../../infrastructure/signaling/createServer.cjs');
+  const requireSignaling = createRequire(signalingPath);
   return requireSignaling(signalingPath).createSignalingServer;
 }
 

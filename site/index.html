@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Direct — run your own server</title>
+  <title>Direct Server — download for Mac, Windows, and Linux</title>
   <style>
     :root { color: #f4f4f4; background: #000; font-family: "Segoe UI", system-ui, sans-serif; }
     body { margin: 0; background: #000; }
@@ -13,6 +13,31 @@
     h2 { font-size: 20px; margin: 36px 0 8px; }
     p, li { color: #c8c8c8; line-height: 1.5; }
     a { color: #fff; }
+    .version { color: #9a9a9a; font-size: 14px; margin: 0 0 28px; }
+    .downloads {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin: 8px 0 8px;
+    }
+    @media (min-width: 640px) {
+      .downloads { grid-template-columns: repeat(3, 1fr); }
+    }
+    .download {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 18px 16px;
+      border: 1px solid #2a2a2a;
+      border-radius: 14px;
+      background: #111;
+      text-decoration: none;
+      color: #fff;
+    }
+    .download:hover { border-color: #5a5a5a; }
+    .download.preferred { border-color: #fff; }
+    .download strong { font-size: 16px; font-weight: 600; }
+    .download span { color: #9a9a9a; font-size: 13px; line-height: 1.4; }
     pre {
       background: #111;
       border: 1px solid #2a2a2a;
@@ -28,27 +53,80 @@
 <body>
   <main>
     <p class="mark">Direct</p>
-    <h1>Run the server yourself.</h1>
-    <p>Clone the repository, install the desktop app, and start a server on your computer. The app shows an address you can share. Each phone that saves that address appears in the app. The server only introduces the phones. It does not store messages.</p>
+    <h1>Download the server.</h1>
+    <p>Open Direct Server on your computer, press Start server, and share the address with both phones. Each phone that saves that address appears in the app. The server only introduces the phones. It does not store messages.</p>
+    <p class="version" id="version">Version 0.1.0</p>
 
-    <h2>Clone DIRECT</h2>
-    <p>The project lives at <a href="https://github.com/opensourceapp-org/direct">github.com/opensourceapp-org/direct</a>.</p>
-    <pre><code>git clone https://github.com/opensourceapp-org/direct.git
-cd direct
-pnpm install
-pnpm server</code></pre>
-    <p>You need Node.js 22 or newer and pnpm. <code>pnpm server</code> downloads the desktop app the first time, then opens the Direct server window. Leave that terminal open while the window is in use.</p>
-    <p>On a Mac, double-click <code>Start Server.command</code> in the project folder. That runs the same steps. <code>Direct.app</code> is the iPhone app. macOS will not open it, and shows “this application is not supported on this Mac.” Run the iPhone app from Xcode on an iPhone.</p>
+    <div class="downloads">
+      <a class="download" id="dl-macos" href="download/macos.html">
+        <strong>macOS</strong>
+        <span>Universal disk image for Intel and Apple silicon.</span>
+      </a>
+      <a class="download" id="dl-windows" href="download/windows.html">
+        <strong>Windows</strong>
+        <span>64-bit installer. Opens Direct Server when it finishes.</span>
+      </a>
+      <a class="download" id="dl-linux" href="download/linux.html">
+        <strong>Linux</strong>
+        <span>AppImage. Mark it executable, then open it.</span>
+      </a>
+    </div>
+    <p id="platform-note"></p>
 
-    <h2>Start it and share the address</h2>
-    <p>In the window, press Start server. Copy a <code>ws://</code> address, for example <code>ws://192.168.1.20:8787</code>. On both phones, open Network and save that same address. Allow TCP port 8787 through the computer’s firewall.</p>
+    <h2>After it downloads</h2>
+    <p>Open Direct Server and press Start server. Copy a <code>ws://</code> address, for example <code>ws://192.168.1.20:8787</code>. On both phones, open Network and save that same address. Allow TCP port 8787 through the computer’s firewall.</p>
+    <p>On a Mac, if Gatekeeper blocks the app, right-click Direct Server and choose Open. On Windows, if SmartScreen appears, choose More info and Run anyway. On Linux: <code>chmod +x Direct-Server-linux.AppImage</code>, then run that file.</p>
     <p>Check it in a browser: <code>http://192.168.1.20:8787/health</code> answers <code>{"ok":true,"service":"direct-signaling","contract":1}</code>.</p>
 
     <h2>Who is connected</h2>
     <p>When a phone connects, its name and DIRECT ID appear under Connected phones. That list stays on this computer. Other phones cannot download it.</p>
 
-    <h2>Without the window</h2>
+    <h2>From source</h2>
+    <p>The project lives at <a href="https://github.com/opensourceapp-org/direct">github.com/opensourceapp-org/direct</a>. Builds are tagged as GitHub releases, starting at <a href="https://github.com/opensourceapp-org/direct/releases/tag/v0.1.0">v0.1.0</a>.</p>
+    <pre><code>git clone https://github.com/opensourceapp-org/direct.git
+cd direct
+pnpm install
+pnpm server</code></pre>
+    <p>You need Node.js 22 or newer and pnpm. <code>pnpm server</code> downloads the desktop app the first time, then opens the Direct Server window. Leave that terminal open while the window is in use.</p>
+    <p>On a Mac, double-click <code>Start Server.command</code> in the project folder. That runs the same steps. <code>Direct.app</code> is the iPhone app. macOS will not open it, and shows “this application is not supported on this Mac.” Run the iPhone app from Xcode on an iPhone.</p>
     <p>The same server can run in a terminal with <code>pnpm signaling</code>. It prints the addresses to share. Closing the terminal or the window stops the server.</p>
   </main>
+  <script>
+    (function () {
+      const ua = navigator.userAgent;
+      let platform = 'macos';
+      if (/Windows/i.test(ua)) platform = 'windows';
+      else if (/Linux/i.test(ua) && !/Android/i.test(ua)) platform = 'linux';
+      else if (/Mac/i.test(ua) && !/iPhone|iPad/i.test(ua)) platform = 'macos';
+      else platform = '';
+      const labels = { macos: 'macOS', windows: 'Windows', linux: 'Linux' };
+      if (platform) {
+        const button = document.getElementById('dl-' + platform);
+        if (button) button.classList.add('preferred');
+        const note = document.getElementById('platform-note');
+        note.textContent = 'This computer looks like ' + labels[platform] + '. That download is outlined.';
+      }
+      fetch('https://api.github.com/repos/opensourceapp-org/direct/releases/latest')
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (release) {
+          if (!release || !release.tag_name) return;
+          document.getElementById('version').textContent = 'Version ' + String(release.tag_name).replace(/^v/, '');
+          const assets = release.assets || [];
+          function asset(pattern) {
+            for (let i = 0; i < assets.length; i += 1) {
+              if (pattern.test(assets[i].name) && assets[i].browser_download_url) return assets[i].browser_download_url;
+            }
+            return '';
+          }
+          const mac = asset(/Direct-Server-mac.*\.(dmg|zip)$/i);
+          const win = asset(/Direct-Server-win.*\.exe$/i);
+          const linux = asset(/Direct-Server-linux.*\.AppImage$/i);
+          if (mac) document.getElementById('dl-macos').href = mac;
+          if (win) document.getElementById('dl-windows').href = win;
+          if (linux) document.getElementById('dl-linux').href = linux;
+        })
+        .catch(function () {});
+    })();
+  </script>
 </body>
 </html>

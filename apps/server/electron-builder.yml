@@ -1,0 +1,48 @@
+appId: org.opensourceapp.direct.server
+productName: Direct Server
+copyright: Copyright © opensourceapp-org
+asar: true
+npmRebuild: false
+nodeGypRebuild: false
+directories:
+  output: dist
+  buildResources: build
+files:
+  - electron/**/*
+  - package.json
+extraMetadata:
+  name: direct-server
+  main: electron/main.cjs
+extraResources:
+  - from: build/signaling
+    to: signaling
+artifactName: Direct-Server-${os}.${ext}
+publish:
+  provider: github
+  owner: opensourceapp-org
+  repo: direct
+  releaseType: release
+mac:
+  category: public.app-category.utilities
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch:
+        - universal
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+linux:
+  category: Network
+  target:
+    - target: AppImage
+      arch:
+        - x64
+nsis:
+  oneClick: true
+  perMachine: false
+  shortcutName: Direct Server

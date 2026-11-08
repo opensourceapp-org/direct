@@ -1,5 +1,6 @@
 node_modules/
 dist/
+apps/server/build/signaling/
 .expo/
 .turbo/
 coverage/

@@ -525,14 +525,16 @@ private fun ServerHelp(onClose: () -> Unit) {
             Modifier.verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Muted("Clone DIRECT from https://github.com/opensourceapp-org/direct. On a Mac, double-click Start Server.command in that folder. On any computer, the commands below open the server window. It shows the address to share and lists each phone that connects. Direct.app is the iPhone app. macOS will not open it.")
+            Muted("Download Direct Server for Mac, Windows, or Linux from https://direct-server.apps.grok.bot. Open the app, press Start server, and share the address it shows. Each phone that connects is listed in the window.")
+            HelpCode("https://direct-server.apps.grok.bot")
+            Muted("To run it from source instead, clone the project. On a Mac, double-click Start Server.command in that folder. Direct.app is the iPhone app. macOS will not open it.")
             HelpCode("git clone https://github.com/opensourceapp-org/direct.git\ncd direct\npnpm install\npnpm server")
             Muted("The server only introduces the two phones. It does not store messages, photos, voice notes, or calls.")
             HelpBlock(
                 "What you need",
-                "A computer both phones can reach, Node.js 22 or newer, pnpm, and this DIRECT project on that computer.",
+                "A computer both phones can reach. The download does not need Node.js. From source, you need Node.js 22 or newer, pnpm, and this DIRECT project on that computer.",
             )
-            HelpBlock("Start it", "pnpm server opens the Direct server window. Press Start server. The window shows one address for each network on that computer and lists each phone that connects. Closing the window stops the server. The same server can run in a terminal with pnpm signaling. Leave that terminal open. Use the address your phones are on, for example:")
+            HelpBlock("Start it", "Open Direct Server, or run pnpm server from source. Press Start server. The window shows one address for each network on that computer and lists each phone that connects. Closing the window stops the server. The same server can run in a terminal with pnpm signaling. Leave that terminal open. Use the address your phones are on, for example:")
             HelpCode("ws://192.168.1.20:8787")
             Muted("Allow TCP port 8787 through that computer's firewall. On both phones, open Network, paste that address, and save it. Both phones must save the same address.")
             HelpBlock("Check that it is running", "On the same network, open this page in a browser. Replace the example with the address the window or the terminal showed.")

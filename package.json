@@ -10,6 +10,7 @@
     "build": "pnpm --filter @direct/mobile build",
     "signaling": "node infrastructure/signaling/server.mjs",
     "server": "pnpm --filter @direct/server start",
+    "dist:server": "pnpm --filter @direct/server dist",
     "postinstall": "node apps/server/run.cjs --prepare"
   },
   "dependencies": {
