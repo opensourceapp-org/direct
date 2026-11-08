@@ -31,7 +31,9 @@ Optional standalone bootstrap, for a host that is not the Vite preview. It excha
 pnpm signaling
 ```
 
-The same server opens in a window with `pnpm server`. The first run downloads the desktop app. On a Mac, double-click `Start Server.command` in the project folder. `Direct.app` is the iPhone app, and macOS will not open it. Press Start server, copy the `ws://` address it shows, and save that address on both phones. Each phone that connects is listed in the window. The page in [site/index.html](site/index.html) is the same set of steps. Clone the repository from [github.com/opensourceapp-org/direct](https://github.com/opensourceapp-org/direct).
+Download Direct Server for macOS, Windows, or Linux from [direct-server.apps.grok.bot](https://direct-server.apps.grok.bot). Open the app, press Start server, copy the `ws://` address it shows, and save that address on both phones. Each phone that connects is listed in the window.
+
+Tagged builds start at [v0.1.0](https://github.com/opensourceapp-org/direct/releases/tag/v0.1.0). The same page in [site/index.html](site/index.html) also has clone steps. From source, `pnpm server` downloads the desktop app the first time. On a Mac, double-click `Start Server.command` in the project folder. `Direct.app` is the iPhone app, and macOS will not open it. Clone the repository from [github.com/opensourceapp-org/direct](https://github.com/opensourceapp-org/direct).
 
 ## Install on Android or iPhone
 

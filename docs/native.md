@@ -6,7 +6,9 @@ Phones run DIRECT as a native app. Android is Kotlin in `native/android`. iOS is
 
 ## Signaling server
 
-On a computer both phones can reach:
+On a computer both phones can reach, download Direct Server for macOS, Windows, or Linux from [direct-server.apps.grok.bot](https://direct-server.apps.grok.bot). Open it, press Start server, and share the `ws://` address it shows. The window lists each phone that connects. Builds are tagged on GitHub, starting at [v0.1.0](https://github.com/opensourceapp-org/direct/releases/tag/v0.1.0).
+
+To run the same window from source:
 
 ```bash
 git clone https://github.com/opensourceapp-org/direct.git
@@ -15,7 +17,7 @@ pnpm install
 pnpm server
 ```
 
-`pnpm server` downloads the desktop app the first time, then opens it. On a Mac, double-click `Start Server.command` in the project folder. `Direct.app` is the iPhone build. macOS will not open that file. Start server, then share the `ws://` address it shows. The window lists each phone that connects. `pnpm signaling` runs the same server in the terminal and prints those addresses. The steps are also on the page in `site/index.html`.
+`pnpm server` downloads the desktop app the first time, then opens it. On a Mac, double-click `Start Server.command` in the project folder. `Direct.app` is the iPhone build. macOS will not open that file. `pnpm signaling` runs the same server in the terminal and prints those addresses. The steps are also on the page in `site/index.html`.
 
 ```bash
 pnpm signaling
