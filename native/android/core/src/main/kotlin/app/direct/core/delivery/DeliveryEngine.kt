@@ -51,6 +51,9 @@ class DeliveryEngine(
     private var rerun = false
     private val bundles = HashMap<String, PublicBundle>()
 
+    /** Plaintext of a call signal, invoked on the node dispatcher before [receive] returns. */
+    var onCall: ((String) -> Unit)? = null
+
     fun queueText(peerId: String, text: String): MessageRecord {
         val (keys, deviceId) = identity() ?: throw DeliveryRejected("Create an identity before sending.")
         val body = text.trim()
@@ -311,6 +314,11 @@ class DeliveryEngine(
             return ingestMedia(peerId, contact, mediaPart.first, mediaPart.second, envelope.createdAt)
         }
         val plaintext = Encoding.text(opened)
+        if (envelope.type == EnvelopeType.CALL) {
+            if (!contact.accepted) return ReceiveOutcome.IGNORED
+            onCall?.invoke(plaintext)
+            return ReceiveOutcome.RECEIPT
+        }
         if (envelope.type == EnvelopeType.PROFILE) {
             val note = ProfileNotes.parse(plaintext) ?: return ReceiveOutcome.IGNORED
             val jpeg = note.avatarJpeg
@@ -350,10 +358,29 @@ class DeliveryEngine(
         val unread = store.messagesWith(peerId).filter { it.direction == Direction.INCOMING && !it.read }
         for (message in unread) {
             store.putMessage(message.copy(read = true, updatedAt = clock()))
+            if (message.mediaKind == "call") continue
             queueReceipt(contact, EnvelopeType.READ, message.id)
         }
         if (unread.isNotEmpty()) store.save()
         return unread.size
+    }
+
+    /** A call signal is sealed and returned. The caller writes it now. It is not queued. */
+    fun sealCall(peerId: String, plain: String): ByteArray? {
+        val (keys, deviceId) = identity() ?: return null
+        val contact = store.contact(peerId) ?: return null
+        if (!contact.accepted || contact.blocked) return null
+        val bundle = try {
+            bundleFor(contact)
+        } catch (_: Exception) {
+            return null
+        }
+        val now = clock()
+        val envelope = Envelopes.seal(
+            keys, deviceId, peerId, bundle.agreementPublic,
+            Encoding.newId("call"), EnvelopeType.CALL, Encoding.utf8(plain), now, ttlMs,
+        )
+        return Encoding.utf8(envelope.encode())
     }
 
     private fun queueReceipt(contact: ContactRecord, type: EnvelopeType, messageId: String) {

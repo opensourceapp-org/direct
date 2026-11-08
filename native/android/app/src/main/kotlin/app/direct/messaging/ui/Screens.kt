@@ -162,6 +162,7 @@ fun DirectRoot(node: DirectNode) {
             state.profile == null -> Onboarding(node)
             else -> Home(node, state) { replayIntro = true }
         }
+        state.call?.let { CallOverlay(node, state, it) }
     }
 }
 
@@ -346,6 +347,9 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(status, fontSize = 13.sp, color = Ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (contact?.accepted == true && !contact.blocked) {
+                CallActions(node, peerId) { error = it }
             }
         }
         HorizontalDivider(color = Ink.border)
@@ -937,7 +941,7 @@ private fun MessageBubble(node: DirectNode, message: MessageRecord, onRetry: () 
 }
 
 @Composable
-private fun Avatar(name: String, jpeg: ByteArray?, size: Dp = 44.dp) {
+internal fun Avatar(name: String, jpeg: ByteArray?, size: Dp = 44.dp) {
     val bitmap = remember(jpeg) { jpeg?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap() }
     Box(Modifier.size(size).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
         if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)

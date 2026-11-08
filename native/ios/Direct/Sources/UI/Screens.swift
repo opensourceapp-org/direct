@@ -26,6 +26,9 @@ struct RootView: View {
             } else {
                 HomeView()
             }
+            if let call = model.state.call {
+                CallScreen(call: call).ignoresSafeArea()
+            }
             if let toast = model.toast {
                 Text(toast)
                     .font(.footnote)
@@ -272,6 +275,18 @@ struct ChatView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                if contact?.accepted == true, contact?.blocked != true {
+                    Button { model.placeCall(peerId, video: false) } label: {
+                        Image(systemName: "phone.fill").font(.system(size: 18)).foregroundStyle(Ink.accent).frame(width: 36, height: 40)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Audio call")
+                    Button { model.placeCall(peerId, video: true) } label: {
+                        Image(systemName: "video.fill").font(.system(size: 18)).foregroundStyle(Ink.accent).frame(width: 36, height: 40)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Video call")
+                }
             }
             .padding(.leading, 8)
             .padding(.trailing, 16)

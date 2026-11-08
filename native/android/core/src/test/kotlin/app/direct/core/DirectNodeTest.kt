@@ -1,6 +1,7 @@
 package app.direct.core
 
 import app.direct.core.delivery.MessageState
+import app.direct.core.node.CallPhase
 import app.direct.core.node.DirectException
 import app.direct.core.node.DirectNode
 import app.direct.core.protocol.ProfileCards
@@ -202,5 +203,69 @@ class DirectNodeTest {
         settle()
         assertEquals(Phase.OPEN, ada.state.value.bootstrap.phase)
         ada.close()
+    }
+
+    @Test
+    fun `an audio call is sealed on the data channel and the bootstrap never sees it`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-call")
+        val bo = node(MemorySecretStore(), "bo-call")
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        ada.setBootstrap("192.168.1.20")
+        bo.setBootstrap("192.168.1.20")
+        settle()
+        val adaId = ada.state.value.profile!!.directId
+        val boId = bo.state.value.profile!!.directId
+        ada.addContact(boId)
+        settle()
+        bo.acceptRequest(adaId)
+        settle()
+
+        ada.placeCall(boId, false)
+        settle()
+        val incoming = bo.state.value.call
+        assertEquals(CallPhase.INCOMING, incoming?.phase)
+        assertEquals(false, incoming?.video)
+        assertEquals(boId, ada.state.value.call?.peerId)
+
+        bo.acceptCall()
+        settle()
+        assertEquals(CallPhase.CONNECTING, ada.state.value.call?.phase)
+        ada.relayOffer("direct-call-offer")
+        settle()
+        bo.relayAnswer("direct-call-answer")
+        ada.markCallLive()
+        bo.markCallLive()
+        settle()
+        assertEquals(CallPhase.ACTIVE, ada.state.value.call?.phase)
+        assertEquals(CallPhase.ACTIVE, bo.state.value.call?.phase)
+        assertTrue(hub.received.none { "direct-call-offer" in it || "direct-call-answer" in it || "\"op\":\"invite\"" in it })
+
+        ada.endCall()
+        settle()
+        assertEquals(CallPhase.ENDED, bo.state.value.call?.phase)
+        assertTrue(ada.state.value.messages.getValue(boId).any { it.mediaKind == "call" && it.body.startsWith("Audio call") })
+        assertTrue(bo.state.value.messages.getValue(adaId).any { it.mediaKind == "call" && it.body.startsWith("Audio call") })
+
+        ada.dismissCall()
+        bo.dismissCall()
+        ada.placeCall(boId, true)
+        settle()
+        assertEquals(true, bo.state.value.call?.video)
+        bo.endCall()
+        settle()
+        assertEquals("Call declined", ada.state.value.call?.reason)
+        assertEquals("Declined", bo.state.value.call?.reason)
+
+        ada.dismissCall()
+        bo.dismissCall()
+        network.goOffline(boId)
+        val missed = assertFailsWith<DirectException> { ada.placeCall(boId, false) }
+        assertEquals(DirectException.Reason.REJECTED, missed.reason)
+        assertEquals("Unreachable", ada.state.value.call?.reason)
+        ada.close()
+        bo.close()
     }
 }

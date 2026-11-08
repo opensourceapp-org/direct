@@ -34,9 +34,9 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>DIRECT uses the camera to scan another phone's profile QR code.</string>
+	<string>DIRECT uses the camera to scan a profile QR code and to show your picture on a video call. The picture goes directly to the other phone.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>DIRECT uses the microphone to record a voice message that is sealed on this phone and sent directly to the other phone.</string>
+	<string>DIRECT uses the microphone for voice messages and for audio and video calls. The audio is sealed on this phone and goes directly to the other phone.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>DIRECT reads a photo, video, or GIF you choose so it can be sealed on this phone and sent directly to the other phone.</string>
 	<key>NSLocalNetworkUsageDescription</key>
@@ -49,6 +49,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+		<string>audio</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

@@ -39,6 +39,9 @@ public final class DeliveryEngine {
     private var rerun = false
     private var bundles: [String: PublicBundle] = [:]
 
+    /// Plaintext of a call signal, invoked on DirectActor before `receive` returns.
+    public var onCall: ((String) -> Void)?
+
     public init(
         store: LocalStore,
         identity: @escaping () -> (IdentityKeys, String)?,
@@ -341,6 +344,11 @@ public final class DeliveryEngine {
             return try ingestMedia(peerId, contact, header, chunk, envelope.createdAt)
         }
         guard let plaintext = String(data: opened, encoding: .utf8) else { return .ignored }
+        if envelope.type == .call {
+            guard contact.accepted else { return .ignored }
+            onCall?(plaintext)
+            return .receipt
+        }
         if envelope.type == .profile {
             guard let note = ProfileNotes.parse(plaintext) else { return .ignored }
             var updated = contact
@@ -383,10 +391,24 @@ public final class DeliveryEngine {
             message.read = true
             message.updatedAt = clock()
             store.putMessage(message)
+            if message.mediaKind == "call" { continue }
             try queueReceipt(contact, .read, message.id)
         }
         if !unread.isEmpty { try store.save() }
         return unread.count
+    }
+
+    /// A call signal is sealed and returned. The caller writes it now. It is not queued.
+    public func sealCall(_ peerId: String, _ plain: String) -> Data? {
+        guard let (keys, deviceId) = identity(),
+              let contact = store.contact(peerId), contact.accepted, !contact.blocked,
+              let bundle = try? bundleFor(contact),
+              let envelope = try? Envelopes.seal(
+                sender: keys, deviceId: deviceId, recipientId: peerId, recipientAgreementPublic: bundle.agreementPublic,
+                id: Encoding.newId("call"), type: .call, plaintext: Encoding.utf8(plain), createdAt: clock(), ttlMs: ttlMs
+              )
+        else { return nil }
+        return Encoding.utf8(envelope.encode())
     }
 
     private func queueReceipt(_ contact: ContactRecord, _ type: EnvelopeType, _ messageId: String) throws {

@@ -27,6 +27,7 @@ Both phones must save the same bootstrap, for example `ws://192.168.1.20:8787`. 
 4. Send. The envelope is sealed and queued before any network attempt. If the other phone is closed, the row stays `Queued` and retries with backoff.
 5. The recipient sees a message request. Accepting it sends read receipts. Declining it blocks that DIRECT ID.
 6. A profile photo and status are sealed to each accepted contact when they change, when you add or accept that contact, and again when a queued update is still waiting and that phone becomes reachable. The picture is not part of the signed bundle, and the bootstrap never receives it. Android applies the photo's EXIF orientation before saving it, so a portrait shot stays portrait. The chat header places the photo to the left of the name, with the status on the line under the name.
+7. An accepted chat has an audio call button and a video call button. The invite, the answer, and the call's own addresses are sealed on the data channel. A second peer connection carries the microphone and, for video, the camera. The bootstrap never hears the call. Both phones have to be open and already able to reach each other. A call is not queued. If the other phone is closed, the row says Unreachable and a message can still wait on this phone. A missed call stays in the chat. The phone rings for 45 seconds.
 
 Outgoing states, in order: Queued, Sending, Sent (written to the data channel), Delivered (the recipient stored it and signed an `ack`, including when it is still a request), Read (the recipient accepted the conversation and opened it). Failed means the envelope expired or the contact was blocked; tap it to seal a fresh envelope under the same id.
 
@@ -94,4 +95,4 @@ This repository's CI environment can compile the Android debug APK and run the K
 - The seal is one-shot X25519 + HKDF-SHA256 + AES-256-GCM. It is not the Signal Double Ratchet.
 - The local store is one encrypted snapshot file, not a SQL database.
 - Writing to the data channel is Sent. Delivered requires the recipient's signed `ack`.
-- A closed app cannot receive. Android retries while WorkManager is allowed to run. iOS retries on the next foreground or background refresh.
+- A closed app cannot receive. Android retries while WorkManager is allowed to run. iOS retries on the next foreground or background refresh. A call is live only: there is no push, so a force-quit phone cannot ring. Android keeps a call notification so the microphone can stay on while the screen is locked. iOS keeps the audio session while the app is in the background. The same STUN servers are used. A symmetric NAT still needs a TURN server you operate, or the call stays on Connecting.

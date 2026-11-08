@@ -7,6 +7,7 @@ import app.direct.core.crypto.IdentityKeys
 import app.direct.core.crypto.PublicBundle
 import app.direct.core.delivery.DeliveryEngine
 import app.direct.core.delivery.DeliveryRejected
+import app.direct.core.protocol.CallNotes
 import app.direct.core.protocol.Envelopes
 import app.direct.core.protocol.MediaNotes
 import app.direct.core.protocol.ProfileCards
@@ -69,6 +70,7 @@ data class NodeState(
     val foreground: Boolean = true,
     val networkAvailable: Boolean = true,
     val storageError: String? = null,
+    val call: CallSnapshot? = null,
 )
 
 /**
@@ -103,6 +105,21 @@ class DirectNode(
     private var foreground = true
     private var networkAvailable = true
     private var mediaDir: File? = null
+    private var callPlain: String? = null
+
+    /** Media (microphone, camera, and the call's own peer connection) listens here. */
+    var onCallEvent: ((CallEvent) -> Unit)? = null
+
+    private val board by lazy {
+        CallBoard(
+            clock = clock,
+            selfId = { keys?.directId },
+            send = { peerId, note -> sendCall(peerId, note) },
+            record = { peerId, id, outgoing, label, missed -> recordCall(peerId, id, outgoing, label, missed) },
+            changed = { publish() },
+            signal = { onCallEvent?.invoke(it) },
+        )
+    }
 
     suspend fun start() = onNode {
         if (_state.value.ready) return@onNode
@@ -240,6 +257,39 @@ class DirectNode(
         wake.trySend(Unit)
         message
     }
+
+    /** Rings an accepted contact. The invite is sealed and written now; it is not queued. */
+    suspend fun placeCall(peerId: String, video: Boolean) = onNode {
+        val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+        if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+        if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before calling.")
+        if (keys == null) throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+        try {
+            board.place(peerId, video, Encoding.newId("call"))
+        } catch (error: CallRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "The call could not start.")
+        }
+    }
+
+    suspend fun acceptCall() = onNode { board.accept() }
+
+    suspend fun endCall() = onNode { board.end() }
+
+    suspend fun dismissCall() = onNode { board.dismiss() }
+
+    suspend fun relayOffer(sdp: String) = onNode { board.relayOffer(sdp) }
+
+    suspend fun relayAnswer(sdp: String) = onNode { board.relayAnswer(sdp) }
+
+    suspend fun relayIce(candidate: String, mid: String, line: Int) = onNode { board.relayIce(candidate, mid, line) }
+
+    suspend fun markCallLive() = onNode { board.markLive() }
+
+    suspend fun setCallMuted(muted: Boolean) = onNode { board.update(muted = muted) }
+
+    suspend fun setCallSpeaker(speaker: Boolean) = onNode { board.update(speaker = speaker) }
+
+    suspend fun setCallCamera(enabled: Boolean) = onNode { board.update(camera = enabled) }
 
     suspend fun readMedia(messageId: String): ByteArray? = onNode {
         val name = store.message(messageId)?.mediaFile ?: return@onNode null
@@ -402,7 +452,10 @@ class DirectNode(
         transport?.closeAll()
         keys = identity
         val profile = store.profile ?: return
-        engine = DeliveryEngine(store, { keys?.let { it to profile.deviceId } }, linksProxy, clock, random, ttlMs, mediaDirectory = mediaDir).also { it.recover() }
+        engine = DeliveryEngine(store, { keys?.let { it to profile.deviceId } }, linksProxy, clock, random, ttlMs, mediaDirectory = mediaDir).also {
+            it.recover()
+            it.onCall = { text -> callPlain = text }
+        }
         transport = transportFactory(bootstrap, identity.directId, scope).also { it.setListener(listener) }
         bootstrap.announce(identity.directId, Bundles.create(identity, profile.name, profile.deviceId).encode())
         refreshWatch()
@@ -448,7 +501,10 @@ class DirectNode(
             }
             saveContact(bundle, accepted = false)
         }
+        callPlain = null
         requireEngine().receive(peerId, payload)
+        val plain = callPlain
+        if (plain != null) board.onRemote(peerId, plain)
         publish()
         wake.trySend(Unit)
     }
@@ -472,9 +528,12 @@ class DirectNode(
     private suspend fun runLoop() {
         while (scope.isActive) {
             engine?.flush()
+            board.tick()
             publish()
             val next = engine?.nextWakeAt()
-            val wait = if (next == null) IDLE_WAKE_MS else (next - clock()).coerceIn(MIN_WAKE_MS, IDLE_WAKE_MS)
+            val engineWait = if (next == null) IDLE_WAKE_MS else (next - clock()).coerceIn(MIN_WAKE_MS, IDLE_WAKE_MS)
+            val ringWait = board.ringUntil?.let { (it - clock()).coerceIn(MIN_WAKE_MS, IDLE_WAKE_MS) }
+            val wait = if (ringWait == null) engineWait else minOf(engineWait, ringWait)
             withTimeoutOrNull(wait) { wake.receive() }
         }
     }
@@ -557,7 +616,30 @@ class DirectNode(
             pending = engine?.pendingCount() ?: 0,
             foreground = foreground,
             networkAvailable = networkAvailable,
+            call = board.snapshot,
         )
+    }
+
+    private suspend fun sendCall(peerId: String, note: CallNotes.Note): Boolean {
+        val bytes = engine?.sealCall(peerId, CallNotes.encode(note)) ?: return false
+        if (!linksProxy.isConnected(peerId) && !linksProxy.connect(peerId)) return false
+        return linksProxy.send(peerId, bytes)
+    }
+
+    private fun recordCall(peerId: String, id: String, outgoing: Boolean, label: String, missed: Boolean) {
+        val now = clock()
+        store.putMessage(
+            MessageRecord(
+                id = id,
+                peerId = peerId,
+                direction = if (outgoing) Direction.OUTGOING else Direction.INCOMING,
+                body = label,
+                createdAt = now,
+                read = !missed,
+                mediaKind = "call",
+            ),
+        )
+        store.save()
     }
 
     private suspend fun <T> onNode(block: suspend () -> T): T = withContext(dispatcher) { block() }

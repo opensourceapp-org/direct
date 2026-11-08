@@ -17,7 +17,8 @@ enum class EnvelopeType(val wire: String) {
     MESSAGE("message"),
     ACK("ack"),
     READ("read"),
-    PROFILE("profile");
+    PROFILE("profile"),
+    CALL("call");
 
     companion object {
         fun fromWire(value: String?): EnvelopeType? = entries.firstOrNull { it.wire == value }
