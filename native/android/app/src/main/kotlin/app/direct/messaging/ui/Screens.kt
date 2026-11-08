@@ -46,8 +46,8 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.outlined.Chat
@@ -59,6 +59,7 @@ import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.QrCode
@@ -118,7 +119,7 @@ private enum class Tab(val label: String, val icon: ImageVector, val selectedIco
     CHATS("Chats", Icons.Outlined.Chat, Icons.Filled.Chat),
     CONTACTS("Contacts", Icons.Outlined.Group, Icons.Filled.Group),
     NETWORK("Network", Icons.Outlined.WifiTethering, Icons.Filled.WifiTethering),
-    IDENTITY("Identity", Icons.Outlined.Key, Icons.Filled.Key),
+    IDENTITY("Settings", Icons.Outlined.Settings, Icons.Filled.Settings),
 }
 
 private fun CoroutineScope.attempt(onError: (String?) -> Unit, block: suspend () -> Unit) = launch {

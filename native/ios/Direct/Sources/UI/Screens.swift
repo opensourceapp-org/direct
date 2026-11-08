@@ -117,7 +117,7 @@ struct HomeView: View {
             NavigationStack { ChatsView() }.tabItem { Label("Chats", systemImage: "bubble.left.and.bubble.right") }
             NavigationStack { ContactsView() }.tabItem { Label("Contacts", systemImage: "person.2") }
             NavigationStack { NetworkView() }.tabItem { Label("Network", systemImage: "antenna.radiowaves.left.and.right") }
-            NavigationStack { IdentityView() }.tabItem { Label("Identity", systemImage: "key") }
+            NavigationStack { IdentityView() }.tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .tint(Ink.accent)
     }
@@ -590,7 +590,7 @@ struct IdentityView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .navigationTitle("Identity")
+        .navigationTitle("Settings")
         .onAppear { status = model.state.profile?.status ?? "" }
         .onChange(of: model.state.profile?.status) { status = $0 ?? "" }
         .onChange(of: photoItem) { item in
