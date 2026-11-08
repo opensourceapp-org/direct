@@ -22,6 +22,7 @@ import org.webrtc.CameraVideoCapturer
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
+import org.webrtc.audio.JavaAudioDeviceModule
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
@@ -57,7 +58,7 @@ class CallMedia(
         .build()
 
     private val factory: PeerConnectionFactory
-    private var audioModule: org.webrtc.JavaAudioDeviceModule? = null
+    private val audioModule: JavaAudioDeviceModule
     private var connection: PeerConnection? = null
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
@@ -78,10 +79,7 @@ class CallMedia(
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions(),
         )
-        audioModule = org.webrtc.JavaAudioDeviceModule.builder(context.applicationContext)
-            .setUseHardwareAcousticEchoCanceler(true)
-            .setUseHardwareNoiseSuppressor(true)
-            .createAudioDeviceModule()
+        audioModule = JavaAudioDeviceModule.builder(context.applicationContext).createAudioDeviceModule()
         val builder = PeerConnectionFactory.builder().setAudioDeviceModule(audioModule)
         egl?.eglBaseContext?.let { context ->
             builder
