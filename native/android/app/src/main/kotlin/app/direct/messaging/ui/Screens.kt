@@ -397,6 +397,7 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
     var status by rememberSaveable(profile.status) { mutableStateOf(profile.status) }
     var error by remember { mutableStateOf<String?>(null) }
     var showQr by rememberSaveable { mutableStateOf(false) }
+    var acknowledged by remember { mutableStateOf<String?>(null) }
     val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -411,8 +412,12 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
     val bundle = state.bundle
     val server = state.bootstrapUrl.orEmpty()
     val card = bundle?.let { shareCard(profile, it, server) }
+    val statusDraft = status.trim()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Header("This phone", profile.name)
+        if (profile.status.isNotBlank()) {
+            Text(profile.status, modifier = Modifier.padding(horizontal = 20.dp), fontSize = 16.sp)
+        }
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Avatar(profile.name, jpegBytes(profile.avatarJpegBase64), 72.dp)
@@ -423,11 +428,26 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
             }
             Label("Status")
             Field(status, { status = it.take(80) }, "Write your own status")
-            PrimaryButton("Save status") { scope.attempt({ error = it }) { node.setStatus(status) } }
+            PrimaryButton(if (acknowledged == statusDraft) "Saved" else "Save status") {
+                scope.attempt({ error = it }) {
+                    node.setStatus(status)
+                    acknowledged = status.trim()
+                }
+            }
+            if (acknowledged == statusDraft) {
+                Text(
+                    if (statusDraft.isEmpty()) "Status cleared" else "Status saved",
+                    color = Ink.success,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
             statusPresets.forEach { preset ->
                 StatusChoice(preset, selected = profile.status == preset) {
                     status = preset
-                    scope.attempt({ error = it }) { node.setStatus(preset) }
+                    scope.attempt({ error = it }) {
+                        node.setStatus(preset)
+                        acknowledged = preset
+                    }
                 }
             }
             Muted("Choose one, or write your own and tap Save status.")

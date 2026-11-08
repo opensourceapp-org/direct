@@ -416,6 +416,8 @@ struct NetworkView: View {
 struct IdentityView: View {
     @EnvironmentObject private var model: AppModel
     @State private var status = ""
+    /// The draft last written by Save status. The button shows Saved while the field still matches it.
+    @State private var acknowledged: String?
     @State private var photoItem: PhotosPickerItem?
     @State private var showQr = false
     @State private var qrImage: UIImage?
@@ -430,6 +432,9 @@ struct IdentityView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(profile.name).font(.title3.bold())
                             Text("Your name").font(.caption).foregroundStyle(Ink.muted)
+                            if !profile.status.isEmpty {
+                                Text(profile.status).font(.subheadline)
+                            }
                         }
                     }
                     VStack(alignment: .leading, spacing: 4) {
@@ -452,10 +457,23 @@ struct IdentityView: View {
                 .listRowBackground(Ink.surface)
                 Section {
                     Field(placeholder: "Write your own status", text: $status)
-                    PrimaryButton(title: "Save status") { model.setStatus(status) }
+                    PrimaryButton(title: acknowledged == statusDraft ? "Saved" : "Save status") {
+                        acknowledged = statusDraft
+                        model.setStatus(status)
+                    }
+                    if acknowledged == statusDraft {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Ink.success)
+                            Text(statusDraft.isEmpty ? "Status cleared" : "Status saved")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(Ink.success)
+                        }
+                    }
                     ForEach(StatusPresets.all, id: \.self) { preset in
                         Button {
                             status = preset
+                            acknowledged = preset
                             model.setStatus(preset)
                         } label: {
                             HStack(spacing: 12) {
@@ -571,6 +589,8 @@ struct IdentityView: View {
             }
         }
     }
+
+    private var statusDraft: String { status.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private func actionLabel(_ title: String, icon: String, tint: Color) -> some View {
         HStack(spacing: 12) {
