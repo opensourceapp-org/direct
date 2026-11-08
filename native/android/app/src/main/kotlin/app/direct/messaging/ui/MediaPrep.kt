@@ -4,22 +4,26 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Matrix
-import android.graphics.Paint
-import android.graphics.RectF
 import android.media.ExifInterface
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.ByteOrder
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 data class Prepared(val kind: String, val mime: String, val name: String, val bytes: ByteArray)
 
@@ -79,84 +83,11 @@ object MediaPrep {
         return out.takeIf { it.size in 3..700 && it[0] == 0xFF.toByte() }
     }
 
+    const val STICKER_COUNT = Stickers.COUNT
+
     fun sticker(index: Int): Prepared {
-        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        when (index % 6) {
-            0 -> {
-                paint.color = Color.parseColor("#0E6B45")
-                canvas.drawCircle(128f, 128f, 110f, paint)
-                paint.color = Color.WHITE
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 10f
-                paint.strokeCap = Paint.Cap.ROUND
-                canvas.drawArc(RectF(78f, 88f, 178f, 188f), 20f, 140f, false, paint)
-                paint.style = Paint.Style.FILL
-                canvas.drawCircle(98f, 112f, 10f, paint)
-                canvas.drawCircle(158f, 112f, 10f, paint)
-            }
-            1 -> {
-                paint.color = Color.parseColor("#C44536")
-                canvas.drawCircle(96f, 108f, 48f, paint)
-                canvas.drawCircle(160f, 108f, 48f, paint)
-                val path = android.graphics.Path().apply {
-                    moveTo(58f, 128f)
-                    lineTo(128f, 210f)
-                    lineTo(198f, 128f)
-                }
-                canvas.drawPath(path, paint)
-            }
-            2 -> {
-                paint.color = Color.parseColor("#E2A322")
-                val path = android.graphics.Path().apply {
-                    moveTo(128f, 28f)
-                    lineTo(156f, 100f)
-                    lineTo(232f, 104f)
-                    lineTo(172f, 154f)
-                    lineTo(196f, 228f)
-                    lineTo(128f, 186f)
-                    lineTo(60f, 228f)
-                    lineTo(84f, 154f)
-                    lineTo(24f, 104f)
-                    lineTo(100f, 100f)
-                    close()
-                }
-                canvas.drawPath(path, paint)
-            }
-            3 -> {
-                paint.color = Color.parseColor("#2F6F8F")
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 16f
-                paint.strokeCap = Paint.Cap.ROUND
-                canvas.drawArc(RectF(40f, 70f, 140f, 170f), 200f, 220f, false, paint)
-                canvas.drawArc(RectF(116f, 70f, 216f, 170f), 120f, 220f, false, paint)
-            }
-            4 -> {
-                paint.color = Color.parseColor("#1A1916")
-                canvas.drawCircle(128f, 128f, 110f, paint)
-                paint.color = Color.parseColor("#F3F1EC")
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 14f
-                paint.strokeCap = Paint.Cap.ROUND
-                canvas.drawLine(78f, 132f, 114f, 168f, paint)
-                canvas.drawLine(114f, 168f, 184f, 92f, paint)
-            }
-            else -> {
-                paint.color = Color.parseColor("#F4C95D")
-                canvas.drawCircle(128f, 128f, 56f, paint)
-                paint.strokeWidth = 10f
-                paint.strokeCap = Paint.Cap.ROUND
-                for (i in 0 until 8) {
-                    canvas.save()
-                    canvas.rotate(i * 45f, 128f, 128f)
-                    canvas.drawLine(128f, 36f, 128f, 58f, paint)
-                    canvas.restore()
-                }
-            }
-        }
         val stream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        Stickers.bitmap(index).compress(Bitmap.CompressFormat.PNG, 100, stream)
         return Prepared("sticker", "image/png", "sticker.png", stream.toByteArray())
     }
 
@@ -225,6 +156,8 @@ object MediaPrep {
 class VoiceCapture(private val context: Context) {
     private var recorder: MediaRecorder? = null
     private var file: File? = null
+    private var startedAt = 0L
+    private val levels = ArrayDeque<Float>()
 
     fun start() {
         cancel()
@@ -239,7 +172,21 @@ class VoiceCapture(private val context: Context) {
         next.start()
         recorder = next
         file = out
+        startedAt = SystemClock.elapsedRealtime()
+        levels.clear()
     }
+
+    /** One bar of the live recording waveform, from the microphone peak since the last sample. */
+    fun sample() {
+        val raw = (recorder?.maxAmplitude ?: 0) / 32767f
+        val shaped = sqrt(raw.toDouble()).toFloat().coerceIn(0.08f, 1f)
+        levels.addLast(shaped)
+        while (levels.size > 32) levels.removeFirst()
+    }
+
+    fun waveform(): List<Float> = levels.toList()
+
+    fun elapsedMs(): Long = if (recorder == null) 0L else SystemClock.elapsedRealtime() - startedAt
 
     fun stop(): ByteArray {
         val recorded = file
@@ -271,6 +218,168 @@ class VoiceCapture(private val context: Context) {
         file?.delete()
         file = null
     }
+}
+
+/** Bar heights for a voice note, decoded from the AAC recording. Quiet notes stay a flat row. */
+object VoiceWaveform {
+    fun peaks(bytes: ByteArray, bars: Int = 28): FloatArray {
+        val quiet = FloatArray(bars) { 0.22f }
+        val file = File.createTempFile("direct-wave", ".m4a")
+        var codec: MediaCodec? = null
+        val extractor = MediaExtractor()
+        try {
+            file.writeBytes(bytes)
+            extractor.setDataSource(file.absolutePath)
+            var track = -1
+            var format: MediaFormat? = null
+            for (index in 0 until extractor.trackCount) {
+                val candidate = extractor.getTrackFormat(index)
+                val mime = candidate.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("audio/")) {
+                    track = index
+                    format = candidate
+                    break
+                }
+            }
+            if (track < 0 || format == null) return quiet
+            extractor.selectTrack(track)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return quiet
+            val decoder = MediaCodec.createDecoderByType(mime)
+            codec = decoder
+            decoder.configure(format, null, null, 0)
+            decoder.start()
+            val samples = ArrayList<Float>(4_096)
+            var channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 1
+            var floatPcm = false
+            val info = MediaCodec.BufferInfo()
+            var inputDone = false
+            var spins = 0
+            while (spins < 4_000) {
+                spins++
+                if (!inputDone) {
+                    val inIndex = decoder.dequeueInputBuffer(8_000)
+                    if (inIndex >= 0) {
+                        val buffer = decoder.getInputBuffer(inIndex)
+                        val size = if (buffer == null) -1 else extractor.readSampleData(buffer, 0)
+                        if (size < 0) {
+                            decoder.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            decoder.queueInputBuffer(inIndex, 0, size, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                when (val outIndex = decoder.dequeueOutputBuffer(info, 8_000)) {
+                    MediaCodec.INFO_TRY_AGAIN_LATER -> if (inputDone) break
+                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val out = decoder.outputFormat
+                        if (out.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) channels = out.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+                        floatPcm = out.containsKey(MediaFormat.KEY_PCM_ENCODING) && out.getInteger(MediaFormat.KEY_PCM_ENCODING) == android.media.AudioFormat.ENCODING_PCM_FLOAT
+                    }
+                    else -> if (outIndex >= 0) {
+                        val buffer = decoder.getOutputBuffer(outIndex)
+                        if (buffer != null && info.size > 0) {
+                            buffer.position(info.offset)
+                            buffer.limit(info.offset + info.size)
+                            buffer.order(ByteOrder.LITTLE_ENDIAN)
+                            var channel = 0
+                            if (floatPcm) {
+                                while (buffer.remaining() >= 4) {
+                                    val sample = abs(buffer.float)
+                                    if (channel == 0) samples.add(sample)
+                                    channel = (channel + 1) % channels
+                                }
+                            } else {
+                                while (buffer.remaining() >= 2) {
+                                    val sample = abs(buffer.short.toInt()) / 32768f
+                                    if (channel == 0) samples.add(sample)
+                                    channel = (channel + 1) % channels
+                                }
+                            }
+                        }
+                        decoder.releaseOutputBuffer(outIndex, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                    }
+                }
+            }
+            if (samples.isEmpty()) return quiet
+            val peaks = FloatArray(bars)
+            val width = samples.size.toFloat() / bars
+            for (bar in 0 until bars) {
+                val start = (bar * width).toInt()
+                val end = ((bar + 1) * width).toInt().coerceAtMost(samples.size)
+                var loud = 0f
+                for (index in start until end) if (samples[index] > loud) loud = samples[index]
+                peaks[bar] = loud
+            }
+            val loudest = peaks.maxOrNull() ?: 0f
+            if (loudest < 0.001f) return quiet
+            return FloatArray(bars) { index -> (peaks[index] / loudest).coerceIn(0.12f, 1f) }
+        } catch (_: Exception) {
+            return quiet
+        } finally {
+            runCatching { codec?.stop() }
+            runCatching { codec?.release() }
+            runCatching { extractor.release() }
+            file.delete()
+        }
+    }
+}
+
+/** Plays one voice note. Starting a note pauses whichever note was already playing. */
+class VoiceNotePlayer(context: Context, bytes: ByteArray, private val onDone: () -> Unit) {
+    private val file = File(context.cacheDir, "voice-play-${bytes.contentHashCode()}-${bytes.size}.m4a")
+    private var player: MediaPlayer? = null
+
+    init {
+        if (!file.exists() || file.length() != bytes.size.toLong()) file.writeBytes(bytes)
+        player = MediaPlayer().apply {
+            setDataSource(file.absolutePath)
+            setOnCompletionListener {
+                seekTo(0)
+                android.os.Handler(android.os.Looper.getMainLooper()).post(onDone)
+            }
+            prepare()
+        }
+        playing += this
+    }
+
+    fun play() {
+        pauseOthers(this)
+        player?.start()
+    }
+
+    fun pause() {
+        player?.pause()
+    }
+
+    fun isPlaying(): Boolean = player?.isPlaying == true
+
+    fun position(): Int = player?.currentPosition ?: 0
+
+    fun duration(): Int = player?.duration ?: 0
+
+    fun release() {
+        playing.remove(this)
+        player?.release()
+        player = null
+        file.delete()
+    }
+
+    companion object {
+        private val playing = mutableListOf<VoiceNotePlayer>()
+
+        fun pauseOthers(except: VoiceNotePlayer) {
+            playing.forEach { if (it !== except) it.pause() }
+        }
+    }
+}
+
+fun voiceClock(ms: Long): String {
+    if (ms <= 0L) return "0:00"
+    val total = ((ms + 500) / 1000).toInt()
+    return "%d:%02d".format(total / 60, total % 60)
 }
 
 fun openAttachment(context: Context, bytes: ByteArray, mime: String, id: String, kind: String?) {

@@ -10,6 +10,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.text.BasicTextField
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -46,8 +48,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -81,6 +84,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -91,6 +95,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -114,7 +121,10 @@ import app.direct.core.store.Direction
 import app.direct.core.store.MessageRecord
 import app.direct.core.store.Profile
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     CHATS("Chats", Icons.Outlined.Chat, Icons.Filled.Chat),
@@ -581,11 +591,27 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
     var attach by rememberSaveable { mutableStateOf(false) }
     var stickers by rememberSaveable { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
+    var wave by remember { mutableStateOf(List(24) { 0.18f }) }
+    var elapsed by remember { mutableStateOf(0L) }
     val voice = remember { VoiceCapture(context) }
     val stickersArt = remember {
-        (0 until 6).map { index ->
+        (0 until MediaPrep.STICKER_COUNT).map { index ->
             val prepared = MediaPrep.sticker(index)
             prepared to BitmapFactory.decodeByteArray(prepared.bytes, 0, prepared.bytes.size)
+        }
+    }
+    LaunchedEffect(recording) {
+        if (!recording) {
+            wave = List(24) { 0.18f }
+            elapsed = 0L
+            return@LaunchedEffect
+        }
+        while (true) {
+            voice.sample()
+            val next = voice.waveform()
+            wave = if (next.isEmpty()) List(24) { 0.18f } else next
+            elapsed = voice.elapsedMs()
+            delay(80)
         }
     }
     val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -611,17 +637,18 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
     }
     Column(Modifier.background(Ink.surface).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (stickers) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 stickersArt.forEach { (prepared, bitmap) ->
                     if (bitmap != null) {
                         Image(
                             bitmap.asImageBitmap(),
                             "Sticker",
-                            Modifier.size(56.dp).clip(CircleShape).clickable {
+                            Modifier.size(72.dp).clickable {
                                 stickers = false
                                 attach = false
                                 sendPrepared(scope, node, peerId, onDraft, draft, onError) { prepared }
                             },
+                            contentScale = ContentScale.Fit,
                         )
                     }
                 }
@@ -646,16 +673,24 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
             }
         }
         if (recording) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                RoundIcon(Icons.Filled.Mic, Ink.danger, Color.White, "Recording") {}
-                Muted("Recording", Modifier.weight(1f))
-                RoundIcon(Icons.AutoMirrored.Filled.Send, Ink.accent, Color.White, "Send voice") {
-                    recording = false
-                    sendPrepared(scope, node, peerId, onDraft, draft, onError) { Prepared("audio", "audio/mp4", "voice.m4a", voice.stop()) }
-                }
-                RoundIcon(Icons.Filled.Stop, Ink.border, Ink.danger, "Cancel") {
-                    recording = false
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                RoundIcon(Icons.Outlined.Delete, Color.Transparent, Ink.danger, "Cancel recording") {
                     voice.cancel()
+                    recording = false
+                }
+                VoiceWave(wave, 1f, Ink.success, Ink.success.copy(alpha = 0.35f), Modifier.weight(1f))
+                Text(voiceClock(elapsed), color = Ink.foreground, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                RoundIcon(Icons.AutoMirrored.Filled.Send, Ink.accent, Color.White, "Send voice") {
+                    val recorded = try {
+                        voice.stop()
+                    } catch (exception: Exception) {
+                        voice.cancel()
+                        recording = false
+                        onError(exception.message ?: "That recording is empty.")
+                        return@RoundIcon
+                    }
+                    recording = false
+                    sendPrepared(scope, node, peerId, onDraft, draft, onError) { Prepared("audio", "audio/mp4", "voice.m4a", recorded) }
                 }
             }
         } else {
@@ -706,6 +741,89 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VoiceWave(levels: List<Float>, progress: Float, played: Color, idle: Color, modifier: Modifier = Modifier) {
+    val bars = if (levels.isEmpty()) List(24) { 0.2f } else levels
+    Canvas(modifier.height(28.dp)) {
+        val count = bars.size
+        val barWidth = 3.dp.toPx()
+        val spacing = if (count > 1) ((size.width - count * barWidth) / (count - 1)).coerceAtLeast(2.dp.toPx()) else 0f
+        val used = count * barWidth + (count - 1) * spacing
+        var x = ((size.width - used) / 2f).coerceAtLeast(0f)
+        bars.forEachIndexed { index, level ->
+            val barHeight = (4.dp.toPx() + (size.height - 4.dp.toPx()) * level).coerceIn(4.dp.toPx(), size.height)
+            val reached = count <= 1 || index.toFloat() / (count - 1) <= progress
+            drawRoundRect(
+                color = if (reached) played else idle,
+                topLeft = Offset(x, (size.height - barHeight) / 2f),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f),
+            )
+            x += barWidth + spacing
+        }
+    }
+}
+
+@Composable
+private fun VoiceNote(bytes: ByteArray, outgoing: Boolean) {
+    var peaks by remember(bytes) { mutableStateOf(List(28) { 0.22f }) }
+    var playing by remember(bytes) { mutableStateOf(false) }
+    var progress by remember(bytes) { mutableStateOf(0f) }
+    var duration by remember(bytes) { mutableStateOf(0) }
+    var position by remember(bytes) { mutableStateOf(0) }
+    val context = LocalContext.current
+    val player = remember(bytes) { VoiceNotePlayer(context, bytes) { playing = false; progress = 0f; position = 0 } }
+    DisposableEffect(player) { onDispose { player.release() } }
+    LaunchedEffect(bytes) {
+        peaks = withContext(Dispatchers.Default) { VoiceWaveform.peaks(bytes).toList() }
+        duration = player.duration()
+    }
+    LaunchedEffect(playing) {
+        while (playing) {
+            if (!player.isPlaying()) {
+                playing = false
+                progress = 0f
+                position = 0
+                break
+            }
+            position = player.position()
+            val length = player.duration().coerceAtLeast(duration)
+            duration = length
+            progress = if (length > 0) position.toFloat() / length else 0f
+            delay(50)
+        }
+    }
+    val played = if (outgoing) Color.White else Ink.success
+    val idle = if (outgoing) Color.White.copy(alpha = 0.35f) else Ink.foreground.copy(alpha = 0.28f)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier.size(32.dp).clip(CircleShape).background(if (outgoing) Color.White else Ink.success).clickable {
+                if (playing) {
+                    player.pause()
+                    playing = false
+                } else {
+                    player.play()
+                    playing = true
+                }
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                if (playing) "Pause" else "Play",
+                tint = if (outgoing) Ink.accent else Color.White,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        VoiceWave(peaks, if (playing || progress > 0f) progress else 0f, played, idle, Modifier.weight(1f).widthIn(min = 96.dp))
+        Text(
+            voiceClock(if (position > 0) position.toLong() else duration.toLong()),
+            color = if (outgoing) Color.White.copy(alpha = 0.9f) else Ink.muted,
+            fontSize = 12.sp,
+        )
     }
 }
 
@@ -762,34 +880,42 @@ private fun MessageBubble(node: DirectNode, message: MessageRecord, onRetry: () 
     LaunchedEffect(message.id, message.mediaFile) {
         bytes = message.mediaFile?.let { node.readMedia(message.id) }
     }
+    val kind = message.mediaKind
+    val sticker = kind == "sticker"
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start) {
         Column(
             Modifier
-                .widthIn(max = 280.dp)
-                .background(if (outgoing) Ink.accent else Ink.surface, RoundedCornerShape(20.dp))
-                .border(androidx.compose.foundation.BorderStroke(1.dp, if (outgoing) Ink.accent else Ink.border), RoundedCornerShape(20.dp))
-                .padding(8.dp),
+                .widthIn(min = if (kind == "audio") 220.dp else 0.dp, max = 280.dp)
+                .then(
+                    if (sticker) Modifier else Modifier
+                        .background(if (outgoing) Ink.accent else Ink.surface, RoundedCornerShape(20.dp))
+                        .border(androidx.compose.foundation.BorderStroke(1.dp, if (outgoing) Ink.accent else Ink.border), RoundedCornerShape(20.dp))
+                        .padding(8.dp),
+                ),
         ) {
-            val kind = message.mediaKind
-            val picture = if (kind == "image" || kind == "gif" || kind == "sticker") {
+            val picture = if (kind == "image" || kind == "gif" || sticker) {
                 bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
             } else null
             if (picture != null) {
                 Image(
                     picture.asImageBitmap(),
                     MediaNotes.label(kind) ?: "Attachment",
-                    Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(12.dp)),
-                    contentScale = ContentScale.Crop,
+                    if (sticker) Modifier.size(148.dp) else Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(12.dp)),
+                    contentScale = if (sticker) ContentScale.Fit else ContentScale.Crop,
                 )
             }
             val label = MediaNotes.label(kind)
             val caption = message.body.isNotBlank() && message.body != label
-            if (caption || picture == null) {
+            if (kind == "audio") {
+                if (bytes != null) VoiceNote(bytes!!, outgoing)
+                else VoiceWave(emptyList(), 0f, if (outgoing) Color.White else Ink.success, if (outgoing) Color.White.copy(alpha = 0.35f) else Ink.foreground.copy(alpha = 0.28f), Modifier.fillMaxWidth())
+            }
+            if (caption || (picture == null && kind != "audio")) {
                 if (message.body.isNotBlank()) {
                     Text(message.body, color = if (outgoing) Color.White else Ink.foreground, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
                 }
             }
-            if ((kind == "video" || kind == "audio") && bytes != null) {
+            if (kind == "video" && bytes != null) {
                 Text(
                     "Open",
                     color = if (outgoing) Color.White else Ink.accent,

@@ -49,77 +49,267 @@ enum MediaPrep {
         return tiny
     }
 
+    static let stickerCount = 16
+
     static func sticker(_ index: Int) -> Data {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256))
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = 2
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256), format: format)
         let image = renderer.image { context in
             let cg = context.cgContext
-            switch index % 6 {
-            case 0:
-                UIColor(red: 0.05, green: 0.42, blue: 0.27, alpha: 1).setFill()
-                cg.fillEllipse(in: CGRect(x: 18, y: 18, width: 220, height: 220))
-                UIColor.white.setStroke()
-                cg.setLineWidth(10)
-                cg.setLineCap(.round)
-                cg.addArc(center: CGPoint(x: 128, y: 140), radius: 48, startAngle: 0.2, endAngle: .pi - 0.2, clockwise: false)
-                cg.strokePath()
-                cg.fillEllipse(in: CGRect(x: 88, y: 100, width: 18, height: 18))
-                cg.fillEllipse(in: CGRect(x: 150, y: 100, width: 18, height: 18))
-            case 1:
-                UIColor(red: 0.77, green: 0.27, blue: 0.21, alpha: 1).setFill()
-                cg.fillEllipse(in: CGRect(x: 48, y: 60, width: 90, height: 90))
-                cg.fillEllipse(in: CGRect(x: 118, y: 60, width: 90, height: 90))
-                cg.move(to: CGPoint(x: 58, y: 128))
-                cg.addLine(to: CGPoint(x: 128, y: 210))
-                cg.addLine(to: CGPoint(x: 198, y: 128))
-                cg.fillPath()
+            switch index % stickerCount {
+            case 0: head(cg, top: rgb(1, 0.88, 0.54), bottom: rgb(0.96, 0.65, 0.14)); eyes(cg, 118); blush(cg); mouth(cg, 156, 46)
+            case 1: head(cg, top: rgb(1, 0.95, 0.66), bottom: rgb(1, 0.76, 0.28)); joy(cg, 112); blush(cg); openMouth(cg, 158, 34, tongue: true)
             case 2:
-                UIColor(red: 0.89, green: 0.64, blue: 0.13, alpha: 1).setFill()
-                let star = UIBezierPath()
-                let points: [CGPoint] = [
-                    CGPoint(x: 128, y: 28), CGPoint(x: 156, y: 100), CGPoint(x: 232, y: 104),
-                    CGPoint(x: 172, y: 154), CGPoint(x: 196, y: 228), CGPoint(x: 128, y: 186),
-                    CGPoint(x: 60, y: 228), CGPoint(x: 84, y: 154), CGPoint(x: 24, y: 104), CGPoint(x: 100, y: 100),
-                ]
-                star.move(to: points[0])
-                points.dropFirst().forEach { star.addLine(to: $0) }
-                star.close()
-                star.fill()
-            case 3:
-                UIColor(red: 0.18, green: 0.44, blue: 0.56, alpha: 1).setStroke()
-                cg.setLineWidth(16)
-                cg.setLineCap(.round)
-                cg.addArc(center: CGPoint(x: 90, y: 128), radius: 50, startAngle: .pi, endAngle: 0, clockwise: false)
-                cg.strokePath()
-                cg.addArc(center: CGPoint(x: 166, y: 128), radius: 50, startAngle: 0, endAngle: .pi, clockwise: false)
-                cg.strokePath()
+                head(cg, top: rgb(1, 0.76, 0.83), bottom: rgb(1, 0.42, 0.58))
+                heart(cg, 92, 118, 16, rgb(0.88, 0.11, 0.28), rgb(1, 0.56, 0.69))
+                heart(cg, 164, 118, 16, rgb(0.88, 0.11, 0.28), rgb(1, 0.56, 0.69))
+                blush(cg); mouth(cg, 158, 40)
+            case 3: head(cg, top: rgb(1, 0.88, 0.54), bottom: rgb(0.94, 0.71, 0.16)); eye(cg, 96, 120, 11); wink(cg, 162, 122, 16); blush(cg); mouth(cg, 156, 42)
             case 4:
-                UIColor(red: 0.10, green: 0.10, blue: 0.09, alpha: 1).setFill()
-                cg.fillEllipse(in: CGRect(x: 18, y: 18, width: 220, height: 220))
-                UIColor(red: 0.95, green: 0.95, blue: 0.93, alpha: 1).setStroke()
-                cg.setLineWidth(14)
-                cg.setLineCap(.round)
-                cg.move(to: CGPoint(x: 78, y: 132))
-                cg.addLine(to: CGPoint(x: 114, y: 168))
-                cg.addLine(to: CGPoint(x: 184, y: 92))
+                head(cg, top: rgb(0.72, 0.95, 1), bottom: rgb(0.24, 0.72, 0.88))
+                eye(cg, 96, 112, 14); eye(cg, 160, 112, 14)
+                rgb(0.12, 0.23, 0.30).setFill(); cg.fillEllipse(in: CGRect(x: 110, y: 150, width: 36, height: 36))
+                rgb(1, 0.54, 0.50).setFill(); cg.fillEllipse(in: CGRect(x: 119, y: 165, width: 18, height: 18))
+            case 5:
+                head(cg, top: rgb(0.84, 0.90, 1), bottom: rgb(0.42, 0.55, 1))
+                eye(cg, 96, 124, 10); eye(cg, 160, 124, 10)
+                brow(cg, 96, 100, raised: true); brow(cg, 160, 100, raised: false)
+                rgb(0.14, 0.23, 0.45).setStroke(); cg.setLineWidth(7); cg.setLineCap(.round)
+                cg.addArc(center: CGPoint(x: 128, y: 196), radius: 36, startAngle: .pi + 0.4, endAngle: -.pi * 0.15, clockwise: false)
                 cg.strokePath()
-            default:
-                UIColor(red: 0.96, green: 0.79, blue: 0.36, alpha: 1).setFill()
-                cg.fillEllipse(in: CGRect(x: 72, y: 72, width: 112, height: 112))
-                cg.setLineWidth(10)
-                cg.setLineCap(.round)
-                UIColor(red: 0.96, green: 0.79, blue: 0.36, alpha: 1).setStroke()
-                for index in 0..<8 {
+            case 6:
+                head(cg, top: rgb(1, 0.71, 0.64), bottom: rgb(0.89, 0.29, 0.23))
+                brow(cg, 96, 104, raised: false); brow(cg, 160, 104, raised: true)
+                eye(cg, 96, 128, 9); eye(cg, 160, 128, 9)
+                rgb(0.42, 0.11, 0.09).setStroke(); cg.setLineWidth(8); cg.setLineCap(.round)
+                cg.move(to: CGPoint(x: 96, y: 176)); cg.addLine(to: CGPoint(x: 160, y: 176)); cg.strokePath()
+            case 7:
+                head(cg, top: rgb(0.72, 0.97, 0.83), bottom: rgb(0.12, 0.66, 0.44))
+                rgb(0.08, 0.14, 0.11).setFill()
+                cg.fill(UIBezierPath(roundedRect: CGRect(x: 58, y: 108, width: 64, height: 34), cornerRadius: 12).cgPath)
+                cg.fill(UIBezierPath(roundedRect: CGRect(x: 134, y: 108, width: 64, height: 34), cornerRadius: 12).cgPath)
+                cg.setStrokeColor(rgb(0.08, 0.14, 0.11).cgColor); cg.setLineWidth(8)
+                cg.move(to: CGPoint(x: 122, y: 124)); cg.addLine(to: CGPoint(x: 134, y: 124)); cg.strokePath()
+                UIColor.white.withAlphaComponent(0.35).setFill()
+                cg.fill(CGRect(x: 68, y: 114, width: 28, height: 10))
+                cg.fill(CGRect(x: 144, y: 114, width: 28, height: 10))
+                mouth(cg, 162, 36)
+            case 8:
+                head(cg, top: rgb(1, 0.82, 0.88), bottom: rgb(1, 0.44, 0.63))
+                eye(cg, 96, 118, 10); eye(cg, 160, 118, 10); blush(cg)
+                fillRadial(cg, 128, 168, 28, rgb(1, 0.36, 0.54), rgb(0.76, 0.09, 0.36))
+                UIColor.white.withAlphaComponent(0.35).setFill(); cg.fillEllipse(in: CGRect(x: 114, y: 156, width: 12, height: 12))
+            case 9:
+                head(cg, top: rgb(0.90, 0.86, 1), bottom: rgb(0.55, 0.42, 1))
+                eye(cg, 108, 120, 10); eye(cg, 156, 114, 10); brow(cg, 108, 98, raised: true)
+                rgb(0.23, 0.16, 0.42).setStroke(); cg.setLineWidth(7); cg.setLineCap(.round)
+                cg.addArc(center: CGPoint(x: 138, y: 168), radius: 28, startAngle: 0.2, endAngle: 1.4, clockwise: false); cg.strokePath()
+                rgb(1, 0.88, 0.70).setFill()
+                cg.fillEllipse(in: CGRect(x: 160, y: 170, width: 32, height: 32))
+                cg.fill(UIBezierPath(roundedRect: CGRect(x: 168, y: 176, width: 46, height: 30), cornerRadius: 14).cgPath)
+            case 10:
+                shadow(cg, 128, 168, 70)
+                heart(cg, 128, 132, 62, rgb(1, 0.30, 0.43), rgb(0.79, 0.09, 0.29))
+                UIColor.white.withAlphaComponent(0.45).setFill(); cg.fillEllipse(in: CGRect(x: 86, y: 98, width: 28, height: 28))
+            case 11: flame(cg)
+            case 12: thumb(cg)
+            case 13:
+                do {
+                    shadow(cg, 128, 150, 80)
                     cg.saveGState()
-                    cg.translateBy(x: 128, y: 128)
-                    cg.rotate(by: CGFloat(index) * .pi / 4)
-                    cg.move(to: CGPoint(x: 0, y: -92))
-                    cg.addLine(to: CGPoint(x: 0, y: -70))
-                    cg.strokePath()
+                    starPath(128, 128, 100, 44).addClip()
+                    let gold = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [rgb(1, 0.96, 0.76).cgColor, rgb(1, 0.72, 0.01).cgColor] as CFArray, locations: [0, 1])!
+                    cg.drawRadialGradient(gold, startCenter: CGPoint(x: 118, y: 90), startRadius: 0, endCenter: CGPoint(x: 128, y: 140), endRadius: 120, options: [])
                     cg.restoreGState()
+                    eye(cg, 104, 124, 8); eye(cg, 152, 124, 8); mouth(cg, 150, 28)
                 }
+            case 14: party(cg)
+            default: sparkles(cg)
             }
         }
         return image.pngData() ?? Data()
+    }
+
+    private static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> UIColor { UIColor(red: r, green: g, blue: b, alpha: 1) }
+
+    private static func shadow(_ cg: CGContext, _ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat) {
+        UIColor.black.withAlphaComponent(0.12).setFill()
+        cg.fillEllipse(in: CGRect(x: cx - r * 0.72, y: cy + 18, width: r * 1.44, height: 22))
+    }
+
+    private static func fillRadial(_ cg: CGContext, _ cx: CGFloat, _ cy: CGFloat, _ radius: CGFloat, _ top: UIColor, _ bottom: UIColor) {
+        cg.saveGState()
+        cg.addEllipse(in: CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2))
+        cg.clip()
+        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [top.cgColor, bottom.cgColor] as CFArray, locations: [0, 1])!
+        cg.drawRadialGradient(gradient, startCenter: CGPoint(x: cx - 10, y: cy - radius * 0.35), startRadius: 0, endCenter: CGPoint(x: cx, y: cy), endRadius: radius, options: [])
+        cg.restoreGState()
+    }
+
+    private static func head(_ cg: CGContext, top: UIColor, bottom: UIColor) {
+        shadow(cg, 128, 150, 90)
+        fillRadial(cg, 128, 136, 96, top, bottom)
+        UIColor.white.withAlphaComponent(0.32).setFill()
+        cg.fillEllipse(in: CGRect(x: 78, y: 62, width: 72, height: 46))
+    }
+
+    private static func eye(_ cg: CGContext, _ x: CGFloat, _ y: CGFloat, _ r: CGFloat) {
+        rgb(0.17, 0.14, 0.11).setFill()
+        cg.fillEllipse(in: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2))
+        UIColor.white.setFill()
+        cg.fillEllipse(in: CGRect(x: x - r * 0.7, y: y - r * 0.75, width: r * 0.64, height: r * 0.64))
+    }
+
+    private static func eyes(_ cg: CGContext, _ y: CGFloat) { eye(cg, 96, y, 11); eye(cg, 160, y, 11) }
+
+    private static func wink(_ cg: CGContext, _ x: CGFloat, _ y: CGFloat, _ r: CGFloat) {
+        rgb(0.17, 0.14, 0.11).setStroke(); cg.setLineWidth(7); cg.setLineCap(.round)
+        cg.addArc(center: CGPoint(x: x, y: y), radius: r, startAngle: .pi * 1.15, endAngle: .pi * 1.85, clockwise: false)
+        cg.strokePath()
+    }
+
+    private static func joy(_ cg: CGContext, _ y: CGFloat) {
+        rgb(0.17, 0.14, 0.11).setStroke(); cg.setLineWidth(7); cg.setLineCap(.round)
+        cg.addArc(center: CGPoint(x: 96, y: y + 6), radius: 16, startAngle: .pi * 1.15, endAngle: .pi * 1.85, clockwise: false)
+        cg.strokePath()
+        cg.addArc(center: CGPoint(x: 160, y: y + 6), radius: 16, startAngle: .pi * 1.15, endAngle: .pi * 1.85, clockwise: false)
+        cg.strokePath()
+    }
+
+    private static func brow(_ cg: CGContext, _ x: CGFloat, _ y: CGFloat, raised: Bool) {
+        rgb(0.17, 0.14, 0.11).setStroke(); cg.setLineWidth(7); cg.setLineCap(.round)
+        let tilt: CGFloat = raised ? -10 : 10
+        cg.move(to: CGPoint(x: x - 16, y: y + tilt)); cg.addLine(to: CGPoint(x: x + 16, y: y - tilt)); cg.strokePath()
+    }
+
+    private static func blush(_ cg: CGContext) {
+        UIColor(red: 1, green: 0.35, blue: 0.43, alpha: 0.32).setFill()
+        cg.fillEllipse(in: CGRect(x: 60, y: 136, width: 28, height: 28))
+        cg.fillEllipse(in: CGRect(x: 168, y: 136, width: 28, height: 28))
+    }
+
+    private static func mouth(_ cg: CGContext, _ y: CGFloat, _ half: CGFloat) {
+        rgb(0.35, 0.20, 0.09).setStroke(); cg.setLineWidth(8); cg.setLineCap(.round)
+        cg.addArc(center: CGPoint(x: 128, y: y), radius: half, startAngle: 0.25, endAngle: .pi - 0.25, clockwise: false)
+        cg.strokePath()
+    }
+
+    private static func openMouth(_ cg: CGContext, _ y: CGFloat, _ rx: CGFloat, tongue: Bool) {
+        rgb(0.23, 0.14, 0.08).setFill()
+        cg.fill(UIBezierPath(roundedRect: CGRect(x: 128 - rx, y: y - 16, width: rx * 2, height: 38), cornerRadius: 16).cgPath)
+        UIColor.white.setFill()
+        cg.fill(UIBezierPath(roundedRect: CGRect(x: 128 - rx + 6, y: y - 12, width: rx * 2 - 12, height: 11), cornerRadius: 6).cgPath)
+        if tongue {
+            rgb(1, 0.42, 0.51).setFill()
+            cg.fillEllipse(in: CGRect(x: 116, y: y + 2, width: 24, height: 16))
+        }
+    }
+
+    private static func heart(_ cg: CGContext, _ cx: CGFloat, _ cy: CGFloat, _ s: CGFloat, _ top: UIColor, _ bottom: UIColor) {
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: cx, y: cy + s * 0.85))
+        path.addCurve(to: CGPoint(x: cx, y: cy - s * 0.25), controlPoint1: CGPoint(x: cx - s * 1.15, y: cy + s * 0.15), controlPoint2: CGPoint(x: cx - s * 1.05, y: cy - s * 0.95))
+        path.addCurve(to: CGPoint(x: cx, y: cy + s * 0.85), controlPoint1: CGPoint(x: cx + s * 1.05, y: cy - s * 0.95), controlPoint2: CGPoint(x: cx + s * 1.15, y: cy + s * 0.15))
+        path.close()
+        cg.saveGState()
+        path.addClip()
+        let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [top.cgColor, bottom.cgColor] as CFArray, locations: [0, 1])!
+        cg.drawRadialGradient(gradient, startCenter: CGPoint(x: cx, y: cy - s * 0.2), startRadius: 0, endCenter: CGPoint(x: cx, y: cy), endRadius: s * 1.4, options: [])
+        cg.restoreGState()
+    }
+
+    private static func starPath(_ cx: CGFloat, _ cy: CGFloat, _ outer: CGFloat, _ inner: CGFloat) -> UIBezierPath {
+        let path = UIBezierPath()
+        for point in 0..<10 {
+            let radius = point % 2 == 0 ? outer : inner
+            let angle = (-90.0 + Double(point) * 36.0) * .pi / 180
+            let x = cx + CGFloat(cos(angle) * radius)
+            let y = cy + CGFloat(sin(angle) * radius)
+            if point == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        path.close()
+        return path
+    }
+
+    private static func flame(_ cg: CGContext) {
+        shadow(cg, 128, 190, 60)
+        let outer = UIBezierPath()
+        outer.move(to: CGPoint(x: 128, y: 28))
+        outer.addCurve(to: CGPoint(x: 196, y: 168), controlPoint1: CGPoint(x: 168, y: 78), controlPoint2: CGPoint(x: 214, y: 110))
+        outer.addCurve(to: CGPoint(x: 128, y: 236), controlPoint1: CGPoint(x: 184, y: 214), controlPoint2: CGPoint(x: 150, y: 236))
+        outer.addCurve(to: CGPoint(x: 60, y: 168), controlPoint1: CGPoint(x: 106, y: 236), controlPoint2: CGPoint(x: 72, y: 214))
+        outer.addCurve(to: CGPoint(x: 128, y: 28), controlPoint1: CGPoint(x: 42, y: 110), controlPoint2: CGPoint(x: 88, y: 78))
+        outer.close()
+        cg.saveGState(); outer.addClip()
+        let hot = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [rgb(1, 0.95, 0.69).cgColor, rgb(1, 0.42, 0).cgColor] as CFArray, locations: [0, 1])!
+        cg.drawRadialGradient(hot, startCenter: CGPoint(x: 128, y: 180), startRadius: 0, endCenter: CGPoint(x: 128, y: 180), endRadius: 120, options: [])
+        cg.restoreGState()
+        let inner = UIBezierPath()
+        inner.move(to: CGPoint(x: 128, y: 96))
+        inner.addCurve(to: CGPoint(x: 156, y: 186), controlPoint1: CGPoint(x: 150, y: 128), controlPoint2: CGPoint(x: 168, y: 150))
+        inner.addCurve(to: CGPoint(x: 128, y: 220), controlPoint1: CGPoint(x: 148, y: 210), controlPoint2: CGPoint(x: 136, y: 220))
+        inner.addCurve(to: CGPoint(x: 100, y: 182), controlPoint1: CGPoint(x: 118, y: 220), controlPoint2: CGPoint(x: 104, y: 206))
+        inner.addCurve(to: CGPoint(x: 128, y: 96), controlPoint1: CGPoint(x: 92, y: 148), controlPoint2: CGPoint(x: 108, y: 126))
+        inner.close()
+        cg.saveGState(); inner.addClip()
+        let core = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [UIColor.white.cgColor, rgb(1, 0.76, 0.03).cgColor] as CFArray, locations: [0, 1])!
+        cg.drawRadialGradient(core, startCenter: CGPoint(x: 128, y: 190), startRadius: 0, endCenter: CGPoint(x: 128, y: 190), endRadius: 70, options: [])
+        cg.restoreGState()
+    }
+
+    private static func thumb(_ cg: CGContext) {
+        shadow(cg, 128, 176, 70)
+        let skin = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [rgb(1, 0.88, 0.72).cgColor, rgb(0.91, 0.63, 0.35).cgColor] as CFArray, locations: [0, 1])!
+        cg.saveGState()
+        UIBezierPath(roundedRect: CGRect(x: 78, y: 108, width: 110, height: 112), cornerRadius: 40).addClip()
+        cg.drawRadialGradient(skin, startCenter: CGPoint(x: 120, y: 140), startRadius: 0, endCenter: CGPoint(x: 130, y: 170), endRadius: 110, options: [])
+        cg.restoreGState()
+        cg.saveGState()
+        UIBezierPath(roundedRect: CGRect(x: 48, y: 78, width: 70, height: 90), cornerRadius: 36).addClip()
+        cg.drawRadialGradient(skin, startCenter: CGPoint(x: 70, y: 100), startRadius: 0, endCenter: CGPoint(x: 80, y: 130), endRadius: 80, options: [])
+        cg.restoreGState()
+        UIColor.white.withAlphaComponent(0.28).setFill()
+        cg.fill(UIBezierPath(roundedRect: CGRect(x: 96, y: 124, width: 54, height: 26), cornerRadius: 16).cgPath)
+    }
+
+    private static func party(_ cg: CGContext) {
+        head(cg, top: rgb(1, 0.88, 0.54), bottom: rgb(0.96, 0.65, 0.14))
+        rgb(0.49, 0.30, 1).setFill()
+        let hat = UIBezierPath()
+        hat.move(to: CGPoint(x: 128, y: 28)); hat.addLine(to: CGPoint(x: 86, y: 118)); hat.addLine(to: CGPoint(x: 170, y: 118)); hat.close(); hat.fill()
+        rgb(1, 0.84, 0.04).setFill(); cg.fillEllipse(in: CGRect(x: 116, y: 16, width: 24, height: 24))
+        rgb(1, 0.30, 0.43).setFill(); cg.fillEllipse(in: CGRect(x: 102, y: 72, width: 12, height: 12))
+        rgb(0.24, 0.86, 0.59).setFill(); cg.fillEllipse(in: CGRect(x: 141, y: 65, width: 10, height: 10))
+        joy(cg, 132); openMouth(cg, 168, 26, tongue: false)
+        rgb(0.23, 0.51, 0.96).setFill(); cg.fillEllipse(in: CGRect(x: 33, y: 57, width: 14, height: 14))
+        rgb(1, 0.30, 0.43).setFill(); cg.fillEllipse(in: CGRect(x: 208, y: 74, width: 12, height: 12))
+        rgb(0.24, 0.86, 0.59).setFill(); cg.fillEllipse(in: CGRect(x: 201, y: 163, width: 10, height: 10))
+    }
+
+    private static func sparkles(_ cg: CGContext) {
+        spark(cg, 128, 118, 78, rgb(1, 0.84, 0.04))
+        spark(cg, 58, 70, 28, rgb(0.49, 0.30, 1))
+        spark(cg, 196, 64, 24, rgb(0.23, 0.51, 0.96))
+        spark(cg, 188, 176, 22, rgb(1, 0.30, 0.43))
+        spark(cg, 64, 176, 18, rgb(0.24, 0.86, 0.59))
+    }
+
+    private static func spark(_ cg: CGContext, _ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat, _ color: UIColor) {
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: cx, y: cy - r))
+        path.addLine(to: CGPoint(x: cx + r * 0.18, y: cy - r * 0.18))
+        path.addLine(to: CGPoint(x: cx + r, y: cy))
+        path.addLine(to: CGPoint(x: cx + r * 0.18, y: cy + r * 0.18))
+        path.addLine(to: CGPoint(x: cx, y: cy + r))
+        path.addLine(to: CGPoint(x: cx - r * 0.18, y: cy + r * 0.18))
+        path.addLine(to: CGPoint(x: cx - r, y: cy))
+        path.addLine(to: CGPoint(x: cx - r * 0.18, y: cy - r * 0.18))
+        path.close()
+        color.setFill(); path.fill()
+        UIColor.white.withAlphaComponent(0.7).setFill()
+        cg.fillEllipse(in: CGRect(x: cx - r * 0.22, y: cy - r * 0.28, width: r * 0.24, height: r * 0.24))
     }
 
     static func shareCard(bundle: String, status: String, avatarJpeg: Data?, bootstrap: String) -> String {
@@ -495,7 +685,7 @@ struct AttachmentBar: View {
             if stickers {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
-                        ForEach(0..<6, id: \.self) { index in
+                        ForEach(0..<MediaPrep.stickerCount, id: \.self) { index in
                             let data = MediaPrep.sticker(index)
                             if let image = UIImage(data: data) {
                                 Button {
@@ -504,8 +694,8 @@ struct AttachmentBar: View {
                                 } label: {
                                     Image(uiImage: image)
                                         .resizable()
-                                        .frame(width: 52, height: 52)
-                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                        .scaledToFit()
+                                        .frame(width: 72, height: 72)
                                 }
                                 .buttonStyle(ComposerPressStyle())
                             }
