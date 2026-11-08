@@ -14,8 +14,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -43,16 +45,16 @@ import app.direct.core.delivery.MessageState
 import app.direct.core.signaling.BootstrapStatus
 
 object Ink {
-    val foreground = Color(0xFF1A1916)
-    val muted = Color(0xFF6E6A62)
-    val border = Color(0xFFE4DFD6)
+    val foreground = Color(0xFF1C1C1E)
+    val muted = Color(0xFF8E8E93)
+    val border = Color(0xFFE5E5EA)
     val surface = Color.White
-    val background = Color(0xFFF3F1EC)
-    val accent = Color(0xFF0E6B45)
-    val accentSoft = Color(0xFFE5F2EB)
-    val success = Color(0xFF1F7A4D)
-    val warning = Color(0xFFB26B00)
-    val danger = Color(0xFFB3261E)
+    val background = Color(0xFFF2F2F7)
+    val accent = Color(0xFF0B57D0)
+    val accentSoft = Color(0xFFE8F0FE)
+    val success = Color(0xFF1E8E3E)
+    val warning = Color(0xFFE37400)
+    val danger = Color(0xFFD93025)
 }
 
 @Composable
@@ -87,21 +89,24 @@ fun Mono(text: String) = Text(text, fontFamily = FontFamily.Monospace, fontSize 
 fun PrimaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) = Button(
     onClick = onClick,
     enabled = enabled,
-    shape = RoundedCornerShape(8.dp),
+    shape = RoundedCornerShape(16.dp),
     colors = ButtonDefaults.buttonColors(containerColor = Ink.accent, contentColor = Color.White, disabledContainerColor = Ink.border, disabledContentColor = Ink.muted),
     modifier = Modifier.fillMaxWidth().height(48.dp),
 ) { Text(label, fontWeight = FontWeight.Medium) }
 
 @Composable
-fun SecondaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) = OutlinedButton(
+fun SecondaryButton(label: String, icon: ImageVector? = null, enabled: Boolean = true, onClick: () -> Unit) = OutlinedButton(
     onClick = onClick,
     enabled = enabled,
-    shape = RoundedCornerShape(8.dp),
+    shape = RoundedCornerShape(16.dp),
     border = BorderStroke(1.dp, Ink.border),
     colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.foreground),
     contentPadding = PaddingValues(horizontal = 16.dp),
     modifier = Modifier.fillMaxWidth().height(48.dp),
-) { Text(label, fontWeight = FontWeight.Medium) }
+) {
+    if (icon != null) Icon(icon, null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+    Text(label, fontWeight = FontWeight.Medium)
+}
 
 @Composable
 fun Field(value: String, onChange: (String) -> Unit, placeholder: String, singleLine: Boolean = true, minLines: Int = 1) {
@@ -114,7 +119,7 @@ fun Field(value: String, onChange: (String) -> Unit, placeholder: String, single
         minLines = minLines,
         keyboardOptions = KeyboardOptions(imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
         keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(16.dp),
         textStyle = TextStyle(fontSize = 16.sp),
         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Ink.foreground, unfocusedBorderColor = Ink.border),
         modifier = Modifier.fillMaxWidth(),
@@ -166,9 +171,9 @@ fun StatusRow(label: String, value: String, color: Color = Ink.muted) = Row(
 
 @Composable
 fun Card(content: @Composable () -> Unit) = Surface(
-    shape = RoundedCornerShape(8.dp),
+    shape = RoundedCornerShape(16.dp),
     border = BorderStroke(1.dp, Ink.border),
-    color = Ink.background,
+    color = Ink.surface,
     modifier = Modifier.fillMaxWidth(),
 ) { Column { content() } }
 
