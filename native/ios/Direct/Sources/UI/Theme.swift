@@ -87,6 +87,7 @@ struct Field: View {
 struct Avatar: View {
     let name: String
     let jpeg: String?
+    var size: CGFloat = 44
 
     var body: some View {
         Group {
@@ -94,11 +95,11 @@ struct Avatar: View {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Text(String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
-                    .font(.headline)
+                    .font(.system(size: size * 0.38, weight: .semibold))
                     .foregroundStyle(Color.white)
             }
         }
-        .frame(width: 44, height: 44)
+        .frame(width: size, height: size)
         .background(Ink.accent)
         .clipShape(Circle())
     }

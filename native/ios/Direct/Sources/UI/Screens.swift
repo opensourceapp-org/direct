@@ -425,57 +425,127 @@ struct IdentityView: View {
             if let profile = model.state.profile {
                 Section {
                     HStack(spacing: 16) {
-                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64)
-                        VStack(alignment: .leading, spacing: 8) {
-                            PhotosPicker(selection: $photoItem, matching: .images) {
-                                Text("Profile photo").foregroundStyle(Ink.accent)
-                            }
-                            if profile.avatarJpegBase64 != nil {
-                                Button("Remove photo") { model.clearAvatar() }.foregroundStyle(Ink.danger)
-                            }
+                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 64)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(profile.name).font(.title3.bold())
+                            Text("Your name").font(.caption).foregroundStyle(Ink.muted)
                         }
                     }
-                    TextField("Status", text: $status)
-                    Button("Save status") { model.setStatus(status) }.tint(Ink.accent)
-                    Text(profile.name).font(.title3.bold())
-                    Text(profile.directId).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                    Button("Copy DIRECT ID") { model.copy(profile.directId, label: "DIRECT ID") }.tint(Ink.accent)
-                    if let bundle = model.state.bundle {
-                        let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
-                        Button(showQr ? "Hide QR code" : "Show QR code") { showQr.toggle() }.tint(Ink.accent)
-                        if showQr, let image = MediaPrep.qrImage(card) {
-                            Image(uiImage: image).interpolation(.none).resizable().scaledToFit().frame(maxWidth: 240)
-                            Muted("The QR code is your signed identity, plus the status and a small photo. The status and photo are for display. They are not part of the signature.")
-                        }
-                        Button("Share profile") { share = true }.tint(Ink.accent)
-                        Button("Copy identity bundle") { model.copy(bundle, label: "Identity bundle") }.tint(Ink.accent)
-                        Muted("Share sends the same card as the QR code, as text another DIRECT phone can add.")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("DIRECT ID").font(.caption).foregroundStyle(Ink.muted)
+                        Text(profile.directId)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
                     }
-                    Button("How DIRECT works") { model.showIntro = true }.tint(Ink.accent)
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        actionLabel("Change photo", icon: "camera", tint: Ink.accent)
+                    }
+                    .buttonStyle(.plain)
+                    if profile.avatarJpegBase64 != nil {
+                        Button { model.clearAvatar() } label: {
+                            actionLabel("Remove photo", icon: "trash", tint: Ink.danger)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .listRowBackground(Ink.surface)
-                .onAppear { status = profile.status }
-                .onChange(of: profile.status) { status = $0 }
-                .onChange(of: photoItem) { item in
-                    Task {
-                        guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
-                        do { model.setAvatar(try MediaPrep.avatar(data)) } catch { model.toast = (error as? PrepError)?.message ?? "That photo could not be used." }
-                    }
+                Section {
+                    Field(placeholder: "Status", text: $status)
+                    PrimaryButton(title: "Save status") { model.setStatus(status) }
+                } header: {
+                    Text("Status")
                 }
-                .sheet(isPresented: $share) {
-                    if let bundle = model.state.bundle {
-                        let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
-                        ShareSheet(items: [card])
+                .listRowBackground(Ink.surface)
+                if let bundle = model.state.bundle {
+                    let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
+                    Section {
+                        Button { showQr.toggle() } label: {
+                            actionLabel(showQr ? "Hide QR code" : "Show QR code", icon: "qrcode", tint: Ink.accent)
+                        }
+                        .buttonStyle(.plain)
+                        if showQr, let image = MediaPrep.qrImage(card) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Image(uiImage: image)
+                                    .interpolation(.none)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: 220)
+                                    .padding(12)
+                                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                Muted("The QR code is your signed identity, plus the status and a small photo. The status and photo are for display. They are not part of the signature.")
+                            }
+                        }
+                        Button { share = true } label: {
+                            actionLabel("Share profile", icon: "square.and.arrow.up", tint: Ink.accent)
+                        }
+                        .buttonStyle(.plain)
+                        Button { model.copy(profile.directId, label: "DIRECT ID") } label: {
+                            actionLabel("Copy DIRECT ID", icon: "doc.on.doc", tint: Ink.accent)
+                        }
+                        .buttonStyle(.plain)
+                        Button { model.copy(bundle, label: "Identity bundle") } label: {
+                            actionLabel("Copy identity bundle", icon: "doc.on.doc", tint: Ink.accent)
+                        }
+                        .buttonStyle(.plain)
+                        Muted("Share sends the same card as the QR code, as text another DIRECT phone can add.")
+                    } header: {
+                        Text("Share")
                     }
+                    .listRowBackground(Ink.surface)
                 }
-                Section("Recovery") {
-                    Button("Show recovery phrase") { model.showPhrase() }.tint(Ink.warning)
+                Section {
+                    Button { model.showIntro = true } label: {
+                        actionLabel("How DIRECT works", icon: "info.circle", tint: Ink.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listRowBackground(Ink.surface)
+                Section {
+                    Button { model.showPhrase() } label: {
+                        actionLabel("Show recovery phrase", icon: "key", tint: Ink.warning)
+                    }
+                    .buttonStyle(.plain)
                     Muted("The private key never leaves this phone's Keychain. The phrase is the only backup.")
+                } header: {
+                    Text("Recovery")
                 }
                 .listRowBackground(Ink.surface)
             }
         }
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .navigationTitle("Identity")
+        .onAppear { status = model.state.profile?.status ?? "" }
+        .onChange(of: model.state.profile?.status) { status = $0 ?? "" }
+        .onChange(of: photoItem) { item in
+            Task {
+                guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                do { model.setAvatar(try MediaPrep.avatar(data)) } catch { model.toast = (error as? PrepError)?.message ?? "That photo could not be used." }
+            }
+        }
+        .sheet(isPresented: $share) {
+            if let profile = model.state.profile, let bundle = model.state.bundle {
+                let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
+                ShareSheet(items: [card])
+            }
+        }
+    }
+
+    private func actionLabel(_ title: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Text(title)
+                .font(.body.weight(.medium))
+                .foregroundStyle(Ink.text)
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Ink.muted)
+        }
+        .contentShape(Rectangle())
     }
 }
