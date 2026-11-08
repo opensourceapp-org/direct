@@ -17,6 +17,11 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		A10000000000000000000016 /* Assets.xcassets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Assets.xcassets;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -42,6 +47,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000002 /* Sources */,
+				A10000000000000000000016 /* Assets.xcassets */,
 				A10000000000000000000007 /* Info.plist */,
 			);
 			path = Direct;
@@ -72,6 +78,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000002 /* Sources */,
+				A10000000000000000000016 /* Assets.xcassets */,
 			);
 			name = Direct;
 			packageProductDependencies = (
@@ -189,6 +196,7 @@
 		A10000000000000000000014 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -212,6 +220,7 @@
 		A10000000000000000000015 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
