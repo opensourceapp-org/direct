@@ -498,27 +498,22 @@ struct IdentityView: View {
                                 .foregroundStyle(Ink.success)
                         }
                     }
-                    ForEach(StatusPresets.all, id: \.self) { preset in
-                        Button {
-                            status = preset
-                            acknowledged = preset
-                            model.setStatus(preset)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Text(preset)
-                                    .font(.body)
-                                    .foregroundStyle(Ink.text)
-                                Spacer(minLength: 8)
-                                if profile.status == preset {
-                                    Image(systemName: "checkmark")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(Ink.accent)
-                                }
-                            }
-                            .contentShape(Rectangle())
+                    Picker("Choose a status", selection: Binding(
+                        get: { StatusPresets.all.contains(profile.status) ? profile.status : "" },
+                        set: { choice in
+                            guard !choice.isEmpty else { return }
+                            status = choice
+                            acknowledged = choice
+                            model.setStatus(choice)
                         }
-                        .buttonStyle(.plain)
+                    )) {
+                        Text("Choose a status").tag("")
+                        ForEach(StatusPresets.all, id: \.self) { preset in
+                            Text(preset).tag(preset)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .tint(Ink.accent)
                 } header: {
                     Text("Status")
                 } footer: {

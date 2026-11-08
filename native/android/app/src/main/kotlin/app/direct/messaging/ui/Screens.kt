@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.onSizeChanged
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
@@ -63,8 +66,12 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.WifiTethering
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -87,6 +94,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -512,13 +520,11 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                     fontWeight = FontWeight.Medium,
                 )
             }
-            statusPresets.forEach { preset ->
-                StatusChoice(preset, selected = profile.status == preset) {
-                    status = preset
-                    scope.attempt({ error = it }) {
-                        node.setStatus(preset)
-                        acknowledged = preset
-                    }
+            StatusMenu(selected = statusPresets.firstOrNull { it == profile.status }) { preset ->
+                status = preset
+                scope.attempt({ error = it }) {
+                    node.setStatus(preset)
+                    acknowledged = preset
                 }
             }
             Muted("Choose one, or write your own and tap Save status.")
@@ -832,18 +838,38 @@ private val statusPresets = listOf(
 )
 
 @Composable
-private fun StatusChoice(label: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) Ink.accentSoft else Color.Transparent)
-            .border(1.dp, if (selected) Ink.accent else Ink.border, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp)
-        if (selected) Text("✓", color = Ink.accent, fontWeight = FontWeight.SemiBold)
+private fun StatusMenu(selected: String?, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    var menuWidth by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
+    Box(Modifier.fillMaxWidth().onSizeChanged { menuWidth = with(density) { it.width.toDp() } }) {
+        OutlinedTextField(
+            value = selected.orEmpty(),
+            onValueChange = {},
+            readOnly = true,
+            placeholder = { Text("Choose a status", color = Ink.muted) },
+            trailingIcon = { Icon(Icons.Filled.KeyboardArrowDown, null, tint = Ink.muted) },
+            shape = RoundedCornerShape(16.dp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Ink.foreground),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Ink.foreground,
+                unfocusedBorderColor = Ink.border,
+                focusedContainerColor = Ink.surface,
+                unfocusedContainerColor = Ink.surface,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Box(Modifier.matchParentSize().clickable { expanded = true })
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.width(menuWidth)) {
+            statusPresets.forEach { preset ->
+                DropdownMenuItem(
+                    text = { Text(preset, color = if (preset == selected) Ink.accent else Ink.foreground) },
+                    onClick = {
+                        expanded = false
+                        onSelect(preset)
+                    },
+                )
+            }
+        }
     }
 }
