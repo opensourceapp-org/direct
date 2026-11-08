@@ -3,17 +3,34 @@ import SwiftUI
 import UIKit
 
 enum Ink {
-    static let background = Color(red: 0.04, green: 0.05, blue: 0.07)
-    static let surface = Color(red: 0.08, green: 0.09, blue: 0.12)
-    static let line = Color.white.opacity(0.08)
-    static let text = Color(red: 0.93, green: 0.94, blue: 0.96)
-    static let muted = Color(red: 0.56, green: 0.59, blue: 0.65)
-    /// Apple system blue and system green in dark mode (#0A84FF, #30D158).
-    static let accent = Color(red: 0.039, green: 0.518, blue: 1.0)
-    static let incoming = Color(red: 0.227, green: 0.227, blue: 0.235)
-    static let success = Color(red: 0.188, green: 0.820, blue: 0.345)
-    static let warning = Color(red: 0.98, green: 0.77, blue: 0.36)
-    static let danger = Color(red: 1.0, green: 0.42, blue: 0.42)
+    static let background = adaptive(light: 0xF2F2F7, dark: 0x0A0C12)
+    static let surface = adaptive(light: 0xFFFFFF, dark: 0x14171F)
+    static let line = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor.white.withAlphaComponent(0.08) : UIColor.black.withAlphaComponent(0.08)
+    })
+    static let text = adaptive(light: 0x1C1C1E, dark: 0xEDF0F5)
+    static let muted = adaptive(light: 0x8E8E93, dark: 0x8F96A6)
+    /// Apple system blue and green, so light and dark mode each get the system color.
+    static let accent = Color(uiColor: .systemBlue)
+    static let incoming = adaptive(light: 0xE9E9EB, dark: 0x3A3A3C)
+    static let success = Color(uiColor: .systemGreen)
+    static let warning = Color(uiColor: .systemOrange)
+    static let danger = Color(uiColor: .systemRed)
+
+    private static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            ui(traits.userInterfaceStyle == .dark ? dark : light)
+        })
+    }
+
+    private static func ui(_ hex: UInt32) -> UIColor {
+        UIColor(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
+    }
 }
 
 extension MessageState {
