@@ -307,10 +307,10 @@ struct AttachmentBar: View {
     @State private var stickers = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             if stickers {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
+                    HStack(spacing: 10) {
                         ForEach(0..<6, id: \.self) { index in
                             let data = MediaPrep.sticker(index)
                             if let image = UIImage(data: data) {
@@ -318,37 +318,61 @@ struct AttachmentBar: View {
                                     stickers = false
                                     onSticker(data)
                                 } label: {
-                                    Image(uiImage: image).resizable().frame(width: 56, height: 56).clipShape(Circle())
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .frame(width: 52, height: 52)
+                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 }
+                                .buttonStyle(ComposerPressStyle())
                             }
                         }
                     }
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
                 }
             }
             if voice.recording {
-                HStack {
-                    Text("Recording").foregroundStyle(Ink.muted)
-                    Button("Stop and send") {
+                HStack(spacing: 12) {
+                    Circle().fill(Ink.danger).frame(width: 8, height: 8)
+                    Text("Recording").font(.subheadline).foregroundStyle(Ink.text)
+                    Spacer(minLength: 8)
+                    Button("Cancel") { voice.cancel() }
+                        .font(.subheadline)
+                        .foregroundStyle(Ink.muted)
+                    Button {
                         do { onVoice(try voice.stop()) } catch { onError((error as? PrepError)?.message ?? "That recording was not sent.") }
+                    } label: {
+                        Text("Send")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Ink.accent, in: Capsule())
                     }
-                    Button("Cancel") { voice.cancel() }.foregroundStyle(Ink.muted)
+                    .buttonStyle(ComposerPressStyle())
                 }
+                .padding(.horizontal, 4)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        PhotosPicker(selection: $photoItem, matching: .images) { chip("Photo") }
-                        PhotosPicker(selection: $videoItem, matching: .videos) { chip("Video") }
-                        PhotosPicker(selection: $gifItem, matching: .images) { chip("GIF") }
-                        Button { stickers.toggle() } label: { chip("Sticker") }
-                        Button {
-                            AVAudioSession.sharedInstance().requestRecordPermission { allowed in
-                                DispatchQueue.main.async {
-                                    guard allowed else { onError("Microphone permission is needed for a voice message."); return }
-                                    do { try voice.start() } catch { onError("Recording could not start.") }
-                                }
+                HStack(spacing: 4) {
+                    PhotosPicker(selection: $photoItem, matching: .images) { chip("Photo", "photo") }
+                        .frame(maxWidth: .infinity)
+                    PhotosPicker(selection: $videoItem, matching: .videos) { chip("Video", "video.fill") }
+                        .frame(maxWidth: .infinity)
+                    PhotosPicker(selection: $gifItem, matching: .images) { chip("GIF", "sparkles") }
+                        .frame(maxWidth: .infinity)
+                    Button { stickers.toggle() } label: { chip("Sticker", "face.smiling", selected: stickers) }
+                        .buttonStyle(ComposerPressStyle())
+                        .frame(maxWidth: .infinity)
+                    Button {
+                        AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+                            DispatchQueue.main.async {
+                                guard allowed else { onError("Microphone permission is needed for a voice message."); return }
+                                do { try voice.start() } catch { onError("Recording could not start.") }
                             }
-                        } label: { chip("Voice") }
-                    }
+                        }
+                    } label: { chip("Voice", "mic.fill") }
+                    .buttonStyle(ComposerPressStyle())
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -369,9 +393,19 @@ struct AttachmentBar: View {
         }
     }
 
-    private func chip(_ title: String) -> some View {
-        Text(title).font(.footnote.weight(.medium)).foregroundStyle(Color.white).padding(.horizontal, 12).padding(.vertical, 8)
-            .background(Ink.success, in: Capsule())
+    private func chip(_ title: String, _ icon: String, selected: Bool = false) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(selected ? Color.white : Ink.accent)
+                .frame(width: 44, height: 36)
+                .background(selected ? Ink.accent : Ink.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(selected ? Ink.text : Ink.muted)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func load(_ item: PhotosPickerItem?, gifOnly: Bool) async {
@@ -443,6 +477,15 @@ struct MediaBubble: View {
                 PlayerSheet(data: bytes, mime: message.mediaMime ?? "video/mp4", name: message.mediaKind == "audio" ? "voice.m4a" : "video.mp4")
             }
         }
+    }
+}
+
+struct ComposerPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
 

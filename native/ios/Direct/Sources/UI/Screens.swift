@@ -205,33 +205,55 @@ struct ChatView: View {
             } else if contact?.blocked == true {
                 Muted("Blocked. Messages from this DIRECT ID are dropped.").padding()
             } else {
-                VStack(spacing: 8) {
-                    AttachmentBar(
-                        onPhoto: { model.sendMedia(peerId: peerId, kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0, caption: draft); draft = "" },
-                        onVideo: { model.sendMedia(peerId: peerId, kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0, caption: draft); draft = "" },
-                        onGif: { model.sendMedia(peerId: peerId, kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0, caption: draft); draft = "" },
-                        onSticker: { model.sendMedia(peerId: peerId, kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: ""); draft = "" },
-                        onVoice: { model.sendMedia(peerId: peerId, kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0, caption: draft); draft = "" },
-                        onError: { model.toast = $0 }
-                    )
-                    HStack(alignment: .bottom) {
-                        Field(placeholder: "Message", text: $draft)
-                        Button {
-                            model.send(peerId, draft)
-                            draft = ""
-                        } label: {
-                            Image(systemName: "arrow.up.circle.fill").font(.title)
-                        }
-                        .tint(Ink.accent)
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-                .padding()
+                composer
             }
         }
         .navigationTitle(contact?.name ?? peerId)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.open(peerId) }
+    }
+
+    private var canSend: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var composer: some View {
+        VStack(spacing: 12) {
+            AttachmentBar(
+                onPhoto: { model.sendMedia(peerId: peerId, kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0, caption: draft); draft = "" },
+                onVideo: { model.sendMedia(peerId: peerId, kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0, caption: draft); draft = "" },
+                onGif: { model.sendMedia(peerId: peerId, kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0, caption: draft); draft = "" },
+                onSticker: { model.sendMedia(peerId: peerId, kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: ""); draft = "" },
+                onVoice: { model.sendMedia(peerId: peerId, kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0, caption: draft); draft = "" },
+                onError: { model.toast = $0 }
+            )
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Message", text: $draft, axis: .vertical)
+                    .font(.body)
+                    .foregroundStyle(Ink.text)
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Ink.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                Button {
+                    model.send(peerId, draft)
+                    draft = ""
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(canSend ? Color.white : Ink.muted)
+                        .frame(width: 36, height: 36)
+                        .background(canSend ? Ink.accent : Ink.surface, in: Circle())
+                }
+                .buttonStyle(ComposerPressStyle())
+                .allowsHitTesting(canSend)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(Ink.background)
+        .overlay(alignment: .top) { Rectangle().fill(Ink.line).frame(height: 0.5) }
     }
 }
 
