@@ -451,10 +451,32 @@ struct IdentityView: View {
                 }
                 .listRowBackground(Ink.surface)
                 Section {
-                    Field(placeholder: "Status", text: $status)
+                    Field(placeholder: "Write your own status", text: $status)
                     PrimaryButton(title: "Save status") { model.setStatus(status) }
+                    ForEach(StatusPresets.all, id: \.self) { preset in
+                        Button {
+                            status = preset
+                            model.setStatus(preset)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text(preset)
+                                    .font(.body)
+                                    .foregroundStyle(Ink.text)
+                                Spacer(minLength: 8)
+                                if profile.status == preset {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Ink.accent)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 } header: {
                     Text("Status")
+                } footer: {
+                    Text("Choose one, or write your own and tap Save status.")
                 }
                 .listRowBackground(Ink.surface)
                 if let bundle = model.state.bundle {
@@ -567,4 +589,20 @@ struct IdentityView: View {
         }
         .contentShape(Rectangle())
     }
+}
+
+private enum StatusPresets {
+    static let all = [
+        "😊 Available",
+        "🔴 Busy",
+        "📚 At school",
+        "🎬 At the movies",
+        "💼 At work",
+        "🔋 Battery about to die",
+        "📵 Can't talk, messages only",
+        "📅 In a meeting",
+        "🏋️ At the gym",
+        "😴 Sleeping",
+        "🚨 Urgent calls only",
+    ]
 }

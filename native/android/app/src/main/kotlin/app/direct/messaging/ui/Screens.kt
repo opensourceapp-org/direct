@@ -422,8 +422,15 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                 }
             }
             Label("Status")
-            Field(status, { status = it.take(80) }, "What you're up to")
+            Field(status, { status = it.take(80) }, "Write your own status")
             PrimaryButton("Save status") { scope.attempt({ error = it }) { node.setStatus(status) } }
+            statusPresets.forEach { preset ->
+                StatusChoice(preset, selected = profile.status == preset) {
+                    status = preset
+                    scope.attempt({ error = it }) { node.setStatus(preset) }
+                }
+            }
+            Muted("Choose one, or write your own and tap Save status.")
             Label("DIRECT ID")
             Mono(profile.directId)
             SecondaryButton("Copy DIRECT ID") { copy(context, "DIRECT ID", profile.directId) }
@@ -666,4 +673,34 @@ private fun shareCard(profile: Profile, bundle: String, bootstrap: String): Stri
 
 private fun copy(context: Context, label: String, text: String) {
     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
+}
+
+private val statusPresets = listOf(
+    "😊 Available",
+    "🔴 Busy",
+    "📚 At school",
+    "🎬 At the movies",
+    "💼 At work",
+    "🔋 Battery about to die",
+    "📵 Can't talk, messages only",
+    "📅 In a meeting",
+    "🏋️ At the gym",
+    "😴 Sleeping",
+    "🚨 Urgent calls only",
+)
+
+@Composable
+private fun StatusChoice(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .border(1.dp, if (selected) Ink.accent else Ink.border, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, modifier = Modifier.weight(1f), fontSize = 16.sp)
+        if (selected) Text("✓", color = Ink.accent, fontWeight = FontWeight.SemiBold)
+    }
 }
