@@ -2,9 +2,11 @@ const { app, BrowserWindow, clipboard, ipcMain } = require('electron');
 const path = require('path');
 const { createRequire } = require('module');
 
-const requireSignaling = createRequire(__filename);
-const signalingPath = path.resolve(__dirname, '../../../infrastructure/signaling/createServer.cjs');
-const { createSignalingServer } = requireSignaling(signalingPath);
+function loadServer() {
+  const requireSignaling = createRequire(__filename);
+  const signalingPath = path.resolve(__dirname, '../../../infrastructure/signaling/createServer.cjs');
+  return requireSignaling(signalingPath).createSignalingServer;
+}
 
 let window = null;
 let signaling = null;
@@ -26,6 +28,13 @@ async function start(requestedPort) {
   const port = Number(requestedPort) || 8787;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     lastError = 'Use a port from 1 to 65535.';
+    return snapshot();
+  }
+  let createSignalingServer;
+  try {
+    createSignalingServer = loadServer();
+  } catch (error) {
+    lastError = error && error.message ? error.message : 'The server files could not be loaded.';
     return snapshot();
   }
   signaling = createSignalingServer();

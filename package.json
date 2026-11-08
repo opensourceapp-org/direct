@@ -10,7 +10,7 @@
     "build": "pnpm --filter @direct/mobile build",
     "signaling": "node infrastructure/signaling/server.mjs",
     "server": "pnpm --filter @direct/server start",
-    "postinstall": "node apps/server/node_modules/electron/install.js"
+    "postinstall": "node apps/server/run.cjs --prepare"
   },
   "dependencies": {
     "ws": "^8.18.3"

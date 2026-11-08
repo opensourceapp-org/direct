@@ -133,13 +133,12 @@ importers:
 
   apps/server:
     dependencies:
-      ws:
-        specifier: ^8.18.3
-        version: 8.22.0
-    devDependencies:
       electron:
         specifier: 33.4.11
         version: 33.4.11
+      ws:
+        specifier: ^8.18.3
+        version: 8.22.0
 
   packages/crypto:
     dependencies:
