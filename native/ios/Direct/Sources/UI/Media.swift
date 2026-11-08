@@ -370,8 +370,8 @@ struct AttachmentBar: View {
     }
 
     private func chip(_ title: String) -> some View {
-        Text(title).font(.footnote.weight(.medium)).padding(.horizontal, 12).padding(.vertical, 8)
-            .background(Ink.accent.opacity(0.2), in: Capsule())
+        Text(title).font(.footnote.weight(.medium)).foregroundStyle(Color.white).padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Ink.success, in: Capsule())
     }
 
     private func load(_ item: PhotosPickerItem?, gifOnly: Bool) async {
@@ -418,8 +418,9 @@ struct MediaBubble: View {
                         Button("Open") { playing = true }.tint(outgoing ? Ink.text : Ink.accent)
                     }
                 }
+                .foregroundStyle(outgoing ? Color.white : Ink.text)
                 .padding(10)
-                .background(outgoing ? Ink.accent.opacity(0.25) : Ink.surface, in: RoundedRectangle(cornerRadius: 14))
+                .background(outgoing ? Ink.accent : Ink.surface, in: RoundedRectangle(cornerRadius: 14))
                 HStack(spacing: 6) {
                     Text(formatTime(message.createdAt))
                     if let state = message.state {

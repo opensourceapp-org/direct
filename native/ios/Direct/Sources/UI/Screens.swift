@@ -139,7 +139,7 @@ struct ChatsView: View {
                         }
                         Spacer()
                         if conversation.unread > 0 {
-                            Text("\(conversation.unread)").font(.caption.bold()).padding(6).background(Ink.accent, in: Circle())
+                            Text("\(conversation.unread)").font(.caption.bold()).foregroundStyle(Color.white).padding(6).background(Ink.success, in: Circle())
                         }
                     }
                 }
@@ -222,6 +222,7 @@ struct ChatView: View {
                         } label: {
                             Image(systemName: "arrow.up.circle.fill").font(.title)
                         }
+                        .tint(Ink.accent)
                         .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
@@ -243,8 +244,9 @@ struct Bubble: View {
             if outgoing { Spacer(minLength: 48) }
             VStack(alignment: outgoing ? .trailing : .leading, spacing: 4) {
                 Text(message.body)
+                    .foregroundStyle(outgoing ? Color.white : Ink.text)
                     .padding(10)
-                    .background(outgoing ? Ink.accent.opacity(0.25) : Ink.surface, in: RoundedRectangle(cornerRadius: 14))
+                    .background(outgoing ? Ink.accent : Ink.surface, in: RoundedRectangle(cornerRadius: 14))
                 HStack(spacing: 6) {
                     Text(formatTime(message.createdAt))
                     if let state = message.state {

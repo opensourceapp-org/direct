@@ -8,8 +8,9 @@ enum Ink {
     static let line = Color.white.opacity(0.08)
     static let text = Color(red: 0.93, green: 0.94, blue: 0.96)
     static let muted = Color(red: 0.56, green: 0.59, blue: 0.65)
-    static let accent = Color(red: 0.42, green: 0.65, blue: 1.0)
-    static let success = Color(red: 0.36, green: 0.84, blue: 0.56)
+    /// Apple system blue and system green in dark mode (#0A84FF, #30D158).
+    static let accent = Color(red: 0.039, green: 0.518, blue: 1.0)
+    static let success = Color(red: 0.188, green: 0.820, blue: 0.345)
     static let warning = Color(red: 0.98, green: 0.77, blue: 0.36)
     static let danger = Color(red: 1.0, green: 0.42, blue: 0.42)
 }
@@ -93,11 +94,11 @@ struct Avatar: View {
             } else {
                 Text(String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
                     .font(.headline)
-                    .foregroundStyle(Ink.accent)
+                    .foregroundStyle(Color.white)
             }
         }
         .frame(width: 44, height: 44)
-        .background(Ink.accent.opacity(0.18))
+        .background(Ink.accent)
         .clipShape(Circle())
     }
 }
