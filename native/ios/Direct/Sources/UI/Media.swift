@@ -88,13 +88,13 @@ enum MediaPrep {
             case 7:
                 head(cg, top: rgb(0.72, 0.97, 0.83), bottom: rgb(0.12, 0.66, 0.44))
                 rgb(0.08, 0.14, 0.11).setFill()
-                cg.fill(UIBezierPath(roundedRect: CGRect(x: 58, y: 108, width: 64, height: 34), cornerRadius: 12).cgPath)
-                cg.fill(UIBezierPath(roundedRect: CGRect(x: 134, y: 108, width: 64, height: 34), cornerRadius: 12).cgPath)
+                fill(cg, UIBezierPath(roundedRect: CGRect(x: 58, y: 108, width: 64, height: 34), cornerRadius: 12))
+                fill(cg, UIBezierPath(roundedRect: CGRect(x: 134, y: 108, width: 64, height: 34), cornerRadius: 12))
                 cg.setStrokeColor(rgb(0.08, 0.14, 0.11).cgColor); cg.setLineWidth(8)
                 cg.move(to: CGPoint(x: 122, y: 124)); cg.addLine(to: CGPoint(x: 134, y: 124)); cg.strokePath()
                 UIColor.white.withAlphaComponent(0.35).setFill()
-                cg.fill(CGRect(x: 68, y: 114, width: 28, height: 10))
-                cg.fill(CGRect(x: 144, y: 114, width: 28, height: 10))
+                fill(cg, CGRect(x: 68, y: 114, width: 28, height: 10))
+                fill(cg, CGRect(x: 144, y: 114, width: 28, height: 10))
                 mouth(cg, 162, 36)
             case 8:
                 head(cg, top: rgb(1, 0.82, 0.88), bottom: rgb(1, 0.44, 0.63))
@@ -108,7 +108,7 @@ enum MediaPrep {
                 cg.addArc(center: CGPoint(x: 138, y: 168), radius: 28, startAngle: 0.2, endAngle: 1.4, clockwise: false); cg.strokePath()
                 rgb(1, 0.88, 0.70).setFill()
                 cg.fillEllipse(in: CGRect(x: 160, y: 170, width: 32, height: 32))
-                cg.fill(UIBezierPath(roundedRect: CGRect(x: 168, y: 176, width: 46, height: 30), cornerRadius: 14).cgPath)
+                fill(cg, UIBezierPath(roundedRect: CGRect(x: 168, y: 176, width: 46, height: 30), cornerRadius: 14))
             case 10:
                 shadow(cg, 128, 168, 70)
                 heart(cg, 128, 132, 62, rgb(1, 0.30, 0.43), rgb(0.79, 0.09, 0.29))
@@ -133,6 +133,17 @@ enum MediaPrep {
     }
 
     private static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> UIColor { UIColor(red: r, green: g, blue: b, alpha: 1) }
+
+    /// CGContext has no single-argument fill for a path or a rectangle on this SDK.
+    private static func fill(_ cg: CGContext, _ path: UIBezierPath) {
+        cg.addPath(path.cgPath)
+        cg.fillPath()
+    }
+
+    private static func fill(_ cg: CGContext, _ rect: CGRect) {
+        cg.addRect(rect)
+        cg.fillPath()
+    }
 
     private static func shadow(_ cg: CGContext, _ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat) {
         UIColor.black.withAlphaComponent(0.12).setFill()
@@ -198,9 +209,9 @@ enum MediaPrep {
 
     private static func openMouth(_ cg: CGContext, _ y: CGFloat, _ rx: CGFloat, tongue: Bool) {
         rgb(0.23, 0.14, 0.08).setFill()
-        cg.fill(UIBezierPath(roundedRect: CGRect(x: 128 - rx, y: y - 16, width: rx * 2, height: 38), cornerRadius: 16).cgPath)
+        fill(cg, UIBezierPath(roundedRect: CGRect(x: 128 - rx, y: y - 16, width: rx * 2, height: 38), cornerRadius: 16))
         UIColor.white.setFill()
-        cg.fill(UIBezierPath(roundedRect: CGRect(x: 128 - rx + 6, y: y - 12, width: rx * 2 - 12, height: 11), cornerRadius: 6).cgPath)
+        fill(cg, UIBezierPath(roundedRect: CGRect(x: 128 - rx + 6, y: y - 12, width: rx * 2 - 12, height: 11), cornerRadius: 6))
         if tongue {
             rgb(1, 0.42, 0.51).setFill()
             cg.fillEllipse(in: CGRect(x: 116, y: y + 2, width: 24, height: 16))
@@ -271,7 +282,7 @@ enum MediaPrep {
         cg.drawRadialGradient(skin, startCenter: CGPoint(x: 70, y: 100), startRadius: 0, endCenter: CGPoint(x: 80, y: 130), endRadius: 80, options: [])
         cg.restoreGState()
         UIColor.white.withAlphaComponent(0.28).setFill()
-        cg.fill(UIBezierPath(roundedRect: CGRect(x: 96, y: 124, width: 54, height: 26), cornerRadius: 16).cgPath)
+        fill(cg, UIBezierPath(roundedRect: CGRect(x: 96, y: 124, width: 54, height: 26), cornerRadius: 16))
     }
 
     private static func party(_ cg: CGContext) {
