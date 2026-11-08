@@ -27,7 +27,7 @@ targets:
     info:
       path: Direct/Info.plist
       properties:
-        CFBundleDisplayName: DIRECT
+        CFBundleDisplayName: Direct
         CFBundleIconName: AppIcon
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
