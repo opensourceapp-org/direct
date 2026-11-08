@@ -271,13 +271,19 @@ class DirectNode(
         publish()
     }
 
-    /** Adds the signed bundle inside a QR or share card, and keeps the unsigned status and photo for display. */
+    /** Adds the signed bundle inside a QR or share card, keeps the unsigned status and photo, and saves the server address when the card includes one. */
     suspend fun addFromShare(text: String): ContactRecord = onNode {
         val card = ProfileCards.parse(text)
         val contact = addBundle(card.bundle)
+        val shared = BootstrapUrl.normalize(card.bootstrap)
+        if (shared is BootstrapUrl.Result.Ok && shared.url != store.settings.bootstrapUrl) {
+            store.settings = store.settings.copy(bootstrapUrl = shared.url)
+            bootstrap.configure(shared.url)
+        }
         val avatar = card.avatarJpeg?.takeIf { it.size in 1..MediaNotes.MAX_AVATAR_BYTES && it.size >= 2 && it[0] == 0xFF.toByte() }
         store.putContact(contact.copy(about = card.status.trim().take(80), avatarJpegBase64 = avatar?.let(Encoding::base64Url) ?: contact.avatarJpegBase64))
         store.save()
+        refreshWatch()
         publish()
         store.contact(contact.directId) ?: contact
     }

@@ -151,6 +151,25 @@ final class DirectNodeTests: XCTestCase {
         ada.close()
     }
 
+    func testASharedProfileSavesTheServer() async throws {
+        let ada = node(MemorySecretStore(), "ada-share")
+        let bo = node(MemorySecretStore(), "bo-share")
+        await ada.start()
+        await bo.start()
+        _ = try ada.createIdentity("Ada")
+        _ = try bo.createIdentity("Bo")
+        let bundle = try XCTUnwrap(ada.state.bundle)
+        let card = ProfileCards.encode(bundle: bundle, status: "Here", avatarJpeg: nil, bootstrap: "192.168.1.20")
+        let added = try bo.addFromShare(card)
+        XCTAssertEqual(ada.state.profile?.directId, added.directId)
+        XCTAssertEqual("Here", added.about)
+        XCTAssertEqual("ws://192.168.1.20:8787", bo.state.bootstrapUrl)
+        await settle()
+        XCTAssertEqual(.open, bo.state.bootstrap.phase)
+        ada.close()
+        bo.close()
+    }
+
     func testALoopbackBootstrapIsRefusedWithAPhoneSpecificMessage() async throws {
         let ada = node(MemorySecretStore(), "ada4")
         await ada.start()

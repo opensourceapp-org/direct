@@ -305,11 +305,15 @@ public final class DirectNode {
         publish()
     }
 
-    /// Adds the signed bundle inside a QR or share card, and keeps the unsigned status and photo for display.
+    /// Adds the signed bundle inside a QR or share card, keeps the unsigned status and photo, and saves the server address when the card includes one.
     @discardableResult
     public func addFromShare(_ text: String) throws -> ContactRecord {
         let card = ProfileCards.parse(text)
         let contact = try addContactBundle(card.bundle)
+        if case let .success(url) = BootstrapUrl.normalize(card.bootstrap), url != store.settings.bootstrapUrl {
+            store.settings.bootstrapUrl = url
+            bootstrap.configure(url)
+        }
         var updated = contact
         updated.about = String(card.status.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
         if let avatar = card.avatarJpeg, avatar.count >= 3, avatar.count <= MediaNotes.maxAvatarBytes, avatar[0] == 0xFF, avatar[1] == 0xD8 {
@@ -317,6 +321,7 @@ public final class DirectNode {
         }
         store.putContact(updated)
         try store.save()
+        refreshWatch()
         publish()
         return store.contact(contact.directId) ?? updated
     }

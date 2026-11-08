@@ -61,12 +61,15 @@ class MediaTest {
         assertEquals(listOf(3, 3, 2), MediaNotes.split(ByteArray(8), 3).map { it.size })
 
         val bundle = """{"v":1,"name":"Ada","directId":"dir_X"}"""
-        val card = ProfileCards.encode(bundle, "In the garden", byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1))
+        val card = ProfileCards.encode(bundle, "In the garden", byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1), "ws://192.168.1.20:8787")
         val parsed = ProfileCards.parse(card)
         assertEquals(bundle, parsed.bundle)
         assertEquals("In the garden", parsed.status)
         assertEquals(3, parsed.avatarJpeg?.size)
+        assertEquals("ws://192.168.1.20:8787", parsed.bootstrap)
+        assertEquals("", ProfileCards.parse(ProfileCards.encode(bundle, "In the garden", null)).bootstrap)
         assertEquals(bundle, ProfileCards.parse(bundle).bundle)
+        assertEquals("", ProfileCards.parse(bundle).bootstrap)
     }
 
     @Test

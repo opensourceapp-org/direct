@@ -58,12 +58,15 @@ final class MediaTests: XCTestCase {
         XCTAssertEqual([3, 3, 2], MediaNotes.split(Data(repeating: 0, count: 8), chunkBytes: 3).map(\.count))
 
         let bundle = #"{"v":1,"name":"Ada","directId":"dir_X"}"#
-        let card = ProfileCards.encode(bundle: bundle, status: "In the garden", avatarJpeg: Data([0xFF, 0xD8, 1]))
+        let card = ProfileCards.encode(bundle: bundle, status: "In the garden", avatarJpeg: Data([0xFF, 0xD8, 1]), bootstrap: "ws://192.168.1.20:8787")
         let parsed = ProfileCards.parse(card)
         XCTAssertEqual(bundle, parsed.bundle)
         XCTAssertEqual("In the garden", parsed.status)
         XCTAssertEqual(3, parsed.avatarJpeg?.count)
+        XCTAssertEqual("ws://192.168.1.20:8787", parsed.bootstrap)
+        XCTAssertEqual("", ProfileCards.parse(ProfileCards.encode(bundle: bundle, status: "In the garden", avatarJpeg: nil)).bootstrap)
         XCTAssertEqual(bundle, ProfileCards.parse(bundle).bundle)
+        XCTAssertEqual("", ProfileCards.parse(bundle).bootstrap)
     }
 
     func testAnOlderSnapshotStillOpens() throws {

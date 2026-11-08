@@ -3,6 +3,7 @@ package app.direct.core
 import app.direct.core.delivery.MessageState
 import app.direct.core.node.DirectException
 import app.direct.core.node.DirectNode
+import app.direct.core.protocol.ProfileCards
 import app.direct.core.signaling.BootstrapStatus.Phase
 import app.direct.core.store.Direction
 import app.direct.core.store.MemorySecretStore
@@ -132,6 +133,26 @@ class DirectNodeTest {
         ada.send(boId, "second")
         settle()
         assertEquals(listOf("first"), bo.state.value.messages.getValue(adaId).map { it.body })
+        ada.close()
+        bo.close()
+    }
+
+    @Test
+    fun `a shared profile saves the server`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-share")
+        val bo = node(MemorySecretStore(), "bo-share")
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        val bundle = ada.state.value.bundle!!
+        val card = ProfileCards.encode(bundle, "Here", null, "192.168.1.20")
+        val added = bo.addFromShare(card)
+        assertEquals(ada.state.value.profile!!.directId, added.directId)
+        assertEquals("Here", added.about)
+        assertEquals("ws://192.168.1.20:8787", bo.state.value.bootstrapUrl)
+        settle()
+        assertEquals(Phase.OPEN, bo.state.value.bootstrap.phase)
         ada.close()
         bo.close()
     }

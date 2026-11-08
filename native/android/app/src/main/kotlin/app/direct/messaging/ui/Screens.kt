@@ -309,7 +309,7 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Header("People", "Contacts")
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Muted("Look up a DIRECT ID from a phone that has DIRECT open on the same bootstrap address. The phones can be on different networks.")
+            Muted("Look up a DIRECT ID from a phone that has DIRECT open on the same server. A scanned QR code also carries that server and saves it on this phone.")
             SecondaryButton("Scan a QR code") { scanning = true }
             Field(directId, { directId = it }, "dir_…")
             PrimaryButton(if (busy) "Looking up" else "Look up", enabled = directId.isNotBlank() && !busy) {
@@ -409,7 +409,8 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
         }
     }
     val bundle = state.bundle
-    val card = bundle?.let { shareCard(profile, it) }
+    val server = state.bootstrapUrl.orEmpty()
+    val card = bundle?.let { shareCard(profile, it, server) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Header("This phone", profile.name)
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -432,12 +433,18 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                     Card {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             QrImage(card, Modifier.fillMaxWidth())
-                            Muted("The QR code is your signed identity, plus the status and a small photo. The status and photo are for display. They are not part of the signature.")
+                            Muted(
+                                if (server.isEmpty()) "Set the server under Network before sharing. Without that address, the other phone can save your identity but cannot connect."
+                                else "The QR code is your signed identity and your server address, plus the status and a small photo. Scanning it saves that server so the two phones can connect. The status and photo are for display. They are not part of the signature.",
+                            )
                         }
                     }
                 }
-                SecondaryButton("Share profile") { shareProfile(context, profile, card) }
-                Muted("Share sends a picture of your QR code, with your name, status, and DIRECT ID. The signed identity stays inside the code.")
+                SecondaryButton("Share profile") { shareProfile(context, profile, card, server) }
+                Muted(
+                    if (server.isEmpty()) "Share includes your name and DIRECT ID. Set the server under Network first, or the other phone will not know where to connect."
+                    else "Share sends a picture of your QR code, with your name, DIRECT ID, and server address. Scanning it saves that server on the other phone.",
+                )
             }
             state.bundle?.let { raw -> SecondaryButton("Copy identity bundle") { copy(context, "DIRECT bundle", raw) } }
             SecondaryButton("How DIRECT works") { onHowItWorks() }
@@ -651,10 +658,10 @@ private fun Avatar(name: String, jpeg: ByteArray?, size: Dp = 44.dp) {
 
 private fun jpegBytes(encoded: String?): ByteArray? = encoded?.let { runCatching { Encoding.fromBase64Url(it) }.getOrNull() }
 
-private fun shareCard(profile: Profile, bundle: String): String {
+private fun shareCard(profile: Profile, bundle: String, bootstrap: String): String {
     val photo = MediaPrep.qrAvatar(jpegBytes(profile.avatarJpegBase64))
-    val withPhoto = ProfileCards.encode(bundle, profile.status, photo)
-    return if (photo != null && qrBitmap(withPhoto) == null) ProfileCards.encode(bundle, profile.status, null) else withPhoto
+    val withPhoto = ProfileCards.encode(bundle, profile.status, photo, bootstrap)
+    return if (photo != null && qrBitmap(withPhoto) == null) ProfileCards.encode(bundle, profile.status, null, bootstrap) else withPhoto
 }
 
 private fun copy(context: Context, label: String, text: String) {

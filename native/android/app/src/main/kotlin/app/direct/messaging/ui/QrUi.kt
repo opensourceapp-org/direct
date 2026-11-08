@@ -67,31 +67,44 @@ fun QrImage(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-fun profileShareCaption(name: String, status: String, directId: String): String {
+fun profileShareCaption(name: String, status: String, directId: String, server: String): String {
     val lines = mutableListOf(name)
     val about = status.trim()
     if (about.isNotEmpty()) lines.add(about)
     lines.add("DIRECT ID: $directId")
-    lines.add("Scan the QR code in DIRECT to add this phone.")
+    val address = server.trim()
+    lines.add(if (address.isEmpty()) "Server: not set" else "Server: $address")
+    lines.add(
+        if (address.isEmpty()) "Set a server under Network before sharing. The other phone needs it to connect."
+        else "Scan the QR code in DIRECT. Both phones use this server to connect.",
+    )
     return lines.joinToString("\n")
 }
 
-/** A picture of the QR code with the name, status, and DIRECT ID written beside it. */
-fun profileCardBitmap(name: String, status: String, directId: String, qrText: String): Bitmap? {
+/** A picture of the QR code with the name, status, DIRECT ID, and server address written beside it. */
+fun profileCardBitmap(name: String, status: String, directId: String, server: String, qrText: String): Bitmap? {
     val qr = qrBitmap(qrText, 620) ?: return null
     val width = 900
     val margin = 64
     val content = width - margin * 2
     val about = status.trim()
-    val footer = "Scan this code in DIRECT to add this phone."
+    val address = server.trim()
+    val serverText = if (address.isEmpty()) "Not set" else address
+    val footer = if (address.isEmpty()) {
+        "Set a server under Network before sharing. The other phone needs it to connect."
+    } else {
+        "Scan this code in DIRECT. Both phones use this server to connect."
+    }
     val nameLayout = centered(name, 44f, Color.BLACK, Typeface.BOLD, content)
     val statusLayout = if (about.isEmpty()) null else centered(about, 28f, 0xFF595959.toInt(), Typeface.NORMAL, content)
     val labelLayout = centered("DIRECT ID", 18f, 0xFF737373.toInt(), Typeface.BOLD, content)
     val idLayout = centered(directId, 22f, Color.BLACK, Typeface.NORMAL, content, monospace = true)
+    val serverLabel = centered("Server", 18f, 0xFF737373.toInt(), Typeface.BOLD, content)
+    val serverLayout = centered(serverText, 22f, if (address.isEmpty()) 0xFF737373.toInt() else Color.BLACK, Typeface.NORMAL, content, monospace = true)
     val footerLayout = centered(footer, 22f, 0xFF595959.toInt(), Typeface.NORMAL, content)
     var height = margin + nameLayout.height + 16
     if (statusLayout != null) height += statusLayout.height + 20
-    height += labelLayout.height + 8 + idLayout.height + 36 + qr.height + 28 + footerLayout.height + margin
+    height += labelLayout.height + 8 + idLayout.height + 20 + serverLabel.height + 8 + serverLayout.height + 36 + qr.height + 28 + footerLayout.height + margin
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     canvas.drawColor(Color.WHITE)
@@ -112,6 +125,10 @@ fun profileCardBitmap(name: String, status: String, directId: String, qrText: St
     paint(labelLayout)
     y += 8
     paint(idLayout)
+    y += 20
+    paint(serverLabel)
+    y += 8
+    paint(serverLayout)
     y += 36
     canvas.drawBitmap(qr, (width - qr.width) / 2f, y, null)
     y += qr.height + 28
@@ -119,9 +136,9 @@ fun profileCardBitmap(name: String, status: String, directId: String, qrText: St
     return bitmap
 }
 
-fun shareProfile(context: Context, profile: Profile, card: String) {
-    val caption = profileShareCaption(profile.name, profile.status, profile.directId)
-    val image = profileCardBitmap(profile.name, profile.status, profile.directId, card)
+fun shareProfile(context: Context, profile: Profile, card: String, server: String) {
+    val caption = profileShareCaption(profile.name, profile.status, profile.directId, server)
+    val image = profileCardBitmap(profile.name, profile.status, profile.directId, server, card)
     val send = Intent(Intent.ACTION_SEND)
     if (image == null) {
         send.type = "text/plain"

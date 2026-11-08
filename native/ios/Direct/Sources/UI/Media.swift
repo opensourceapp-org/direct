@@ -122,27 +122,31 @@ enum MediaPrep {
         return image.pngData() ?? Data()
     }
 
-    static func shareCard(bundle: String, status: String, avatarJpeg: Data?) -> String {
+    static func shareCard(bundle: String, status: String, avatarJpeg: Data?, bootstrap: String) -> String {
         let tiny = qrAvatar(avatarJpeg)
-        let withPhoto = ProfileCards.encode(bundle: bundle, status: status, avatarJpeg: tiny)
+        let withPhoto = ProfileCards.encode(bundle: bundle, status: status, avatarJpeg: tiny, bootstrap: bootstrap)
         if tiny != nil, qrImage(withPhoto) == nil {
-            return ProfileCards.encode(bundle: bundle, status: status, avatarJpeg: nil)
+            return ProfileCards.encode(bundle: bundle, status: status, avatarJpeg: nil, bootstrap: bootstrap)
         }
         return withPhoto
     }
 
     /// Words a person can read. The signed bundle stays inside the QR image.
-    static func profileShareCaption(name: String, status: String, directId: String) -> String {
+    static func profileShareCaption(name: String, status: String, directId: String, server: String) -> String {
         var lines = [name]
         let about = status.trimmingCharacters(in: .whitespacesAndNewlines)
         if !about.isEmpty { lines.append(about) }
         lines.append("DIRECT ID: \(directId)")
-        lines.append("Scan the QR code in DIRECT to add this phone.")
+        let address = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        lines.append(address.isEmpty ? "Server: not set" : "Server: \(address)")
+        lines.append(address.isEmpty
+            ? "Set a server under Network before sharing. The other phone needs it to connect."
+            : "Scan the QR code in DIRECT. Both phones use this server to connect.")
         return lines.joined(separator: "\n")
     }
 
-    /// A picture of the QR code with the name, status, and DIRECT ID written beside it.
-    static func profileCardImage(name: String, status: String, directId: String, qrText: String) -> UIImage? {
+    /// A picture of the QR code with the name, status, DIRECT ID, and server address written beside it.
+    static func profileCardImage(name: String, status: String, directId: String, server: String, qrText: String) -> UIImage? {
         guard let qr = qrImage(qrText) else { return nil }
         let width: CGFloat = 900
         let margin: CGFloat = 64
@@ -153,7 +157,11 @@ enum MediaPrep {
         let idFont = UIFont.monospacedSystemFont(ofSize: 22, weight: .regular)
         let footerFont = UIFont.systemFont(ofSize: 22, weight: .regular)
         let about = status.trimmingCharacters(in: .whitespacesAndNewlines)
-        let footer = "Scan this code in DIRECT to add this phone."
+        let address = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        let serverText = address.isEmpty ? "Not set" : address
+        let footer = address.isEmpty
+            ? "Set a server under Network before sharing. The other phone needs it to connect."
+            : "Scan this code in DIRECT. Both phones use this server to connect."
 
         func blockHeight(_ text: String, font: UIFont) -> CGFloat {
             ceil((text as NSString).boundingRect(
@@ -167,11 +175,12 @@ enum MediaPrep {
         let nameHeight = blockHeight(name, font: nameFont)
         let statusHeight = about.isEmpty ? 0 : blockHeight(about, font: statusFont)
         let idHeight = blockHeight(directId, font: idFont)
+        let serverHeight = blockHeight(serverText, font: idFont)
         let footerHeight = blockHeight(footer, font: footerFont)
         let qrSize: CGFloat = 620
         var canvasHeight = margin + nameHeight + 16
         if !about.isEmpty { canvasHeight += statusHeight + 20 }
-        canvasHeight += 28 + 8 + idHeight + 36 + qrSize + 28 + footerHeight + margin
+        canvasHeight += 28 + 8 + idHeight + 20 + 28 + 8 + serverHeight + 36 + qrSize + 28 + footerHeight + margin
 
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -201,7 +210,11 @@ enum MediaPrep {
             draw("DIRECT ID", font: labelFont, color: UIColor(white: 0.45, alpha: 1), box: 28)
             y += 28 + 8
             draw(directId, font: idFont, color: .black, box: idHeight)
-            y += idHeight + 36
+            y += idHeight + 20
+            draw("Server", font: labelFont, color: UIColor(white: 0.45, alpha: 1), box: 28)
+            y += 28 + 8
+            draw(serverText, font: idFont, color: address.isEmpty ? UIColor(white: 0.45, alpha: 1) : .black, box: serverHeight)
+            y += serverHeight + 36
             qr.draw(in: CGRect(x: (width - qrSize) / 2, y: y, width: qrSize, height: qrSize))
             y += qrSize + 28
             draw(footer, font: footerFont, color: UIColor(white: 0.35, alpha: 1), box: footerHeight)

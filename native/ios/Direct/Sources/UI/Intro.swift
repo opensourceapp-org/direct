@@ -9,7 +9,7 @@ struct IntroView: View {
     private let pages: [(symbol: String, title: String, body: String)] = [
         ("lock.iphone", "A conversation between two phones", "DIRECT creates your identity on this phone. A message is sealed here before it leaves, and the other phone is the only one that can open it."),
         ("antenna.radiowaves.left.and.right", "The bootstrap only introduces you", "A small server helps the two phones find each other. It never sees your messages, photos, voice notes, or keys."),
-        ("qrcode", "Add someone with an ID or a QR code", "Share your DIRECT ID, or let them scan your QR code. You can scan theirs too. The first message arrives as a request they accept."),
+        ("qrcode", "Add someone with an ID or a QR code", "Share your QR code. It includes your identity and the server address, so their phone can connect. The first message arrives as a request they accept."),
         ("hourglass", "Offline messages wait on this phone", "If the other phone is away, the message stays here and sends when they can be reached. There is no chat server holding a copy."),
     ]
 

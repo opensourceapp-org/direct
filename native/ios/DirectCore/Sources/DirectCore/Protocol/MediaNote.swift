@@ -154,22 +154,25 @@ public enum MediaNotes {
     }
 }
 
-/// What a QR code carries: the signed bundle, plus an optional status and photo.
+/// What a QR code carries: the signed bundle, the server address, plus an optional status and photo.
 /// The share sheet sends a picture of that code, not this JSON as the message.
 public enum ProfileCards {
     public struct Card: Equatable, Sendable {
         public var bundle: String
         public var status: String
         public var avatarJpeg: Data?
+        /// Bootstrap address the sender is using. Empty on cards made before this field existed.
+        public var bootstrap: String
 
-        public init(bundle: String, status: String, avatarJpeg: Data?) {
+        public init(bundle: String, status: String, avatarJpeg: Data?, bootstrap: String = "") {
             self.bundle = bundle
             self.status = status
             self.avatarJpeg = avatarJpeg
+            self.bootstrap = bootstrap
         }
     }
 
-    public static func encode(bundle: String, status: String, avatarJpeg: Data?) -> String {
+    public static func encode(bundle: String, status: String, avatarJpeg: Data?, bootstrap: String = "") -> String {
         let avatar = avatarJpeg.flatMap { jpeg -> String? in
             guard (1...MediaNotes.maxAvatarBytes).contains(jpeg.count) else { return nil }
             return Encoding.base64Url(jpeg)
@@ -180,6 +183,8 @@ public enum ProfileCards {
             ("status", .string(status.trimmingCharacters(in: .whitespacesAndNewlines))),
         ]
         if let avatar { pairs.append(("avatar", .string(avatar))) }
+        let server = bootstrap.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !server.isEmpty { pairs.append(("bootstrap", .string(server))) }
         return JSON.object(pairs).serialized()
     }
 
@@ -191,6 +196,7 @@ public enum ProfileCards {
         }
         let status = json["status"]?.string ?? ""
         let avatar = json["avatar"]?.string.flatMap(Encoding.fromBase64Url)
-        return Card(bundle: bundle, status: status, avatarJpeg: avatar)
+        let bootstrap = json["bootstrap"]?.string ?? ""
+        return Card(bundle: bundle, status: status, avatarJpeg: avatar, bootstrap: bootstrap)
     }
 }

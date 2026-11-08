@@ -154,16 +154,18 @@ object MediaNotes {
     private fun JsonObject.int(name: String): Int? = (this[name] as? JsonPrimitive)?.intOrNull
 }
 
-/** What a QR code carries: the signed bundle, plus an optional status and photo. The share sheet sends a picture of that code, not this JSON as the message. */
+/** What a QR code carries: the signed bundle, the server address, plus an optional status and photo. The share sheet sends a picture of that code, not this JSON as the message. */
 object ProfileCards {
-    data class Card(val bundle: String, val status: String, val avatarJpeg: ByteArray?)
+    data class Card(val bundle: String, val status: String, val avatarJpeg: ByteArray?, val bootstrap: String = "")
 
-    fun encode(bundle: String, status: String, avatarJpeg: ByteArray?): String {
+    fun encode(bundle: String, status: String, avatarJpeg: ByteArray?, bootstrap: String = ""): String {
         val avatar = avatarJpeg?.takeIf { it.size in 1..MediaNotes.MAX_AVATAR_BYTES }?.let { Encoding.base64Url(it) }
+        val server = bootstrap.trim()
         return buildString {
             append("{\"v\":1,\"bundle\":").append(quote(bundle))
             append(",\"status\":").append(quote(status.trim()))
             if (avatar != null) append(",\"avatar\":").append(quote(avatar))
+            if (server.isNotEmpty()) append(",\"bootstrap\":").append(quote(server))
             append('}')
         }
     }
@@ -180,7 +182,8 @@ object ProfileCards {
         if (bundle != null) {
             val status = (json["status"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull.orEmpty()
             val avatar = (json["avatar"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.let { Encoding.fromBase64Url(it) }
-            return Card(bundle, status, avatar)
+            val bootstrap = (json["bootstrap"] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull.orEmpty()
+            return Card(bundle, status, avatar, bootstrap)
         }
         return Card(trimmed, "", null)
     }

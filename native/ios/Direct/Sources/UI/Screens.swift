@@ -341,7 +341,7 @@ struct ContactsView: View {
                         model.addContact(trimmed) { input = "" }
                     }
                 }
-                Muted("A DIRECT ID is looked up on the bootstrap, so the other phone must be open with the same bootstrap address. A QR code or pasted card works with no bootstrap at all.")
+                Muted("A DIRECT ID is looked up on the server, so the other phone must be open on that same address. A QR code or pasted card also carries the server, and scanning it saves that address on this phone.")
             }
             .listRowBackground(Ink.surface)
             Section("Contacts") {
@@ -458,7 +458,8 @@ struct IdentityView: View {
                 }
                 .listRowBackground(Ink.surface)
                 if let bundle = model.state.bundle {
-                    let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
+                    let server = model.state.bootstrapUrl ?? ""
+                    let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) }, bootstrap: server)
                     Section {
                         Button {
                             showQr.toggle()
@@ -480,7 +481,9 @@ struct IdentityView: View {
                                 } else {
                                     Muted("This profile is too large to draw as a QR code. Share it instead, or remove the photo and try again.")
                                 }
-                                Muted("The QR code is your signed identity, plus the status and a small photo. The status and photo are for display. They are not part of the signature.")
+                                Muted(server.isEmpty
+                                    ? "Set the server under Network before sharing. Without that address, the other phone can save your identity but cannot connect."
+                                    : "The QR code is your signed identity and your server address, plus the status and a small photo. Scanning it saves that server so the two phones can connect. The status and photo are for display. They are not part of the signature.")
                             }
                         }
                         Button { share = true } label: {
@@ -495,7 +498,9 @@ struct IdentityView: View {
                             actionLabel("Copy identity bundle", icon: "doc.on.doc", tint: Ink.accent)
                         }
                         .buttonStyle(.plain)
-                        Muted("Share sends a picture of your QR code, with your name, status, and DIRECT ID. The signed identity stays inside the code.")
+                        Muted(server.isEmpty
+                            ? "Share includes your name and DIRECT ID. Set the server under Network first, or the other phone will not know where to connect."
+                            : "Share sends a picture of your QR code, with your name, DIRECT ID, and server address. Scanning it saves that server on the other phone.")
                     } header: {
                         Text("Share")
                     }
@@ -533,9 +538,10 @@ struct IdentityView: View {
         }
         .sheet(isPresented: $share) {
             if let profile = model.state.profile, let bundle = model.state.bundle {
-                let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
-                let caption = MediaPrep.profileShareCaption(name: profile.name, status: profile.status, directId: profile.directId)
-                if let image = MediaPrep.profileCardImage(name: profile.name, status: profile.status, directId: profile.directId, qrText: card) {
+                let server = model.state.bootstrapUrl ?? ""
+                let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) }, bootstrap: server)
+                let caption = MediaPrep.profileShareCaption(name: profile.name, status: profile.status, directId: profile.directId, server: server)
+                if let image = MediaPrep.profileCardImage(name: profile.name, status: profile.status, directId: profile.directId, server: server, qrText: card) {
                     ShareSheet(items: [image, caption])
                 } else {
                     ShareSheet(items: [caption])

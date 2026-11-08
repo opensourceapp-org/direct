@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 private val pages = listOf(
     "A conversation between two phones" to "DIRECT creates your identity on this phone. A message is sealed here before it leaves, and the other phone is the only one that can open it.",
     "The bootstrap only introduces you" to "A small server helps the two phones find each other. It never sees your messages, photos, voice notes, or keys.",
-    "Add someone with an ID or a QR code" to "Share your DIRECT ID, or let them scan your QR code. You can scan theirs too. The first message arrives as a request they accept.",
+    "Add someone with an ID or a QR code" to "Share your QR code. It includes your identity and the server address, so their phone can connect. The first message arrives as a request they accept.",
     "Offline messages wait on this phone" to "If the other phone is away, the message stays here and sends when they can be reached. There is no chat server holding a copy.",
 )
 
