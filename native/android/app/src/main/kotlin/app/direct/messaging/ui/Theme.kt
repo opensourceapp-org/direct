@@ -16,14 +16,23 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -95,17 +104,37 @@ fun SecondaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit)
 ) { Text(label, fontWeight = FontWeight.Medium) }
 
 @Composable
-fun Field(value: String, onChange: (String) -> Unit, placeholder: String, singleLine: Boolean = true, minLines: Int = 1) = OutlinedTextField(
-    value = value,
-    onValueChange = onChange,
-    placeholder = { Text(placeholder, color = Ink.muted) },
-    singleLine = singleLine,
-    minLines = minLines,
-    shape = RoundedCornerShape(8.dp),
-    textStyle = TextStyle(fontSize = 16.sp),
-    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Ink.foreground, unfocusedBorderColor = Ink.border),
-    modifier = Modifier.fillMaxWidth(),
-)
+fun Field(value: String, onChange: (String) -> Unit, placeholder: String, singleLine: Boolean = true, minLines: Int = 1) {
+    val focus = LocalFocusManager.current
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        placeholder = { Text(placeholder, color = Ink.muted) },
+        singleLine = singleLine,
+        minLines = minLines,
+        keyboardOptions = KeyboardOptions(imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
+        keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+        shape = RoundedCornerShape(8.dp),
+        textStyle = TextStyle(fontSize = 16.sp),
+        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Ink.foreground, unfocusedBorderColor = Ink.border),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** Dragging a list or form lowers the keyboard. */
+@Composable
+fun Modifier.hideKeyboardOnScroll(): Modifier {
+    val focus = LocalFocusManager.current
+    val connection = remember(focus) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y != 0f) focus.clearFocus()
+                return Offset.Zero
+            }
+        }
+    }
+    return nestedScroll(connection)
+}
 
 @Composable
 fun Dot(color: Color) = Box(Modifier.size(8.dp).padding(0.dp)) {

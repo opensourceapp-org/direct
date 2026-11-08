@@ -88,6 +88,12 @@ struct PrimaryButton: View {
     }
 }
 
+enum Keyboard {
+    static func dismiss() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
 struct Field: View {
     let placeholder: String
     @Binding var text: String

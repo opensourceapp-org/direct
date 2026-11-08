@@ -41,6 +41,14 @@ struct RootView: View {
             }
         }
         .foregroundStyle(Ink.text)
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { Keyboard.dismiss() }
+                    .font(.body.weight(.semibold))
+            }
+        }
         .sheet(item: Binding(get: { model.newPhrase.map(Phrase.init) }, set: { _ in model.newPhrase = nil })) { phrase in
             PhraseSheet(phrase: phrase.value)
         }
@@ -204,6 +212,7 @@ struct ChatView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .onChange(of: messages.count) { _ in
                     if let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
                     model.open(peerId)
