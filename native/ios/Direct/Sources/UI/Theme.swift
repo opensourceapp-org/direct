@@ -77,11 +77,33 @@ struct PrimaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 12)
+            Text(title)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(Ink.accent)
+        .buttonStyle(FilledButtonStyle())
         .disabled(!enabled)
+    }
+}
+
+/// Filled accent button with white text in light and dark mode.
+/// A parent `foregroundStyle` would otherwise paint the label with the screen's text color.
+private struct FilledButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        FilledLabel(configuration: configuration)
+    }
+
+    private struct FilledLabel: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .font(.headline)
+                .foregroundStyle(Color.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Ink.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .opacity(!isEnabled ? 0.45 : configuration.isPressed ? 0.85 : 1)
+        }
     }
 }
 
