@@ -179,6 +179,7 @@ struct StatusRow: View {
 
 struct ChatView: View {
     let peerId: String
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var model: AppModel
     @State private var draft = ""
     @State private var attachments = false
@@ -188,14 +189,7 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 4) {
-                Avatar(name: contact?.name ?? "?", jpeg: contact?.avatarJpegBase64, size: 56)
-                Text(contact?.name ?? peerId).font(.headline)
-                Text(presence).font(.caption).foregroundStyle(Ink.muted)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 4)
-            .padding(.bottom, 8)
+            header
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -249,8 +243,42 @@ struct ChatView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .onAppear { model.open(peerId) }
+    }
+
+    /// Back control, photo, and name share one row. The status sits under the name, beside the photo.
+    private var header: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Ink.accent)
+                        .frame(width: 28, height: 40)
+                }
+                .buttonStyle(.plain)
+                Avatar(name: contact?.name ?? "?", jpeg: contact?.avatarJpegBase64, size: 40)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(contact?.name ?? peerId)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Ink.text)
+                        .lineLimit(1)
+                    Text(presence)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Ink.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 8)
+            .padding(.trailing, 16)
+            .padding(.vertical, 4)
+            Divider().overlay(Ink.line)
+        }
+        .background(Ink.background)
     }
 
     private var presence: String {

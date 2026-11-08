@@ -26,7 +26,7 @@ Both phones must save the same bootstrap, for example `ws://192.168.1.20:8787`. 
 3. On one phone, add the other by DIRECT ID. The lookup reads the public bundle the other phone announced. Pasting that bundle skips the lookup.
 4. Send. The envelope is sealed and queued before any network attempt. If the other phone is closed, the row stays `Queued` and retries with backoff.
 5. The recipient sees a message request. Accepting it sends read receipts. Declining it blocks that DIRECT ID.
-6. A profile photo and status are sealed to each accepted contact when they change, when you add or accept that contact, and again when a queued update is still waiting and that phone becomes reachable. The picture is not part of the signed bundle, and the bootstrap never receives it. Android applies the photo's EXIF orientation before saving it, so a portrait shot stays portrait. The chat header shows that photo above the name.
+6. A profile photo and status are sealed to each accepted contact when they change, when you add or accept that contact, and again when a queued update is still waiting and that phone becomes reachable. The picture is not part of the signed bundle, and the bootstrap never receives it. Android applies the photo's EXIF orientation before saving it, so a portrait shot stays portrait. The chat header places the photo to the left of the name, with the status on the line under the name.
 
 Outgoing states, in order: Queued, Sending, Sent (written to the data channel), Delivered (the recipient stored it and signed an `ack`, including when it is still a request), Read (the recipient accepted the conversation and opened it). Failed means the envelope expired or the contact was blocked; tap it to seal a fresh envelope under the same id.
 

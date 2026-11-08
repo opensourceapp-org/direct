@@ -79,6 +79,7 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -305,31 +306,37 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         if (contact?.accepted == true) node.openConversation(peerId)
         if (messages.isNotEmpty()) list.animateScrollToItem(messages.lastIndex)
     }
+    val status = when {
+        contact == null -> "Not a contact"
+        contact.blocked -> "Blocked"
+        request -> "Message request"
+        peerId in state.connected -> "Connected directly"
+        peerId in state.online -> "On the bootstrap"
+        else -> "Offline · messages wait on this phone"
+    }
     Column(Modifier.fillMaxSize().imePadding()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.Top,
+            Modifier.fillMaxWidth().padding(end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.size(40.dp).clip(CircleShape).clickable(onClick = back),
+                Modifier.size(48.dp).clip(CircleShape).clickable(onClick = back),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
             }
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Avatar(contact?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 56.dp)
-                Label(contact?.name ?: peerId)
-                val status = when {
-                    contact == null -> "Not a contact"
-                    contact.blocked -> "Blocked"
-                    request -> "Message request"
-                    peerId in state.connected -> "Connected directly"
-                    peerId in state.online -> "On the bootstrap"
-                    else -> "Offline · messages wait on this phone"
-                }
-                Muted(status)
+            Avatar(contact?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 40.dp)
+            Column(Modifier.weight(1f).padding(start = 12.dp, top = 8.dp, bottom = 8.dp)) {
+                Text(
+                    contact?.name ?: peerId,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Ink.foreground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(status, fontSize = 13.sp, color = Ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Spacer(Modifier.size(40.dp))
         }
         HorizontalDivider(color = Ink.border)
         LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
