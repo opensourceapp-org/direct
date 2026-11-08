@@ -137,7 +137,12 @@ enum MediaPrep {
         filter.correctionLevel = "M"
         guard let output = filter.outputImage else { return nil }
         let scaled = output.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
-        return UIImage(ciImage: scaled)
+        let rect = scaled.extent.integral
+        guard !rect.isInfinite, rect.width > 1, rect.height > 1 else { return nil }
+        // A UIImage that only wraps a CIImage draws blank in SwiftUI.
+        let context = CIContext()
+        guard let rendered = context.createCGImage(scaled, from: rect) else { return nil }
+        return UIImage(cgImage: rendered)
     }
 
     private static func isGif(_ data: Data) -> Bool {

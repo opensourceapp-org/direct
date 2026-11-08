@@ -418,6 +418,7 @@ struct IdentityView: View {
     @State private var status = ""
     @State private var photoItem: PhotosPickerItem?
     @State private var showQr = false
+    @State private var qrImage: UIImage?
     @State private var share = false
 
     var body: some View {
@@ -459,19 +460,26 @@ struct IdentityView: View {
                 if let bundle = model.state.bundle {
                     let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) })
                     Section {
-                        Button { showQr.toggle() } label: {
+                        Button {
+                            showQr.toggle()
+                            qrImage = showQr ? MediaPrep.qrImage(card) : nil
+                        } label: {
                             actionLabel(showQr ? "Hide QR code" : "Show QR code", icon: "qrcode", tint: Ink.accent)
                         }
                         .buttonStyle(.plain)
-                        if showQr, let image = MediaPrep.qrImage(card) {
+                        if showQr {
                             VStack(alignment: .leading, spacing: 8) {
-                                Image(uiImage: image)
-                                    .interpolation(.none)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxWidth: 220)
-                                    .padding(12)
-                                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                if let qrImage {
+                                    Image(uiImage: qrImage)
+                                        .interpolation(.none)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 220, height: 220)
+                                        .padding(12)
+                                        .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                } else {
+                                    Muted("This profile is too large to draw as a QR code. Share it instead, or remove the photo and try again.")
+                                }
                                 Muted("The QR code is your signed identity, plus the status and a small photo. The status and photo are for display. They are not part of the signature.")
                             }
                         }
