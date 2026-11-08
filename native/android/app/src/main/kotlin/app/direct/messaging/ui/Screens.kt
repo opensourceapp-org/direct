@@ -525,7 +525,7 @@ private fun ServerHelp(onClose: () -> Unit) {
             Modifier.verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Muted("Clone DIRECT from https://github.com/hyper-realm/direct. On that computer, open the server app. It starts the server, shows the address to share, and lists each phone that connects.")
+            Muted("Clone DIRECT from https://github.com/hyper-realm/direct. On a Mac, double-click Start Server.command in that folder. On any computer, the commands below open the server window. It shows the address to share and lists each phone that connects. Direct.app is the iPhone app. macOS will not open it.")
             HelpCode("git clone https://github.com/hyper-realm/direct.git\ncd direct\npnpm install\npnpm server")
             Muted("The server only introduces the two phones. It does not store messages, photos, voice notes, or calls.")
             HelpBlock(

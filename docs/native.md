@@ -15,7 +15,7 @@ pnpm install
 pnpm server
 ```
 
-`pnpm server` downloads the desktop app the first time, then opens it. Start server, then share the `ws://` address it shows. The window lists each phone that connects. `pnpm signaling` runs the same server in the terminal and prints those addresses. The steps are also on the page in `site/index.html`.
+`pnpm server` downloads the desktop app the first time, then opens it. On a Mac, double-click `Start Server.command` in the project folder. `Direct.app` is the iPhone build. macOS will not open that file. Start server, then share the `ws://` address it shows. The window lists each phone that connects. `pnpm signaling` runs the same server in the terminal and prints those addresses. The steps are also on the page in `site/index.html`.
 
 ```bash
 pnpm signaling
