@@ -17,8 +17,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
@@ -29,14 +27,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -126,30 +121,27 @@ fun Field(value: String, onChange: (String) -> Unit, placeholder: String, single
     )
 }
 
-/** Dragging a list or form lowers the keyboard. */
-@Composable
-fun Modifier.hideKeyboardOnScroll(): Modifier {
-    val focus = LocalFocusManager.current
-    val connection = remember(focus) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.UserInput && available.y != 0f) focus.clearFocus()
-                return Offset.Zero
-            }
-        }
-    }
-    return nestedScroll(connection)
-}
-
-/** A tap that no text field or button handled closes the keyboard. */
+/**
+ * Closes the keyboard on a tap the text field did not use.
+ * The down event is not consumed, so a field can still take focus and open the keyboard.
+ */
 @Composable
 fun Modifier.dismissKeyboardOnOutsideTap(): Modifier {
     val focus = LocalFocusManager.current
     return pointerInput(Unit) {
         awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            val up = waitForUpOrCancellation(pass = PointerEventPass.Final)
-            if (up != null && !up.isConsumed) focus.clearFocus()
+            val down = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.changedToDownIgnoreConsumed() }
+                ?: return@awaitEachGesture
+            val pointerId = down.id
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Final)
+                val change = event.changes.firstOrNull { it.id == pointerId } ?: return@awaitEachGesture
+                if (change.changedToUp()) {
+                    if (!change.isConsumed) focus.clearFocus()
+                    return@awaitEachGesture
+                }
+                if (change.isConsumed || !change.pressed) return@awaitEachGesture
+            }
         }
     }
 }
