@@ -12,7 +12,7 @@ enum SendFeedback {
     private final class Playback {
         private var player: AVAudioPlayer?
         private let clip: Data
-        private let haptic = UIImpactFeedbackGenerator(style: .light)
+        private let haptic = UIImpactFeedbackGenerator(style: .soft)
 
         init() {
             clip = SendFeedback.swoosh()
@@ -20,7 +20,7 @@ enum SendFeedback {
         }
 
         func play() {
-            haptic.impactOccurred(intensity: 0.6)
+            haptic.impactOccurred(intensity: 0.35)
             haptic.prepare()
             let session = AVAudioSession.sharedInstance()
             if session.category != .playback {
@@ -28,34 +28,38 @@ enum SendFeedback {
                 try? session.setActive(true)
             }
             player = try? AVAudioPlayer(data: clip)
-            player?.volume = 0.85
+            player?.volume = 0.45
             player?.prepareToPlay()
             player?.play()
         }
     }
 
-    /// Rising filtered noise, about a fifth of a second, with a soft fade so it does not click.
+    /// A soft rising whoosh. The level is a smooth hump, so the start has no crack.
     private static func swoosh() -> Data {
         let sampleRate = 44_100
-        let duration = 0.22
+        let duration = 0.32
         let count = Int(Double(sampleRate) * duration)
         var samples = [Int16](repeating: 0, count: count)
         var low = 0.0
+        var low2 = 0.0
+        var phase = 0.0
         var seed: UInt32 = 0xA3C59AC3
         for index in 0..<count {
             let t = Double(index) / Double(sampleRate)
-            let attack = min(1, t / 0.012)
-            let release = exp(-max(0, t - 0.02) * 14)
-            let fade = min(1, max(0, (duration - t) / 0.018))
-            let envelope = attack * release * fade
+            let hump = sin(.pi * t / duration)
+            let envelope = hump * hump
+            let glide = t / duration
+            let frequency = 380 + 720 * glide
+            phase += 2 * .pi * frequency / Double(sampleRate)
+            let tone = sin(phase) * 0.55 + sin(phase * 0.5) * 0.22
             seed = seed &* 1_664_525 &+ 1_013_904_223
             let white = Double(Int32(bitPattern: seed)) / Double(Int32.max)
-            let cutoff = 320 + 2_600 * pow(t / duration, 0.65)
-            let alpha = 1 / (1 + (Double(sampleRate) / (2 * Double.pi * cutoff)))
+            let cutoff = 500 + 700 * glide
+            let alpha = 1 / (1 + (Double(sampleRate) / (2 * .pi * cutoff)))
             low += alpha * (white - low)
-            let air = (white - low) * 0.18
-            let mixed = max(-1, min(1, (low * 1.35 + air) * envelope))
-            samples[index] = Int16(mixed * 15_000)
+            low2 += alpha * (low - low2)
+            let mixed = max(-1, min(1, (tone + low2 * 0.35) * envelope))
+            samples[index] = Int16(mixed * 12_000)
         }
         return wav(samples, sampleRate: sampleRate)
     }
