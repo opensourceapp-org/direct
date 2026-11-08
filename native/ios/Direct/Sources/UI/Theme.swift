@@ -10,6 +10,7 @@ enum Ink {
     static let muted = Color(red: 0.56, green: 0.59, blue: 0.65)
     /// Apple system blue and system green in dark mode (#0A84FF, #30D158).
     static let accent = Color(red: 0.039, green: 0.518, blue: 1.0)
+    static let incoming = Color(red: 0.227, green: 0.227, blue: 0.235)
     static let success = Color(red: 0.188, green: 0.820, blue: 0.345)
     static let warning = Color(red: 0.98, green: 0.77, blue: 0.36)
     static let danger = Color(red: 1.0, green: 0.42, blue: 0.42)
@@ -116,4 +117,16 @@ struct Muted: View {
 
 func formatTime(_ ms: Int64) -> String {
     Date(timeIntervalSince1970: TimeInterval(ms) / 1000).formatted(date: .omitted, time: .shortened)
+}
+
+func messageBubble(_ outgoing: Bool, tail: Bool) -> UnevenRoundedRectangle {
+    let round: CGFloat = 18
+    let corner: CGFloat = tail ? 5 : 18
+    return UnevenRoundedRectangle(
+        topLeadingRadius: round,
+        bottomLeadingRadius: outgoing ? round : corner,
+        bottomTrailingRadius: outgoing ? corner : round,
+        topTrailingRadius: round,
+        style: .continuous
+    )
 }

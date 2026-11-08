@@ -172,6 +172,7 @@ struct ChatView: View {
     let peerId: String
     @EnvironmentObject private var model: AppModel
     @State private var draft = ""
+    @State private var attachments = false
 
     private var contact: ContactRecord? { model.state.contacts.first { $0.directId == peerId } }
     private var messages: [MessageRecord] { model.state.messages[peerId] ?? [] }
@@ -180,12 +181,28 @@ struct ChatView: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(messages) { message in
-                            MediaBubble(message: message).id(message.id)
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                            let previous = index > 0 ? messages[index - 1] : nil
+                            let next = index + 1 < messages.count ? messages[index + 1] : nil
+                            let continues = next.map { $0.direction == message.direction && !messageGap(message, $0) } ?? false
+                            VStack(spacing: 2) {
+                                if messageGap(previous, message) {
+                                    Text(formatTime(message.createdAt))
+                                        .font(.caption2)
+                                        .foregroundStyle(Ink.muted)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.top, 12)
+                                        .padding(.bottom, 4)
+                                }
+                                MediaBubble(message: message, tail: !continues, showReceipt: !continues && message.direction == .outgoing)
+                            }
+                            .padding(.top, previous?.direction == message.direction && !messageGap(previous, message) ? 2 : 8)
+                            .id(message.id)
                         }
                     }
-                    .padding()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
                 }
                 .onChange(of: messages.count) { _ in
                     if let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -210,6 +227,7 @@ struct ChatView: View {
         }
         .navigationTitle(contact?.name ?? peerId)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .onAppear { model.open(peerId) }
     }
 
@@ -217,9 +235,14 @@ struct ChatView: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private func messageGap(_ earlier: MessageRecord?, _ later: MessageRecord) -> Bool {
+        guard let earlier else { return true }
+        return later.createdAt - earlier.createdAt > 5 * 60 * 1000
+    }
+
     private var composer: some View {
-        VStack(spacing: 12) {
-            AttachmentBar(
+        VStack(spacing: 0) {
+            AttachmentBar(expanded: $attachments,
                 onPhoto: { model.sendMedia(peerId: peerId, kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0, caption: draft); draft = "" },
                 onVideo: { model.sendMedia(peerId: peerId, kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0, caption: draft); draft = "" },
                 onGif: { model.sendMedia(peerId: peerId, kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0, caption: draft); draft = "" },
@@ -228,6 +251,16 @@ struct ChatView: View {
                 onError: { model.toast = $0 }
             )
             HStack(alignment: .bottom, spacing: 8) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { attachments.toggle() }
+                } label: {
+                    Image(systemName: attachments ? "xmark" : "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Ink.accent)
+                        .frame(width: 36, height: 36)
+                        .background(Ink.surface, in: Circle())
+                }
+                .buttonStyle(ComposerPressStyle())
                 TextField("Message", text: $draft, axis: .vertical)
                     .font(.body)
                     .foregroundStyle(Ink.text)
@@ -238,6 +271,7 @@ struct ChatView: View {
                 Button {
                     model.send(peerId, draft)
                     draft = ""
+                    withAnimation(.easeOut(duration: 0.2)) { attachments = false }
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 16, weight: .bold))
@@ -250,10 +284,11 @@ struct ChatView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 10)
+        .padding(.top, 8)
         .padding(.bottom, 8)
         .background(Ink.background)
         .overlay(alignment: .top) { Rectangle().fill(Ink.line).frame(height: 0.5) }
+        .animation(.easeOut(duration: 0.2), value: attachments)
     }
 }
 
@@ -266,9 +301,11 @@ struct Bubble: View {
             if outgoing { Spacer(minLength: 48) }
             VStack(alignment: outgoing ? .trailing : .leading, spacing: 4) {
                 Text(message.body)
+                    .font(.system(size: 17))
                     .foregroundStyle(outgoing ? Color.white : Ink.text)
-                    .padding(10)
-                    .background(outgoing ? Ink.accent : Ink.surface, in: RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(outgoing ? Ink.accent : Ink.incoming, in: messageBubble(outgoing, tail: true))
                 HStack(spacing: 6) {
                     Text(formatTime(message.createdAt))
                     if let state = message.state {

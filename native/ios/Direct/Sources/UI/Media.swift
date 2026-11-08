@@ -293,6 +293,7 @@ final class VoiceCapture: NSObject, ObservableObject {
 }
 
 struct AttachmentBar: View {
+    @Binding var expanded: Bool
     let onPhoto: (Data) -> Void
     let onVideo: (Data) -> Void
     let onGif: (Data) -> Void
@@ -307,6 +308,58 @@ struct AttachmentBar: View {
     @State private var stickers = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if voice.recording {
+                recordingRow
+            } else if expanded {
+                attachmentChoices
+            }
+        }
+        .padding(.bottom, voice.recording || expanded ? 10 : 0)
+        .onChange(of: expanded) { shown in
+            if !shown { stickers = false }
+        }
+        .onChange(of: photoItem) { item in Task { await load(item, gifOnly: false) } }
+        .onChange(of: gifItem) { item in Task { await load(item, gifOnly: true) } }
+        .onChange(of: videoItem) { item in
+            Task {
+                guard let item else { return }
+                let bytes: Data?
+                if let file = try? await item.loadTransferable(type: VideoBytes.self) {
+                    bytes = file.data
+                } else {
+                    bytes = try? await item.loadTransferable(type: Data.self)
+                }
+                guard let bytes else { onError("That video could not be read."); return }
+                do { onVideo(try MediaPrep.video(bytes, mime: "video/mp4").bytes) } catch { onError((error as? PrepError)?.message ?? "That video was not sent.") }
+            }
+        }
+    }
+
+    private var recordingRow: some View {
+        HStack(spacing: 12) {
+            Circle().fill(Ink.danger).frame(width: 8, height: 8)
+            Text("Recording").font(.subheadline).foregroundStyle(Ink.text)
+            Spacer(minLength: 8)
+            Button("Cancel") { voice.cancel() }
+                .font(.subheadline)
+                .foregroundStyle(Ink.muted)
+            Button {
+                do { onVoice(try voice.stop()) } catch { onError((error as? PrepError)?.message ?? "That recording was not sent.") }
+            } label: {
+                Text("Send")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Ink.accent, in: Capsule())
+            }
+            .buttonStyle(ComposerPressStyle())
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private var attachmentChoices: some View {
         VStack(alignment: .leading, spacing: 10) {
             if stickers {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -331,64 +384,26 @@ struct AttachmentBar: View {
                     .padding(.vertical, 2)
                 }
             }
-            if voice.recording {
-                HStack(spacing: 12) {
-                    Circle().fill(Ink.danger).frame(width: 8, height: 8)
-                    Text("Recording").font(.subheadline).foregroundStyle(Ink.text)
-                    Spacer(minLength: 8)
-                    Button("Cancel") { voice.cancel() }
-                        .font(.subheadline)
-                        .foregroundStyle(Ink.muted)
-                    Button {
-                        do { onVoice(try voice.stop()) } catch { onError((error as? PrepError)?.message ?? "That recording was not sent.") }
-                    } label: {
-                        Text("Send")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(Ink.accent, in: Capsule())
-                    }
-                    .buttonStyle(ComposerPressStyle())
-                }
-                .padding(.horizontal, 4)
-            } else {
-                HStack(spacing: 4) {
-                    PhotosPicker(selection: $photoItem, matching: .images) { chip("Photo", "photo") }
-                        .frame(maxWidth: .infinity)
-                    PhotosPicker(selection: $videoItem, matching: .videos) { chip("Video", "video.fill") }
-                        .frame(maxWidth: .infinity)
-                    PhotosPicker(selection: $gifItem, matching: .images) { chip("GIF", "sparkles") }
-                        .frame(maxWidth: .infinity)
-                    Button { stickers.toggle() } label: { chip("Sticker", "face.smiling", selected: stickers) }
-                        .buttonStyle(ComposerPressStyle())
-                        .frame(maxWidth: .infinity)
-                    Button {
-                        AVAudioSession.sharedInstance().requestRecordPermission { allowed in
-                            DispatchQueue.main.async {
-                                guard allowed else { onError("Microphone permission is needed for a voice message."); return }
-                                do { try voice.start() } catch { onError("Recording could not start.") }
-                            }
-                        }
-                    } label: { chip("Voice", "mic.fill") }
+            HStack(spacing: 4) {
+                PhotosPicker(selection: $photoItem, matching: .images) { chip("Photo", "photo") }
+                    .frame(maxWidth: .infinity)
+                PhotosPicker(selection: $videoItem, matching: .videos) { chip("Video", "video.fill") }
+                    .frame(maxWidth: .infinity)
+                PhotosPicker(selection: $gifItem, matching: .images) { chip("GIF", "sparkles") }
+                    .frame(maxWidth: .infinity)
+                Button { stickers.toggle() } label: { chip("Sticker", "face.smiling", selected: stickers) }
                     .buttonStyle(ComposerPressStyle())
                     .frame(maxWidth: .infinity)
-                }
-            }
-        }
-        .onChange(of: photoItem) { item in Task { await load(item, gifOnly: false) } }
-        .onChange(of: gifItem) { item in Task { await load(item, gifOnly: true) } }
-        .onChange(of: videoItem) { item in
-            Task {
-                guard let item else { return }
-                let bytes: Data?
-                if let file = try? await item.loadTransferable(type: VideoBytes.self) {
-                    bytes = file.data
-                } else {
-                    bytes = try? await item.loadTransferable(type: Data.self)
-                }
-                guard let bytes else { onError("That video could not be read."); return }
-                do { onVideo(try MediaPrep.video(bytes, mime: "video/mp4").bytes) } catch { onError((error as? PrepError)?.message ?? "That video was not sent.") }
+                Button {
+                    AVAudioSession.sharedInstance().requestRecordPermission { allowed in
+                        DispatchQueue.main.async {
+                            guard allowed else { onError("Microphone permission is needed for a voice message."); return }
+                            do { try voice.start() } catch { onError("Recording could not start.") }
+                        }
+                    }
+                } label: { chip("Voice", "mic.fill") }
+                .buttonStyle(ComposerPressStyle())
+                .frame(maxWidth: .infinity)
             }
         }
     }
@@ -426,49 +441,34 @@ struct AttachmentBar: View {
 
 struct MediaBubble: View {
     let message: MessageRecord
+    var tail = true
+    var showReceipt = false
     @EnvironmentObject private var model: AppModel
     @State private var bytes: Data?
     @State private var playing = false
 
     var body: some View {
         let outgoing = message.direction == .outgoing
-        HStack {
-            if outgoing { Spacer(minLength: 48) }
-            VStack(alignment: outgoing ? .trailing : .leading, spacing: 4) {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let bytes, let image = UIImage(data: bytes), let kind = message.mediaKind, ["image", "sticker", "gif"].contains(kind) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(maxWidth: 220, maxHeight: 220)
-                            .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+        HStack(alignment: .bottom, spacing: 0) {
+            if outgoing { Spacer(minLength: 64) }
+            VStack(alignment: outgoing ? .trailing : .leading, spacing: 3) {
+                content(outgoing: outgoing)
+                if showReceipt, !receipt.isEmpty {
+                    Button {
+                        if message.state == .failed { model.retry(message.id) }
+                    } label: {
+                        Text(receipt)
+                            .font(.caption2)
+                            .foregroundStyle(message.state == .failed ? Ink.danger : Ink.muted)
                     }
-                    let label = MediaNotes.label(message.mediaKind)
-                    if !message.body.isEmpty, message.body != label {
-                        Text(message.body)
-                    }
-                    if message.mediaKind == "video" || message.mediaKind == "audio", bytes != nil {
-                        Button("Open") { playing = true }.tint(outgoing ? Ink.text : Ink.accent)
-                    }
+                    .buttonStyle(.plain)
+                    .disabled(message.state != .failed)
                 }
-                .foregroundStyle(outgoing ? Color.white : Ink.text)
-                .padding(10)
-                .background(outgoing ? Ink.accent : Ink.surface, in: RoundedRectangle(cornerRadius: 14))
-                HStack(spacing: 6) {
-                    Text(formatTime(message.createdAt))
-                    if let state = message.state {
-                        Text(state.label).foregroundStyle(state == .failed ? Ink.danger : Ink.muted)
-                    }
-                }
-                .font(.caption2)
-                .foregroundStyle(Ink.muted)
                 if let error = message.lastError, message.state == .queued || message.state == .failed {
-                    Text(error).font(.caption2).foregroundStyle(Ink.warning)
+                    Text(error).font(.caption2).foregroundStyle(Ink.danger)
                 }
             }
-            .onTapGesture { if message.state == .failed { model.retry(message.id) } }
-            if !outgoing { Spacer(minLength: 48) }
+            if !outgoing { Spacer(minLength: 64) }
         }
         .onAppear { model.loadMedia(message.id) { bytes = $0 } }
         .onChange(of: message.mediaFile) { _ in model.loadMedia(message.id) { bytes = $0 } }
@@ -477,6 +477,64 @@ struct MediaBubble: View {
                 PlayerSheet(data: bytes, mime: message.mediaMime ?? "video/mp4", name: message.mediaKind == "audio" ? "voice.m4a" : "video.mp4")
             }
         }
+    }
+
+    private var receipt: String {
+        switch message.state {
+        case .queued, .sending: return "Sending"
+        case .sent: return "Sent"
+        case .accepted: return "Delivered"
+        case .acknowledged: return "Read"
+        case .failed: return "Not Delivered"
+        case nil: return ""
+        }
+    }
+
+    @ViewBuilder
+    private func content(outgoing: Bool) -> some View {
+        let kind = message.mediaKind
+        let label = MediaNotes.label(kind)
+        let fill = outgoing ? Ink.accent : Ink.incoming
+        let shape = messageBubble(outgoing, tail: tail)
+        if let bytes, let image = UIImage(data: bytes), let kind, ["image", "sticker", "gif"].contains(kind) {
+            VStack(alignment: outgoing ? .trailing : .leading, spacing: 2) {
+                let caption = !message.body.isEmpty && message.body != label
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 240, maxHeight: 320)
+                    .clipShape(messageBubble(outgoing, tail: caption ? false : tail))
+                if !message.body.isEmpty, message.body != label {
+                    textBubble(message.body, outgoing: outgoing, fill: fill)
+                }
+            }
+        } else if kind == "video" || kind == "audio" {
+            Button { playing = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: kind == "audio" ? "play.fill" : "video.fill")
+                        .font(.system(size: 13, weight: .bold))
+                    Text(kind == "audio" ? "Voice message" : "Video")
+                        .font(.system(size: 17))
+                }
+                .foregroundStyle(outgoing ? Color.white : Ink.text)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(fill, in: shape)
+            }
+            .buttonStyle(.plain)
+            .disabled(bytes == nil)
+        } else if !message.body.isEmpty {
+            textBubble(message.body, outgoing: outgoing, fill: fill)
+        }
+    }
+
+    private func textBubble(_ text: String, outgoing: Bool, fill: Color) -> some View {
+        Text(text)
+            .font(.system(size: 17))
+            .foregroundStyle(outgoing ? Color.white : Ink.text)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(fill, in: messageBubble(outgoing, tail: tail))
     }
 }
 
