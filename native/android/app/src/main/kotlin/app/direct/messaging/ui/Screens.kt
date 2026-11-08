@@ -1,10 +1,21 @@
 package app.direct.messaging.ui
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,22 +24,69 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.WifiTethering
+import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.Gif
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.QrCode
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material.icons.outlined.WifiTethering
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,19 +96,45 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.graphics.BitmapFactory
+import app.direct.core.Encoding
 import app.direct.core.delivery.MessageState
 import app.direct.core.node.DirectNode
 import app.direct.core.node.NodeState
+import app.direct.core.protocol.MediaNotes
+import app.direct.core.protocol.ProfileCards
 import app.direct.core.store.Direction
+import app.direct.core.store.MessageRecord
+import app.direct.core.store.Profile
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-private enum class Tab(val label: String) { CHATS("Chats"), CONTACTS("Contacts"), NETWORK("Network"), IDENTITY("Identity") }
+private enum class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
+    CHATS("Chats", Icons.Outlined.Chat, Icons.Filled.Chat),
+    CONTACTS("Contacts", Icons.Outlined.Group, Icons.Filled.Group),
+    NETWORK("Network", Icons.Outlined.WifiTethering, Icons.Filled.WifiTethering),
+    IDENTITY("Settings", Icons.Outlined.Settings, Icons.Filled.Settings),
+}
 
 private fun CoroutineScope.attempt(onError: (String?) -> Unit, block: suspend () -> Unit) = launch {
     onError(null)
@@ -64,13 +148,24 @@ private fun CoroutineScope.attempt(onError: (String?) -> Unit, block: suspend ()
 @Composable
 fun DirectRoot(node: DirectNode) {
     val state by node.state.collectAsStateWithLifecycle()
-    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("direct.ui", Context.MODE_PRIVATE) }
+    var introSeen by remember { mutableStateOf(prefs.getBoolean("intro.seen", false)) }
+    var replayIntro by rememberSaveable { mutableStateOf(false) }
+    fun finishIntro() {
+        prefs.edit().putBoolean("intro.seen", true).apply()
+        introSeen = true
+        replayIntro = false
+    }
+    Box(Modifier.fillMaxSize().safeDrawingPadding().dismissKeyboardOnOutsideTap()) {
         when {
             !state.ready -> Centered("Opening DIRECT")
             state.storageError != null -> Centered(state.storageError!!)
+            replayIntro || (state.profile == null && !introSeen) -> Intro(creating = state.profile == null, onDone = ::finishIntro)
             state.profile == null -> Onboarding(node)
-            else -> Home(node, state)
+            else -> Home(node, state) { replayIntro = true }
         }
+        state.call?.let { CallOverlay(node, state, it) }
     }
 }
 
@@ -86,7 +181,10 @@ private fun Onboarding(node: DirectNode) {
     var error by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Spacer(Modifier.padding(top = 32.dp))
-        Text("DIRECT", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp)
+        Box(Modifier.size(72.dp).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.Lock, null, tint = Ink.accent, modifier = Modifier.size(32.dp))
+        }
+        Text("DIRECT", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, color = Ink.accent)
         Title("No middlemen. Just connection.")
         Muted("Your identity is created on this phone and its keys stay in the Android Keystore. There is no account and no server that stores your messages.")
         Label("Display name")
@@ -102,14 +200,14 @@ private fun Onboarding(node: DirectNode) {
             PrimaryButton("Create identity", enabled = name.isNotBlank()) {
                 scope.attempt({ error = it }) { node.createIdentity(name) }
             }
-            SecondaryButton("Restore from recovery phrase") { restoring = true }
+            SecondaryButton("Restore from recovery phrase", Icons.Outlined.Key) { restoring = true }
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
     }
 }
 
 @Composable
-private fun Home(node: DirectNode, state: NodeState) {
+private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.CHATS) }
     var openPeer by rememberSaveable { mutableStateOf<String?>(null) }
     val peer = openPeer
@@ -124,17 +222,25 @@ private fun Home(node: DirectNode, state: NodeState) {
                 Tab.CHATS -> ChatsScreen(state) { openPeer = it }
                 Tab.CONTACTS -> ContactsScreen(node, state) { openPeer = it }
                 Tab.NETWORK -> NetworkScreen(node, state)
-                Tab.IDENTITY -> IdentityScreen(node, state)
+                Tab.IDENTITY -> IdentityScreen(node, state, onHowItWorks)
             }
         }
-        NavigationBar(containerColor = Ink.background, tonalElevation = 0.dp) {
+        HorizontalDivider(color = Ink.border)
+        NavigationBar(containerColor = Ink.surface, tonalElevation = 0.dp) {
             Tab.entries.forEach { item ->
+                val selected = tab == item
                 NavigationBarItem(
-                    selected = tab == item,
+                    selected = selected,
                     onClick = { tab = item },
-                    icon = {},
-                    label = { Text(item.label, fontWeight = if (tab == item) FontWeight.SemiBold else FontWeight.Normal) },
-                    colors = NavigationBarItemDefaults.colors(indicatorColor = Ink.surface, selectedTextColor = Ink.foreground, unselectedTextColor = Ink.muted),
+                    icon = { Icon(if (selected) item.selectedIcon else item.icon, item.label) },
+                    label = { Text(item.label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
+                    colors = NavigationBarItemDefaults.colors(
+                        indicatorColor = Ink.accentSoft,
+                        selectedIconColor = Ink.accent,
+                        unselectedIconColor = Ink.muted,
+                        selectedTextColor = Ink.accent,
+                        unselectedTextColor = Ink.muted,
+                    ),
                 )
             }
         }
@@ -152,7 +258,19 @@ private fun ChatsScreen(state: NodeState, open: (String) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Header("Messages", "Chats")
         if (state.conversations.isEmpty()) {
-            Muted("No conversations yet. Add a contact by DIRECT ID. A message someone sends you before you add them appears here as a request.", Modifier.padding(20.dp))
+            Column(
+                Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(Modifier.size(72.dp).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.Chat, null, tint = Ink.accent, modifier = Modifier.size(32.dp))
+                }
+                Muted(
+                    "No conversations yet. Add a contact by DIRECT ID. A message someone sends you before you add them appears here as a request.",
+                    Modifier.padding(top = 16.dp),
+                )
+            }
             return
         }
         LazyColumn {
@@ -162,10 +280,12 @@ private fun ChatsScreen(state: NodeState, open: (String) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    val contact = state.contacts.firstOrNull { it.directId == conversation.peerId }
+                    Avatar(conversation.name, jpegBytes(contact?.avatarJpegBase64))
                     Column(Modifier.weight(1f)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Label(conversation.name)
-                            if (conversation.request) Badge("Request")
+                            if (conversation.request) Badge("Request", Ink.warning)
                         }
                         Muted(conversation.lastBody ?: "No messages yet")
                     }
@@ -179,11 +299,12 @@ private fun ChatsScreen(state: NodeState, open: (String) -> Unit) {
 }
 
 @Composable
-private fun Badge(text: String) = Text(
+private fun Badge(text: String, color: Color = Ink.accent) = Text(
     text,
+    color = Color.White,
     fontSize = 12.sp,
     fontWeight = FontWeight.Medium,
-    modifier = Modifier.background(Ink.surface, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+    modifier = Modifier.background(color, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 2.dp),
 )
 
 @Composable
@@ -199,48 +320,46 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         if (contact?.accepted == true) node.openConversation(peerId)
         if (messages.isNotEmpty()) list.animateScrollToItem(messages.lastIndex)
     }
+    val status = when {
+        contact == null -> "Not a contact"
+        contact.blocked -> "Blocked"
+        request -> "Message request"
+        peerId in state.connected -> "Connected directly"
+        peerId in state.online -> "On the bootstrap"
+        else -> "Offline · messages wait on this phone"
+    }
     Column(Modifier.fillMaxSize().imePadding()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Back", modifier = Modifier.clickable(onClick = back).padding(8.dp), fontWeight = FontWeight.Medium)
-            Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                Label(contact?.name ?: peerId)
-                val status = when {
-                    contact == null -> "Not a contact"
-                    contact.blocked -> "Blocked"
-                    request -> "Message request"
-                    peerId in state.connected -> "Connected directly"
-                    peerId in state.online -> "On the bootstrap"
-                    else -> "Offline · messages wait on this phone"
-                }
-                Muted(status)
+        Row(
+            Modifier.fillMaxWidth().padding(end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(48.dp).clip(CircleShape).clickable(onClick = back),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
+            }
+            Avatar(contact?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 40.dp)
+            Column(Modifier.weight(1f).padding(start = 12.dp, top = 8.dp, bottom = 8.dp)) {
+                Text(
+                    contact?.name ?: peerId,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Ink.foreground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(status, fontSize = 13.sp, color = Ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (contact?.accepted == true && !contact.blocked) {
+                CallActions(node, peerId) { error = it }
             }
         }
         HorizontalDivider(color = Ink.border)
         LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item { Spacer(Modifier.padding(4.dp)) }
             items(messages, key = { it.id }) { message ->
-                val outgoing = message.direction == Direction.OUTGOING
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start) {
-                    Text(
-                        message.body,
-                        color = if (outgoing) androidx.compose.ui.graphics.Color.White else Ink.foreground,
-                        modifier = Modifier
-                            .widthIn(max = 300.dp)
-                            .background(if (outgoing) Ink.foreground else Ink.surface, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                    )
-                    val state0 = message.state
-                    if (outgoing && state0 != null) {
-                        Text(
-                            state0.label(),
-                            fontSize = 12.sp,
-                            color = if (state0 == MessageState.FAILED) Ink.danger else Ink.muted,
-                            modifier = Modifier.padding(top = 2.dp).clickable(enabled = state0 == MessageState.FAILED) {
-                                scope.attempt({ error = it }) { node.retry(message.id) }
-                            },
-                        )
-                    }
-                }
+                MessageBubble(node, message) { scope.attempt({ error = it }) { node.retry(message.id) } }
             }
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
@@ -258,19 +377,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                 }
             }
             contact.blocked -> Muted("You blocked this DIRECT ID.", Modifier.padding(16.dp))
-            else -> Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.weight(1f)) { Field(draft, { draft = it }, "Message", singleLine = false) }
-                Text(
-                    "Send",
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (draft.isBlank()) Ink.muted else Ink.foreground,
-                    modifier = Modifier.clickable(enabled = draft.isNotBlank()) {
-                        val body = draft
-                        draft = ""
-                        scope.attempt({ error = it }) { node.send(peerId, body) }
-                    }.padding(8.dp),
-                )
-            }
+            else -> Composer(node, peerId, draft, { draft = it }) { error = it }
         }
     }
 }
@@ -278,14 +385,36 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
 @Composable
 private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var directId by rememberSaveable { mutableStateOf("") }
     var bundle by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var scanning by rememberSaveable { mutableStateOf(false) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) {
+            scanning = false
+            error = "Camera permission is needed to scan a QR code."
+        }
+    }
+    if (scanning) {
+        BackHandler { scanning = false }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            QrScanner(onCode = { text ->
+                scanning = false
+                scope.attempt({ error = it }) { node.addFromShare(text) }
+            }, onClose = { scanning = false })
+        } else {
+            LaunchedEffect(Unit) { camera.launch(Manifest.permission.CAMERA) }
+            Centered("Allow camera access to scan a QR code.")
+        }
+        return
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Header("People", "Contacts")
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Muted("Look up a DIRECT ID from a phone that has DIRECT open on the same bootstrap address. The phones can be on different networks.")
+            Muted("Look up a DIRECT ID from a phone that has DIRECT open on the same server. A scanned QR code also carries that server and saves it on this phone.")
+            SecondaryButton("Scan a QR code", Icons.Outlined.QrCodeScanner) { scanning = true }
             Field(directId, { directId = it }, "dir_…")
             PrimaryButton(if (busy) "Looking up" else "Look up", enabled = directId.isNotBlank() && !busy) {
                 busy = true
@@ -301,9 +430,9 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
             }
             Label("Or paste an identity bundle")
             Field(bundle, { bundle = it }, "{\"v\":1,…}", singleLine = false, minLines = 3)
-            SecondaryButton("Verify and add", enabled = bundle.isNotBlank()) {
+            SecondaryButton("Add from bundle or share card", enabled = bundle.isNotBlank()) {
                 scope.attempt({ error = it }) {
-                    node.addContactBundle(bundle)
+                    node.addFromShare(bundle)
                     bundle = ""
                 }
             }
@@ -311,10 +440,18 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
         }
         Spacer(Modifier.padding(8.dp))
         state.contacts.filter { it.accepted && !it.blocked }.forEach { contact ->
-            Column(Modifier.fillMaxWidth().clickable { open(contact.directId) }.padding(horizontal = 20.dp, vertical = 12.dp)) {
-                Label(contact.name)
-                Mono(contact.directId)
-                Muted(if (contact.verified) "Verified · ${contact.fingerprint}" else "Not verified · ${contact.fingerprint}")
+            Row(
+                Modifier.fillMaxWidth().clickable { open(contact.directId) }.padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Avatar(contact.name, jpegBytes(contact.avatarJpegBase64))
+                Column(Modifier.weight(1f)) {
+                    Label(contact.name)
+                    if (contact.about.isNotBlank()) Muted(contact.about)
+                    Mono(contact.directId)
+                    Muted(if (contact.verified) "Verified · ${contact.fingerprint}" else "Not verified · ${contact.fingerprint}")
+                }
             }
             HorizontalDivider(color = Ink.border)
         }
@@ -327,8 +464,25 @@ private fun NetworkScreen(node: DirectNode, state: NodeState) {
     var address by rememberSaveable(state.bootstrapUrl) { mutableStateOf(state.bootstrapUrl ?: "") }
     var error by remember { mutableStateOf<String?>(null) }
     val (phase, color) = state.bootstrap.describe()
+    var help by rememberSaveable { mutableStateOf(false) }
+    if (help) {
+        BackHandler { help = false }
+        ServerHelp { help = false }
+        return
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Header("Diagnostics", "Network")
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 12.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("DIAGNOSTICS", color = Ink.muted, fontSize = 12.sp, letterSpacing = 1.2.sp)
+                Title("Network")
+            }
+            IconButton(onClick = { help = true }) {
+                Icon(Icons.Outlined.HelpOutline, "How to run your own server", tint = Ink.accent)
+            }
+        }
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Card {
                 StatusRow("Bootstrap", phase, color)
@@ -356,31 +510,588 @@ private fun NetworkScreen(node: DirectNode, state: NodeState) {
 }
 
 @Composable
-private fun IdentityScreen(node: DirectNode, state: NodeState) {
+private fun ServerHelp(onClose: () -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
+            }
+            Title("Your server")
+        }
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Muted("Clone DIRECT from https://github.com/hyper-realm/direct. On a Mac, double-click Start Server.command in that folder. On any computer, the commands below open the server window. It shows the address to share and lists each phone that connects. Direct.app is the iPhone app. macOS will not open it.")
+            HelpCode("git clone https://github.com/hyper-realm/direct.git\ncd direct\npnpm install\npnpm server")
+            Muted("The server only introduces the two phones. It does not store messages, photos, voice notes, or calls.")
+            HelpBlock(
+                "What you need",
+                "A computer both phones can reach, Node.js 22 or newer, pnpm, and this DIRECT project on that computer.",
+            )
+            HelpBlock("Start it", "pnpm server opens the Direct server window. Press Start server. The window shows one address for each network on that computer and lists each phone that connects. Closing the window stops the server. The same server can run in a terminal with pnpm signaling. Leave that terminal open. Use the address your phones are on, for example:")
+            HelpCode("ws://192.168.1.20:8787")
+            Muted("Allow TCP port 8787 through that computer's firewall. On both phones, open Network, paste that address, and save it. Both phones must save the same address.")
+            HelpBlock("Check that it is running", "On the same network, open this page in a browser. Replace the example with the address the window or the terminal showed.")
+            HelpCode("http://192.168.1.20:8787/health")
+            Muted("A working server answers:")
+            HelpCode("{\"ok\":true,\"service\":\"direct-signaling\",\"contract\":1}")
+            Muted("The page at the server root is a short note that this is the DIRECT signaling server.")
+            HelpCode("http://192.168.1.20:8787")
+            HelpBlock("Addresses the phone accepts", "A bare host is saved as ws:// and port 8787. http:// is saved as ws://. https:// is saved as wss://. The host is lowercased, and a trailing slash is removed.")
+            HelpCode("ws://192.168.1.20:8787\n192.168.1.20\nhttp://192.168.1.20:8787\nhttps://signals.example.com")
+            Muted("Do not enter localhost, 127.0.0.1, or 0.0.0.0. On a phone those names mean the phone itself.")
+            HelpBlock("Choose a port", "8787 is the default. The server listens on every network interface of that computer unless you set HOST to one address.")
+            HelpCode("PORT=9000 pnpm signaling\nws://192.168.1.20:9000")
+            HelpBlock(
+                "Phones away from your Wi-Fi",
+                "A 192.168 address only works on that local network. Forward TCP 8787 to this computer, or run the server where both phones can reach it, and save that address. This server speaks plain WebSocket and does not add TLS itself. For a public wss:// address, put a TLS proxy in front of port 8787 and save wss://your.host, or https://your.host.",
+            )
+            HelpBlock(
+                "What it is allowed to see",
+                "Public identity bundles, who is online, and the WebRTC setup that connects the phones. The message itself stays sealed on the phones.",
+            )
+        }
+    }
+}
+
+@Composable
+private fun HelpBlock(title: String, body: String) = Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Label(title)
+    Muted(body)
+}
+
+@Composable
+private fun HelpCode(text: String) = Text(
+    text,
+    fontFamily = FontFamily.Monospace,
+    fontSize = 13.sp,
+    color = Ink.foreground,
+    modifier = Modifier.fillMaxWidth().background(Ink.surface, RoundedCornerShape(10.dp)).border(1.dp, Ink.border, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
+)
+
+@Composable
+private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val profile = state.profile ?: return
     var phrase by remember { mutableStateOf<String?>(null) }
+    var status by rememberSaveable(profile.status) { mutableStateOf(profile.status) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var showQr by rememberSaveable { mutableStateOf(false) }
+    var acknowledged by remember { mutableStateOf<String?>(null) }
+    val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            error = null
+            try {
+                node.setAvatar(MediaPrep.avatar(context, uri))
+            } catch (exception: Exception) {
+                error = exception.message ?: "That photo could not be used."
+            }
+        }
+    }
+    val bundle = state.bundle
+    val server = state.bootstrapUrl.orEmpty()
+    val card = bundle?.let { shareCard(profile, it, server) }
+    val statusDraft = status.trim()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Header("This phone", profile.name)
+        if (profile.status.isNotBlank()) {
+            Text(profile.status, modifier = Modifier.padding(horizontal = 20.dp), fontSize = 16.sp)
+        }
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Avatar(profile.name, jpegBytes(profile.avatarJpegBase64), 72.dp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SecondaryButton("Profile photo", Icons.Outlined.PhotoCamera) { photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                    if (profile.avatarJpegBase64 != null) SecondaryButton("Remove photo", Icons.Outlined.Delete) { scope.attempt({ error = it }) { node.clearAvatar() } }
+                }
+            }
+            Label("Status")
+            Field(status, { status = it.take(80) }, "Write your own status")
+            PrimaryButton(if (acknowledged == statusDraft) "Saved" else "Save status") {
+                scope.attempt({ error = it }) {
+                    node.setStatus(status)
+                    acknowledged = status.trim()
+                }
+            }
+            if (acknowledged == statusDraft) {
+                Text(
+                    if (statusDraft.isEmpty()) "Status cleared" else "Status saved",
+                    color = Ink.success,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            StatusMenu(selected = statusPresets.firstOrNull { it == profile.status }) { preset ->
+                status = preset
+                scope.attempt({ error = it }) {
+                    node.setStatus(preset)
+                    acknowledged = preset
+                }
+            }
+            Muted("Choose one, or write your own and tap Save status.")
             Label("DIRECT ID")
             Mono(profile.directId)
-            SecondaryButton("Copy DIRECT ID") { copy(context, "DIRECT ID", profile.directId) }
-            state.bundle?.let { bundle -> SecondaryButton("Copy identity bundle") { copy(context, "DIRECT bundle", bundle) } }
+            SecondaryButton("Copy DIRECT ID", Icons.Outlined.ContentCopy) { copy(context, "DIRECT ID", profile.directId) }
+            if (card != null) {
+                SecondaryButton(if (showQr) "Hide QR code" else "Show QR code", Icons.Outlined.QrCode) { showQr = !showQr }
+                if (showQr) {
+                    Card {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            QrImage(card, Modifier.fillMaxWidth())
+                            Muted(
+                                if (server.isEmpty()) "Set the server under Network before sharing. Without that address, the other phone can save your identity but cannot connect."
+                                else "The QR code is your signed identity and your server address, plus the status and a small photo. Scanning it saves that server so the two phones can connect. The status and photo are for display. They are not part of the signature.",
+                            )
+                        }
+                    }
+                }
+                SecondaryButton("Share profile", Icons.Outlined.Share) { shareProfile(context, profile, card, server) }
+                Muted(
+                    if (server.isEmpty()) "Share includes your name and DIRECT ID. Set the server under Network first, or the other phone will not know where to connect."
+                    else "Share sends a picture of your QR code, with your name, DIRECT ID, and server address. Scanning it saves that server on the other phone.",
+                )
+            }
+            state.bundle?.let { raw -> SecondaryButton("Copy identity bundle", Icons.Outlined.ContentCopy) { copy(context, "DIRECT bundle", raw) } }
+            SecondaryButton("How DIRECT works", Icons.Outlined.Info) { onHowItWorks() }
             Muted("Device ${profile.deviceId}")
             Label("Recovery phrase")
             Muted("Anyone with these 24 words can become you. Write them down and keep them off this phone.")
             val shown = phrase
-            if (shown == null) SecondaryButton("Show recovery phrase") { scope.launch { phrase = node.recoveryPhrase() } }
+            if (shown == null) SecondaryButton("Show recovery phrase", Icons.Outlined.Key) { scope.launch { phrase = node.recoveryPhrase() } }
             else {
                 Mono(shown)
                 SecondaryButton("Hide") { phrase = null }
+            }
+            error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
+        }
+    }
+}
+
+@Composable
+private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (String) -> Unit, onError: (String?) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var attach by rememberSaveable { mutableStateOf(false) }
+    var stickers by rememberSaveable { mutableStateOf(false) }
+    var recording by remember { mutableStateOf(false) }
+    var wave by remember { mutableStateOf(List(24) { 0.18f }) }
+    var elapsed by remember { mutableStateOf(0L) }
+    val voice = remember { VoiceCapture(context) }
+    val stickersArt = remember {
+        (0 until MediaPrep.STICKER_COUNT).map { index ->
+            val prepared = MediaPrep.sticker(index)
+            prepared to BitmapFactory.decodeByteArray(prepared.bytes, 0, prepared.bytes.size)
+        }
+    }
+    LaunchedEffect(recording) {
+        if (!recording) {
+            wave = List(24) { 0.18f }
+            elapsed = 0L
+            return@LaunchedEffect
+        }
+        while (true) {
+            voice.sample()
+            val next = voice.waveform()
+            wave = if (next.isEmpty()) List(24) { 0.18f } else next
+            elapsed = voice.elapsedMs()
+            delay(80)
+        }
+    }
+    val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) sendPrepared(scope, node, peerId, onDraft, draft, onError) { MediaPrep.visual(context, uri) }
+    }
+    val video = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) sendPrepared(scope, node, peerId, onDraft, draft, onError) { MediaPrep.video(context, uri) }
+    }
+    val gif = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) sendPrepared(scope, node, peerId, onDraft, draft, onError) { MediaPrep.gif(context, uri) }
+    }
+    val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) onError("Microphone permission is needed for a voice message.")
+        else {
+            try {
+                voice.start()
+                recording = true
+                onError(null)
+            } catch (exception: Exception) {
+                onError(exception.message ?: "Recording could not start.")
+            }
+        }
+    }
+    Column(Modifier.background(Ink.surface).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (stickers) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                stickersArt.forEach { (prepared, bitmap) ->
+                    if (bitmap != null) {
+                        Image(
+                            bitmap.asImageBitmap(),
+                            "Sticker",
+                            Modifier.size(72.dp).clickable {
+                                stickers = false
+                                attach = false
+                                sendPrepared(scope, node, peerId, onDraft, draft, onError) { prepared }
+                            },
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                }
+            }
+        }
+        if (attach && !recording) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                AttachChoice(Icons.Outlined.Image, "Photo") { photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                AttachChoice(Icons.Outlined.Videocam, "Video") { video.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
+                AttachChoice(Icons.Outlined.Gif, "GIF") { gif.launch("image/gif") }
+                AttachChoice(Icons.Outlined.EmojiEmotions, "Sticker") { stickers = !stickers }
+                AttachChoice(Icons.Filled.Mic, "Voice") {
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        try {
+                            voice.start()
+                            recording = true
+                        } catch (exception: Exception) {
+                            onError(exception.message ?: "Recording could not start.")
+                        }
+                    } else mic.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+        }
+        if (recording) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                RoundIcon(Icons.Outlined.Delete, Color.Transparent, Ink.danger, "Cancel recording") {
+                    voice.cancel()
+                    recording = false
+                }
+                VoiceWave(wave, 1f, Ink.success, Ink.success.copy(alpha = 0.35f), Modifier.weight(1f))
+                Text(voiceClock(elapsed), color = Ink.foreground, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                RoundIcon(Icons.AutoMirrored.Filled.Send, Ink.accent, Color.White, "Send voice") {
+                    val recorded = try {
+                        voice.stop()
+                    } catch (exception: Exception) {
+                        voice.cancel()
+                        recording = false
+                        onError(exception.message ?: "That recording is empty.")
+                        return@RoundIcon
+                    }
+                    recording = false
+                    sendPrepared(scope, node, peerId, onDraft, draft, onError) { Prepared("audio", "audio/mp4", "voice.m4a", recorded) }
+                }
+            }
+        } else {
+            val canSend = draft.isNotBlank()
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                RoundIcon(
+                    if (attach) Icons.Filled.Close else Icons.Filled.Add,
+                    Ink.accentSoft,
+                    Ink.accent,
+                    if (attach) "Close attachments" else "Add attachment",
+                ) {
+                    attach = !attach
+                    if (!attach) stickers = false
+                }
+                BasicTextField(
+                    value = draft,
+                    onValueChange = onDraft,
+                    textStyle = TextStyle(color = Ink.foreground, fontSize = 16.sp),
+                    cursorBrush = SolidColor(Ink.accent),
+                    maxLines = 5,
+                    modifier = Modifier.weight(1f),
+                    decorationBox = { inner ->
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 44.dp)
+                                .background(Ink.surface, RoundedCornerShape(22.dp))
+                                .border(androidx.compose.foundation.BorderStroke(1.dp, Ink.border), RoundedCornerShape(22.dp))
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            if (draft.isEmpty()) Text("Message", color = Ink.muted, fontSize = 16.sp)
+                            inner()
+                        }
+                    },
+                )
+                RoundIcon(
+                    Icons.AutoMirrored.Filled.Send,
+                    if (canSend) Ink.accent else Ink.border,
+                    if (canSend) Color.White else Ink.muted,
+                    "Send",
+                ) {
+                    if (!canSend) return@RoundIcon
+                    val body = draft
+                    onDraft("")
+                    attach = false
+                    scope.attempt(onError) { node.send(peerId, body) }
+                }
             }
         }
     }
 }
 
+@Composable
+private fun VoiceWave(levels: List<Float>, progress: Float, played: Color, idle: Color, modifier: Modifier = Modifier) {
+    val bars = if (levels.isEmpty()) List(24) { 0.2f } else levels
+    Canvas(modifier.height(28.dp)) {
+        val count = bars.size
+        val barWidth = 3.dp.toPx()
+        val spacing = if (count > 1) ((size.width - count * barWidth) / (count - 1)).coerceAtLeast(2.dp.toPx()) else 0f
+        val used = count * barWidth + (count - 1) * spacing
+        var x = ((size.width - used) / 2f).coerceAtLeast(0f)
+        bars.forEachIndexed { index, level ->
+            val barHeight = (4.dp.toPx() + (size.height - 4.dp.toPx()) * level).coerceIn(4.dp.toPx(), size.height)
+            val reached = count <= 1 || index.toFloat() / (count - 1) <= progress
+            drawRoundRect(
+                color = if (reached) played else idle,
+                topLeft = Offset(x, (size.height - barHeight) / 2f),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f),
+            )
+            x += barWidth + spacing
+        }
+    }
+}
+
+@Composable
+private fun VoiceNote(bytes: ByteArray, outgoing: Boolean) {
+    var peaks by remember(bytes) { mutableStateOf(List(28) { 0.22f }) }
+    var playing by remember(bytes) { mutableStateOf(false) }
+    var progress by remember(bytes) { mutableStateOf(0f) }
+    var duration by remember(bytes) { mutableStateOf(0) }
+    var position by remember(bytes) { mutableStateOf(0) }
+    val context = LocalContext.current
+    val player = remember(bytes) { VoiceNotePlayer(context, bytes) { playing = false; progress = 0f; position = 0 } }
+    DisposableEffect(player) { onDispose { player.release() } }
+    LaunchedEffect(bytes) {
+        peaks = withContext(Dispatchers.Default) { VoiceWaveform.peaks(bytes).toList() }
+        duration = player.duration()
+    }
+    LaunchedEffect(playing) {
+        while (playing) {
+            if (!player.isPlaying()) {
+                playing = false
+                progress = 0f
+                position = 0
+                break
+            }
+            position = player.position()
+            val length = player.duration().coerceAtLeast(duration)
+            duration = length
+            progress = if (length > 0) position.toFloat() / length else 0f
+            delay(50)
+        }
+    }
+    val played = if (outgoing) Color.White else Ink.success
+    val idle = if (outgoing) Color.White.copy(alpha = 0.35f) else Ink.foreground.copy(alpha = 0.28f)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier.size(32.dp).clip(CircleShape).background(if (outgoing) Color.White else Ink.success).clickable {
+                if (playing) {
+                    player.pause()
+                    playing = false
+                } else {
+                    player.play()
+                    playing = true
+                }
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                if (playing) "Pause" else "Play",
+                tint = if (outgoing) Ink.accent else Color.White,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        VoiceWave(peaks, if (playing || progress > 0f) progress else 0f, played, idle, Modifier.weight(1f).widthIn(min = 96.dp))
+        Text(
+            voiceClock(if (position > 0) position.toLong() else duration.toLong()),
+            color = if (outgoing) Color.White.copy(alpha = 0.9f) else Ink.muted,
+            fontSize = 12.sp,
+        )
+    }
+}
+
+@Composable
+private fun RoundIcon(icon: ImageVector, background: Color, tint: Color, description: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(CircleShape).background(background).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, description, tint = tint, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun AttachChoice(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Column(
+        Modifier.clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(Modifier.size(52.dp).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
+            Icon(icon, label, tint = Ink.accent)
+        }
+        Text(label, fontSize = 12.sp, color = Ink.foreground)
+    }
+}
+
+private fun sendPrepared(
+    scope: kotlinx.coroutines.CoroutineScope,
+    node: DirectNode,
+    peerId: String,
+    onDraft: (String) -> Unit,
+    draft: String,
+    onError: (String?) -> Unit,
+    prepare: () -> Prepared,
+) {
+    scope.launch {
+        onError(null)
+        try {
+            val prepared = prepare()
+            node.sendMedia(peerId, prepared.kind, prepared.mime, prepared.name, prepared.bytes, draft.trim())
+            onDraft("")
+        } catch (exception: Exception) {
+            onError(exception.message ?: "That attachment was not sent.")
+        }
+    }
+}
+
+@Composable
+private fun MessageBubble(node: DirectNode, message: MessageRecord, onRetry: () -> Unit) {
+    val outgoing = message.direction == Direction.OUTGOING
+    val context = LocalContext.current
+    var bytes by remember(message.id, message.mediaFile) { mutableStateOf<ByteArray?>(null) }
+    LaunchedEffect(message.id, message.mediaFile) {
+        bytes = message.mediaFile?.let { node.readMedia(message.id) }
+    }
+    val kind = message.mediaKind
+    val sticker = kind == "sticker"
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start) {
+        Column(
+            Modifier
+                .widthIn(min = if (kind == "audio") 220.dp else 0.dp, max = 280.dp)
+                .then(
+                    if (sticker) Modifier else Modifier
+                        .background(if (outgoing) Ink.accent else Ink.surface, RoundedCornerShape(20.dp))
+                        .border(androidx.compose.foundation.BorderStroke(1.dp, if (outgoing) Ink.accent else Ink.border), RoundedCornerShape(20.dp))
+                        .padding(8.dp),
+                ),
+        ) {
+            val picture = if (kind == "image" || kind == "gif" || sticker) {
+                bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+            } else null
+            if (picture != null) {
+                Image(
+                    picture.asImageBitmap(),
+                    MediaNotes.label(kind) ?: "Attachment",
+                    if (sticker) Modifier.size(148.dp) else Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(12.dp)),
+                    contentScale = if (sticker) ContentScale.Fit else ContentScale.Crop,
+                )
+            }
+            val label = MediaNotes.label(kind)
+            val caption = message.body.isNotBlank() && message.body != label
+            if (kind == "audio") {
+                if (bytes != null) VoiceNote(bytes!!, outgoing)
+                else VoiceWave(emptyList(), 0f, if (outgoing) Color.White else Ink.success, if (outgoing) Color.White.copy(alpha = 0.35f) else Ink.foreground.copy(alpha = 0.28f), Modifier.fillMaxWidth())
+            }
+            if (caption || (picture == null && kind != "audio")) {
+                if (message.body.isNotBlank()) {
+                    Text(message.body, color = if (outgoing) Color.White else Ink.foreground, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                }
+            }
+            if (kind == "video" && bytes != null) {
+                Text(
+                    "Open",
+                    color = if (outgoing) Color.White else Ink.accent,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(4.dp).clickable { openAttachment(context, bytes!!, message.mediaMime ?: "*/*", message.id, kind) },
+                )
+            }
+        }
+        val state0 = message.state
+        if (outgoing && state0 != null) {
+            Text(
+                state0.label(),
+                fontSize = 12.sp,
+                color = if (state0 == MessageState.FAILED) Ink.danger else Ink.muted,
+                modifier = Modifier.padding(top = 2.dp).clickable(enabled = state0 == MessageState.FAILED, onClick = onRetry),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun Avatar(name: String, jpeg: ByteArray?, size: Dp = 44.dp) {
+    val bitmap = remember(jpeg) { jpeg?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap() }
+    Box(Modifier.size(size).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
+        if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        else Text(name.trim().take(1).uppercase().ifBlank { "?" }, color = Ink.accent, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+private fun jpegBytes(encoded: String?): ByteArray? = encoded?.let { runCatching { Encoding.fromBase64Url(it) }.getOrNull() }
+
+private fun shareCard(profile: Profile, bundle: String, bootstrap: String): String {
+    val photo = MediaPrep.qrAvatar(jpegBytes(profile.avatarJpegBase64))
+    val withPhoto = ProfileCards.encode(bundle, profile.status, photo, bootstrap)
+    return if (photo != null && qrBitmap(withPhoto) == null) ProfileCards.encode(bundle, profile.status, null, bootstrap) else withPhoto
+}
+
 private fun copy(context: Context, label: String, text: String) {
     context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
+}
+
+private val statusPresets = listOf(
+    "😊 Available",
+    "🔴 Busy",
+    "📚 At school",
+    "🎬 At the movies",
+    "💼 At work",
+    "🔋 Battery about to die",
+    "📵 Can't talk, messages only",
+    "📅 In a meeting",
+    "🏋️ At the gym",
+    "😴 Sleeping",
+    "🚨 Urgent calls only",
+)
+
+@Composable
+private fun StatusMenu(selected: String?, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    var menuWidth by remember { mutableStateOf(0.dp) }
+    val density = LocalDensity.current
+    Box(Modifier.fillMaxWidth().onSizeChanged { menuWidth = with(density) { it.width.toDp() } }) {
+        OutlinedTextField(
+            value = selected.orEmpty(),
+            onValueChange = {},
+            readOnly = true,
+            placeholder = { Text("Choose a status", color = Ink.muted) },
+            trailingIcon = { Icon(Icons.Filled.KeyboardArrowDown, null, tint = Ink.muted) },
+            shape = RoundedCornerShape(16.dp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Ink.foreground),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Ink.foreground,
+                unfocusedBorderColor = Ink.border,
+                focusedContainerColor = Ink.surface,
+                unfocusedContainerColor = Ink.surface,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Box(Modifier.matchParentSize().clickable { expanded = true })
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.width(menuWidth)) {
+            statusPresets.forEach { preset ->
+                DropdownMenuItem(
+                    text = { Text(preset, color = if (preset == selected) Ink.accent else Ink.foreground) },
+                    onClick = {
+                        expanded = false
+                        onSelect(preset)
+                    },
+                )
+            }
+        }
+    }
 }

@@ -4,6 +4,40 @@ public struct Profile: Codable, Equatable, Sendable {
     public var name: String
     public var deviceId: String
     public var directId: String
+    /// A short line the user wrote. It is shared only on their QR or the share sheet.
+    public var status: String
+    /// Small JPEG, base64url. Nil until they choose a photo.
+    public var avatarJpegBase64: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, deviceId, directId, status, avatarJpegBase64
+    }
+
+    public init(name: String, deviceId: String, directId: String, status: String = "", avatarJpegBase64: String? = nil) {
+        self.name = name
+        self.deviceId = deviceId
+        self.directId = directId
+        self.status = status
+        self.avatarJpegBase64 = avatarJpegBase64
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        deviceId = try container.decode(String.self, forKey: .deviceId)
+        directId = try container.decode(String.self, forKey: .directId)
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
+        avatarJpegBase64 = try container.decodeIfPresent(String.self, forKey: .avatarJpegBase64)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(deviceId, forKey: .deviceId)
+        try container.encode(directId, forKey: .directId)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(avatarJpegBase64, forKey: .avatarJpegBase64)
+    }
 }
 
 public struct Settings: Codable, Equatable, Sendable {
@@ -20,10 +54,17 @@ public struct ContactRecord: Codable, Equatable, Identifiable, Sendable {
     public var accepted: Bool = true
     public var blocked: Bool = false
     public var createdAt: Int64
+    /// Status text copied from their QR. It is not signed.
+    public var about: String
+    public var avatarJpegBase64: String?
 
     public var id: String { directId }
 
-    public init(directId: String, name: String, bundle: String, fingerprint: String, verified: Bool = false, accepted: Bool = true, blocked: Bool = false, createdAt: Int64) {
+    private enum CodingKeys: String, CodingKey {
+        case directId, name, bundle, fingerprint, verified, accepted, blocked, createdAt, about, avatarJpegBase64
+    }
+
+    public init(directId: String, name: String, bundle: String, fingerprint: String, verified: Bool = false, accepted: Bool = true, blocked: Bool = false, createdAt: Int64, about: String = "", avatarJpegBase64: String? = nil) {
         self.directId = directId
         self.name = name
         self.bundle = bundle
@@ -32,6 +73,36 @@ public struct ContactRecord: Codable, Equatable, Identifiable, Sendable {
         self.accepted = accepted
         self.blocked = blocked
         self.createdAt = createdAt
+        self.about = about
+        self.avatarJpegBase64 = avatarJpegBase64
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        directId = try container.decode(String.self, forKey: .directId)
+        name = try container.decode(String.self, forKey: .name)
+        bundle = try container.decode(String.self, forKey: .bundle)
+        fingerprint = try container.decode(String.self, forKey: .fingerprint)
+        verified = try container.decodeIfPresent(Bool.self, forKey: .verified) ?? false
+        accepted = try container.decodeIfPresent(Bool.self, forKey: .accepted) ?? true
+        blocked = try container.decodeIfPresent(Bool.self, forKey: .blocked) ?? false
+        createdAt = try container.decode(Int64.self, forKey: .createdAt)
+        about = try container.decodeIfPresent(String.self, forKey: .about) ?? ""
+        avatarJpegBase64 = try container.decodeIfPresent(String.self, forKey: .avatarJpegBase64)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(directId, forKey: .directId)
+        try container.encode(name, forKey: .name)
+        try container.encode(bundle, forKey: .bundle)
+        try container.encode(fingerprint, forKey: .fingerprint)
+        try container.encode(verified, forKey: .verified)
+        try container.encode(accepted, forKey: .accepted)
+        try container.encode(blocked, forKey: .blocked)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(about, forKey: .about)
+        try container.encodeIfPresent(avatarJpegBase64, forKey: .avatarJpegBase64)
     }
 }
 
@@ -52,8 +123,18 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
     public var read: Bool = false
     public var lastError: String?
     public var updatedAt: Int64
+    /// image, video, gif, sticker, or audio. Nil for a text message.
+    public var mediaKind: String?
+    public var mediaMime: String?
+    public var mediaName: String?
+    /// File name inside the media directory. The bytes are not in this snapshot.
+    public var mediaFile: String?
 
-    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil) {
+    private enum CodingKeys: String, CodingKey {
+        case id, peerId, direction, body, createdAt, state, read, lastError, updatedAt, mediaKind, mediaMime, mediaName, mediaFile
+    }
+
+    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil, mediaKind: String? = nil, mediaMime: String? = nil, mediaName: String? = nil, mediaFile: String? = nil) {
         self.id = id
         self.peerId = peerId
         self.direction = direction
@@ -63,6 +144,44 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         self.read = read
         self.lastError = lastError
         self.updatedAt = updatedAt ?? createdAt
+        self.mediaKind = mediaKind
+        self.mediaMime = mediaMime
+        self.mediaName = mediaName
+        self.mediaFile = mediaFile
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        peerId = try container.decode(String.self, forKey: .peerId)
+        direction = try container.decode(Direction.self, forKey: .direction)
+        body = try container.decode(String.self, forKey: .body)
+        createdAt = try container.decode(Int64.self, forKey: .createdAt)
+        state = try container.decodeIfPresent(MessageState.self, forKey: .state)
+        read = try container.decodeIfPresent(Bool.self, forKey: .read) ?? false
+        lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
+        updatedAt = try container.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? createdAt
+        mediaKind = try container.decodeIfPresent(String.self, forKey: .mediaKind)
+        mediaMime = try container.decodeIfPresent(String.self, forKey: .mediaMime)
+        mediaName = try container.decodeIfPresent(String.self, forKey: .mediaName)
+        mediaFile = try container.decodeIfPresent(String.self, forKey: .mediaFile)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(peerId, forKey: .peerId)
+        try container.encode(direction, forKey: .direction)
+        try container.encode(body, forKey: .body)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(state, forKey: .state)
+        try container.encode(read, forKey: .read)
+        try container.encodeIfPresent(lastError, forKey: .lastError)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(mediaKind, forKey: .mediaKind)
+        try container.encodeIfPresent(mediaMime, forKey: .mediaMime)
+        try container.encodeIfPresent(mediaName, forKey: .mediaName)
+        try container.encodeIfPresent(mediaFile, forKey: .mediaFile)
     }
 }
 

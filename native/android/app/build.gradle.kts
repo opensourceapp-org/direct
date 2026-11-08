@@ -12,7 +12,7 @@ android {
         applicationId = "app.direct.messaging"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = 3
         versionName = "0.2.0"
     }
 
@@ -60,4 +60,12 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+
+    implementation("com.google.zxing:core:3.5.3")
+    val camera = "1.4.1"
+    implementation("androidx.camera:camera-core:$camera")
+    implementation("androidx.camera:camera-camera2:$camera")
+    implementation("androidx.camera:camera-lifecycle:$camera")
+    implementation("androidx.camera:camera-view:$camera")
 }

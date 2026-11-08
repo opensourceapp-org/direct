@@ -31,6 +31,8 @@ Optional standalone bootstrap, for a host that is not the Vite preview. It excha
 pnpm signaling
 ```
 
+The same server opens in a window with `pnpm server`. The first run downloads the desktop app. On a Mac, double-click `Start Server.command` in the project folder. `Direct.app` is the iPhone app, and macOS will not open it. Press Start server, copy the `ws://` address it shows, and save that address on both phones. Each phone that connects is listed in the window. The page in [site/index.html](site/index.html) is the same set of steps. Clone the repository from [github.com/hyper-realm/direct](https://github.com/hyper-realm/direct).
+
 ## Install on Android or iPhone
 
 The phone apps are native. Android is Kotlin in `native/android`. iOS is Swift in `native/ios`. They are not a WebView, not React Native, and not Expo Go. `apps/mobile` stays as the browser preview and the TypeScript reference.

@@ -44,6 +44,7 @@ public struct NodeState: Equatable, Sendable {
     public var foreground = true
     public var networkAvailable = true
     public var storageError: String?
+    public var call: CallSnapshot? = nil
 
     public init() {}
 }
@@ -70,6 +71,21 @@ public final class DirectNode {
     /// Called on `DirectActor` after every change. The UI hops to the main actor.
     public var onState: ((NodeState) -> Void)?
 
+    /// Media (microphone, camera, and the call's own peer connection) listens here.
+    public var onCallEvent: ((CallEvent) -> Void)?
+
+    private var callPlain: String?
+    private lazy var board: CallBoard = {
+        let board = CallBoard()
+        board.clock = { [weak self] in self?.clock() ?? 0 }
+        board.selfId = { [weak self] in self?.keys?.directId }
+        board.send = { [weak self] peer, note in await self?.sendCall(peer, note) ?? false }
+        board.record = { [weak self] peer, id, outgoing, label, missed in self?.recordCall(peer, id, outgoing, label, missed) }
+        board.changed = { [weak self] in self?.publish() }
+        board.signal = { [weak self] event in self?.onCallEvent?(event) }
+        return board
+    }()
+
     private let secrets: SecretStore
     private let storeFile: URL?
     private let transportFactory: TransportFactory
@@ -90,6 +106,7 @@ public final class DirectNode {
     private var online = Set<String>()
     private var foreground = true
     private var networkAvailable = true
+    private var mediaDir: URL?
     private var cachedBundle: (key: String, value: String)?
     private lazy var links = Links(node: self)
     private lazy var listener = Listener(node: self)
@@ -117,6 +134,11 @@ public final class DirectNode {
 
     public func start() async {
         guard !state.ready else { return }
+        let parent = storeFile?.deletingLastPathComponent() ?? FileManager.default.temporaryDirectory
+        let stem = storeFile?.deletingPathExtension().lastPathComponent ?? "memory"
+        let directory = parent.appendingPathComponent("direct-media-\(stem)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        mediaDir = directory
         do {
             store = try storeFile.map { try LocalStore.open(file: $0, key: try vault.storageKey()) } ?? LocalStore.inMemory()
         } catch {
@@ -250,6 +272,115 @@ public final class DirectNode {
         return message
     }
 
+    /// Photo, video, GIF, sticker, or voice note. The bytes are sealed and queued on this phone.
+    @discardableResult
+    public func sendMedia(_ peerId: String, kind: String, mime: String, name: String, bytes: Data, caption: String) throws -> MessageRecord {
+        guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
+        guard !contact.blocked else { throw DirectError(.blocked, "This contact is blocked.") }
+        guard contact.accepted else { throw DirectError(.notAccepted, "Accept the message request before replying.") }
+        let message: MessageRecord
+        do {
+            message = try requireEngine().queueMedia(peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+        return message
+    }
+
+    /// Rings an accepted contact. The invite is sealed and written now; it is not queued.
+    public func placeCall(_ peerId: String, video: Bool) async throws {
+        guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
+        if contact.blocked { throw DirectError(.blocked, "This contact is blocked.") }
+        if !contact.accepted { throw DirectError(.notAccepted, "Accept the message request before calling.") }
+        guard keys != nil else { throw DirectError(.noIdentity, "Create your identity first.") }
+        do {
+            try await board.place(peerId: peerId, video: video, id: Encoding.newId("call"))
+        } catch let error as CallRejected {
+            throw DirectError(.rejected, error.message)
+        }
+    }
+
+    public func acceptCall() async { await board.accept() }
+
+    public func endCall() async { await board.end() }
+
+    public func dismissCall() { board.dismiss() }
+
+    public func relayOffer(_ sdp: String) async { await board.relayOffer(sdp) }
+
+    public func relayAnswer(_ sdp: String) async { await board.relayAnswer(sdp) }
+
+    public func relayIce(_ candidate: String, _ mid: String, _ line: Int) async { await board.relayIce(candidate, mid, line) }
+
+    public func markCallLive() { board.markLive() }
+
+    public func setCallMuted(_ muted: Bool) { board.update(muted: muted) }
+
+    public func setCallSpeaker(_ speaker: Bool) { board.update(speaker: speaker) }
+
+    public func setCallCamera(_ enabled: Bool) { board.update(camera: enabled) }
+
+    public func readMedia(_ messageId: String) -> Data? {
+        guard let name = store.message(messageId)?.mediaFile, let mediaDir else { return nil }
+        return try? Data(contentsOf: mediaDir.appendingPathComponent(name))
+    }
+
+    public func setStatus(_ text: String) throws {
+        guard var profile = store.profile else { throw DirectError(.noIdentity, "Create your identity first.") }
+        profile.status = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        store.profile = profile
+        try store.save()
+        try? engine?.shareProfile()
+        publish()
+        wake.fire()
+    }
+
+    public func setAvatar(_ jpeg: Data) throws {
+        guard var profile = store.profile else { throw DirectError(.noIdentity, "Create your identity first.") }
+        guard jpeg.count >= 3, jpeg.count <= MediaNotes.maxAvatarBytes, jpeg[0] == 0xFF, jpeg[1] == 0xD8 else {
+            throw DirectError(.rejected, "Choose a smaller JPEG photo.")
+        }
+        profile.avatarJpegBase64 = Encoding.base64Url(jpeg)
+        store.profile = profile
+        try store.save()
+        try? engine?.shareProfile()
+        publish()
+        wake.fire()
+    }
+
+    public func clearAvatar() throws {
+        guard var profile = store.profile else { return }
+        profile.avatarJpegBase64 = nil
+        store.profile = profile
+        try store.save()
+        try? engine?.shareProfile()
+        publish()
+        wake.fire()
+    }
+
+    /// Adds the signed bundle inside a QR or share card, keeps the unsigned status and photo, and saves the server address when the card includes one.
+    @discardableResult
+    public func addFromShare(_ text: String) throws -> ContactRecord {
+        let card = ProfileCards.parse(text)
+        let contact = try addContactBundle(card.bundle)
+        if case let .success(url) = BootstrapUrl.normalize(card.bootstrap), url != store.settings.bootstrapUrl {
+            store.settings.bootstrapUrl = url
+            bootstrap.configure(url)
+        }
+        var updated = contact
+        updated.about = String(card.status.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        if let avatar = card.avatarJpeg, avatar.count >= 3, avatar.count <= MediaNotes.maxAvatarBytes, avatar[0] == 0xFF, avatar[1] == 0xD8 {
+            updated.avatarJpegBase64 = Encoding.base64Url(avatar)
+        }
+        store.putContact(updated)
+        try store.save()
+        refreshWatch()
+        publish()
+        return store.contact(contact.directId) ?? updated
+    }
+
     public func acceptRequest(_ peerId: String) throws {
         guard var contact = store.contact(peerId) else { return }
         contact.accepted = true
@@ -258,6 +389,7 @@ public final class DirectNode {
         try store.save()
         try requireEngine().markRead(peerId)
         refreshWatch()
+        try? engine?.shareProfile(peerId: peerId)
         publish()
         wake.fire()
     }
@@ -360,9 +492,10 @@ public final class DirectNode {
         engine = DeliveryEngine(
             store: store,
             identity: { [weak self] in self?.keys.map { ($0, deviceId) } },
-            links: links, clock: clock, random: random, ttlMs: ttlMs
+            links: links, clock: clock, random: random, ttlMs: ttlMs, mediaDirectory: mediaDir
         )
         try? engine?.recover()
+        engine?.onCall = { [weak self] text in self?.callPlain = text }
         let next = transportFactory(bootstrap, identity.directId)
         next.setListener(listener)
         transport = next
@@ -409,7 +542,9 @@ public final class DirectNode {
             guard let published = await bootstrap.lookup(peerId), let bundle = try? verifiedBundle(published, expected: peerId) else { return }
             if store.contact(peerId) == nil { _ = try? saveContact(bundle, accepted: false) }
         }
+        callPlain = nil
         _ = try? requireEngine().receive(peerId, payload)
+        if let plain = callPlain { await board.onRemote(peerId, plain) }
         publish()
         wake.fire()
     }
@@ -428,12 +563,19 @@ public final class DirectNode {
     private func runLoop() async {
         while !closed, !Task.isCancelled {
             try? await engine?.flush()
+            await board.tick()
             publish()
-            let wait: Int64
+            let engineWait: Int64
             if let next = engine?.nextWakeAt() {
-                wait = min(max(next - clock(), timing.minWakeMs), timing.idleWakeMs)
+                engineWait = min(max(next - clock(), timing.minWakeMs), timing.idleWakeMs)
             } else {
-                wait = timing.idleWakeMs
+                engineWait = timing.idleWakeMs
+            }
+            let wait: Int64
+            if let until = board.ringUntil {
+                wait = min(engineWait, max(until - clock(), timing.minWakeMs))
+            } else {
+                wait = engineWait
             }
             await wake.wait(timeoutMs: wait)
         }
@@ -449,12 +591,16 @@ public final class DirectNode {
             verified: existing?.verified == true && existing?.fingerprint == bundle.fingerprint,
             accepted: accepted || existing?.accepted == true,
             blocked: existing?.blocked == true,
-            createdAt: existing?.createdAt ?? clock()
+            createdAt: existing?.createdAt ?? clock(),
+            about: existing?.about ?? "",
+            avatarJpegBase64: existing?.avatarJpegBase64
         )
         store.putContact(contact)
         try store.save()
         refreshWatch()
+        if contact.accepted, !contact.blocked { try? engine?.shareProfile(peerId: contact.directId) }
         publish()
+        wake.fire()
         return contact
     }
 
@@ -508,7 +654,9 @@ public final class DirectNode {
             return Conversation(
                 peerId: contact.directId,
                 name: contact.name,
-                lastBody: thread.last?.body,
+                lastBody: thread.last.flatMap { message in
+                    message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? MediaNotes.label(message.mediaKind) : message.body
+                },
                 lastAt: thread.last?.createdAt ?? contact.createdAt,
                 unread: thread.filter { $0.direction == .incoming && !$0.read }.count,
                 request: !contact.accepted && !contact.blocked,
@@ -528,6 +676,22 @@ public final class DirectNode {
         next.pending = engine?.pendingCount() ?? 0
         next.foreground = foreground
         next.networkAvailable = networkAvailable
+        next.call = board.snapshot
         state = next
+    }
+
+    private func sendCall(_ peerId: String, _ note: CallNotes.Note) async -> Bool {
+        guard let bytes = engine?.sealCall(peerId, CallNotes.encode(note)) else { return false }
+        if links.isConnected(peerId) == false, await links.connect(peerId) == false { return false }
+        return await links.send(peerId, bytes)
+    }
+
+    private func recordCall(_ peerId: String, _ id: String, _ outgoing: Bool, _ label: String, _ missed: Bool) {
+        let now = clock()
+        store.putMessage(MessageRecord(
+            id: id, peerId: peerId, direction: outgoing ? .outgoing : .incoming,
+            body: label, createdAt: now, read: !missed, mediaKind: "call"
+        ))
+        try? store.save()
     }
 }

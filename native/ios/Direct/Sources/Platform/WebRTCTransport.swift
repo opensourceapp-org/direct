@@ -22,10 +22,10 @@ final class WebRTCTransport: PeerTransport {
     private var sessions: [String: Session] = [:]
     private weak var listener: PeerListener?
 
-    init(bootstrap: BootstrapClient, selfId: String, iceServers: [RTCIceServer] = WebRTCTransport.defaultIceServers) {
+    init(bootstrap: BootstrapClient, selfId: String, iceServers: [RTCIceServer]? = nil) {
         self.bootstrap = bootstrap
         self.selfId = selfId
-        self.iceServers = iceServers
+        self.iceServers = iceServers ?? WebRTCTransport.defaultIceServers
         bootstrap.onNegotiation = { [weak self] frame in
             Task { @DirectActor in await self?.onSignal(frame) }
         }

@@ -9,6 +9,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import app.direct.core.node.DirectNode
+import app.direct.messaging.platform.CallMedia
 import app.direct.messaging.platform.KeystoreSecretStore
 import app.direct.messaging.platform.OkHttpWebSocketFactory
 import app.direct.messaging.platform.WebRtcTransport
@@ -29,6 +30,9 @@ class DirectApp : Application() {
     lateinit var node: DirectNode
         private set
 
+    lateinit var calls: CallMedia
+        private set
+
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -41,6 +45,8 @@ class DirectApp : Application() {
             transportFactory = { bootstrap, selfId, scope -> WebRtcTransport(this, bootstrap, selfId, scope) },
             dispatcher = Dispatchers.Default.limitedParallelism(1),
         )
+        calls = CallMedia(this, appScope, node)
+        node.onCallEvent = { calls.onEvent(it) }
         appScope.launch { node.start() }
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

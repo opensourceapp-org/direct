@@ -180,7 +180,8 @@ final class FakePeerNetwork {
         func connect(_ peerId: String) async -> Bool {
             guard let network, !network.offline.contains(selfId), !network.offline.contains(peerId), bootstrap.status.isOpen else { return false }
             let reachable = await bootstrap.sendNegotiation(.offer(to: peerId, from: selfId, sdp: "v=0"))
-            guard reachable, let remote = network.transports[peerId] else { return false }
+            // The offer wait can outlive the other phone. A forwarded offer is not a live link.
+            guard reachable, let remote = network.transports[peerId], remote.bootstrap.status.isOpen else { return false }
             links.insert(peerId)
             remote.links.insert(selfId)
             listener?.onPeerConnected(peerId)

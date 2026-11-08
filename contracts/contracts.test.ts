@@ -25,7 +25,12 @@ type HubSocket = {
 
 const { createSignalHub } = createRequire(__filename)(
   path.resolve(__dirname, '../infrastructure/signaling/hub.cjs'),
-) as { createSignalHub: (options?: { now?: () => number }) => { attach(socket: HubSocket): void } };
+) as {
+  createSignalHub: (options?: { now?: () => number }) => {
+    attach(socket: HubSocket): void;
+    roster(): { directId: string; name: string }[];
+  };
+};
 
 const here = (name: string) => path.join(__dirname, name);
 const signaling = JSON.parse(readFileSync(here('signaling.json'), 'utf8'));
@@ -145,6 +150,54 @@ describe('signaling contract', () => {
     for (const frame of signaling.forbidden) a.receive(frame);
     expect(b.sent).toEqual([]);
     expect(a.sent).toEqual([]);
+  });
+
+  test('the connected list is available on this computer', async () => {
+    const { createSignalingServer } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/createServer.cjs'),
+    ) as {
+      createSignalingServer: () => {
+        listen(port: number, host: string): Promise<{ port: number }>;
+        close(): Promise<void>;
+      };
+    };
+    const WebSocket = createRequire(__filename)('ws') as new (url: string) => {
+      once(event: 'open', listener: () => void): void;
+      once(event: 'error', listener: (error: Error) => void): void;
+      send(data: string): void;
+      close(): void;
+    };
+    const server = createSignalingServer();
+    const info = await server.listen(0, '127.0.0.1');
+    const phone = new WebSocket(`ws://127.0.0.1:${info.port}`);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        phone.once('open', () => resolve());
+        phone.once('error', (openError) => reject(openError));
+      });
+      phone.send(JSON.stringify(signaling.clientToHub.hello));
+      let users: { directId: string; name: string }[] = [];
+      for (let attempt = 0; attempt < 20 && users.length === 0; attempt += 1) {
+        const response = await fetch(`http://127.0.0.1:${info.port}/roster`);
+        expect(response.status).toBe(200);
+        users = (await response.json()).users;
+        if (users.length === 0) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(users).toEqual([{ directId: ada, name: 'Ada' }]);
+    } finally {
+      phone.close();
+      await server.close();
+    }
+  });
+
+  test('the operator roster lists a phone only while its socket is open', () => {
+    const hub = createSignalHub();
+    const phone = socket();
+    hub.attach(phone);
+    phone.receive(signaling.clientToHub.hello);
+    expect(hub.roster()).toEqual([{ directId: ada, name: 'Ada' }]);
+    phone.close();
+    expect(hub.roster()).toEqual([]);
   });
 
   test('a dropped device stays findable for the grace period only', () => {

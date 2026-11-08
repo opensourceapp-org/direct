@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Direct — run your own server</title>
+  <style>
+    :root { color: #f4f4f4; background: #000; font-family: "Segoe UI", system-ui, sans-serif; }
+    body { margin: 0; background: #000; }
+    main { max-width: 720px; margin: 0 auto; padding: 64px 24px 80px; }
+    .mark { letter-spacing: 0.2em; text-transform: uppercase; color: #9a9a9a; font-size: 12px; margin: 0 0 12px; }
+    h1 { font-size: 48px; letter-spacing: -0.04em; margin: 0 0 12px; font-weight: 600; }
+    h2 { font-size: 20px; margin: 36px 0 8px; }
+    p, li { color: #c8c8c8; line-height: 1.5; }
+    a { color: #fff; }
+    pre {
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: 14px;
+      padding: 16px;
+      overflow: auto;
+      color: #fff;
+      font-size: 14px;
+    }
+    code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="mark">Direct</p>
+    <h1>Run the server yourself.</h1>
+    <p>Clone the repository, install the desktop app, and start a server on your computer. The app shows an address you can share. Each phone that saves that address appears in the app. The server only introduces the phones. It does not store messages.</p>
+
+    <h2>Clone DIRECT</h2>
+    <p>The project lives at <a href="https://github.com/hyper-realm/direct">github.com/hyper-realm/direct</a>.</p>
+    <pre><code>git clone https://github.com/hyper-realm/direct.git
+cd direct
+pnpm install
+pnpm server</code></pre>
+    <p>You need Node.js 22 or newer and pnpm. <code>pnpm server</code> downloads the desktop app the first time, then opens the Direct server window. Leave that terminal open while the window is in use.</p>
+    <p>On a Mac, double-click <code>Start Server.command</code> in the project folder. That runs the same steps. <code>Direct.app</code> is the iPhone app. macOS will not open it, and shows “this application is not supported on this Mac.” Run the iPhone app from Xcode on an iPhone.</p>
+
+    <h2>Start it and share the address</h2>
+    <p>In the window, press Start server. Copy a <code>ws://</code> address, for example <code>ws://192.168.1.20:8787</code>. On both phones, open Network and save that same address. Allow TCP port 8787 through the computer’s firewall.</p>
+    <p>Check it in a browser: <code>http://192.168.1.20:8787/health</code> answers <code>{"ok":true,"service":"direct-signaling","contract":1}</code>.</p>
+
+    <h2>Who is connected</h2>
+    <p>When a phone connects, its name and DIRECT ID appear under Connected phones. That list stays on this computer. Other phones cannot download it.</p>
+
+    <h2>Without the window</h2>
+    <p>The same server can run in a terminal with <code>pnpm signaling</code>. It prints the addresses to share. Closing the terminal or the window stops the server.</p>
+  </main>
+</body>
+</html>

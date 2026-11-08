@@ -6,12 +6,15 @@ import app.direct.core.crypto.IdentityKeys
 import app.direct.core.crypto.PublicBundle
 import app.direct.core.protocol.EnvelopeType
 import app.direct.core.protocol.Envelopes
+import app.direct.core.protocol.MediaNotes
+import app.direct.core.protocol.ProfileNotes
 import app.direct.core.store.ContactRecord
 import app.direct.core.store.Direction
 import app.direct.core.store.LocalStore
 import app.direct.core.store.MessageRecord
 import app.direct.core.store.QueueItem
 import app.direct.core.store.QueueKind
+import java.io.File
 
 /** Moves envelope bytes to a peer. Implemented by the WebRTC data channel on each platform. */
 interface PeerLinks {
@@ -41,10 +44,15 @@ class DeliveryEngine(
     private val random: () -> Double = Math::random,
     val ttlMs: Long = DEFAULT_TTL_MS,
     val receiptTimeoutMs: Long = RECEIPT_TIMEOUT_MS,
+    private val mediaDirectory: File? = null,
+    private val mediaChunkBytes: Int = MediaNotes.DEFAULT_CHUNK,
 ) {
     private var flushing = false
     private var rerun = false
     private val bundles = HashMap<String, PublicBundle>()
+
+    /** Plaintext of a call signal, invoked on the node dispatcher before [receive] returns. */
+    var onCall: ((String) -> Unit)? = null
 
     fun queueText(peerId: String, text: String): MessageRecord {
         val (keys, deviceId) = identity() ?: throw DeliveryRejected("Create an identity before sending.")
@@ -63,6 +71,36 @@ class DeliveryEngine(
         return message
     }
 
+    /**
+     * Seals [bytes] into chunked envelopes and queues them. The file stays on this device
+     * so the bubble can show it, and so a restart can send whatever has not been written yet.
+     */
+    fun queueMedia(peerId: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String): MessageRecord {
+        if (identity() == null) throw DeliveryRejected("Create an identity before sending.")
+        if (kind !in MediaNotes.KINDS) throw DeliveryRejected("That attachment is not supported.")
+        if (bytes.isEmpty()) throw DeliveryRejected("That file is empty.")
+        if (bytes.size > MediaNotes.MAX_BYTES) throw DeliveryRejected("That file is over 6 MB. Choose a shorter one.")
+        val directory = mediaDirectory ?: throw DeliveryRejected("Attachments need local storage.")
+        val contact = store.contact(peerId) ?: throw DeliveryRejected("That contact is not on this device.")
+        if (contact.blocked) throw DeliveryRejected("This contact is blocked.")
+        val now = clock()
+        val id = Encoding.newId("med")
+        val fileName = "$id.bin"
+        directory.mkdirs()
+        File(directory, fileName).writeBytes(bytes)
+        val parts = MediaNotes.split(bytes, mediaChunkBytes).size
+        val cleanCaption = caption.trim()
+        val job = MediaNotes.Job(kind, mime, name, cleanCaption, parts, 0, fileName)
+        val message = MessageRecord(
+            id, peerId, Direction.OUTGOING, cleanCaption, now, MessageState.QUEUED,
+            mediaKind = kind, mediaMime = mime, mediaName = name, mediaFile = fileName,
+        )
+        store.putMessage(message)
+        store.putQueued(QueueItem(id, peerId, QueueKind.MESSAGE, MediaNotes.encodeJob(job), 0, now, now + ttlMs))
+        store.save()
+        return message
+    }
+
     /** Requeues a FAILED message with a fresh envelope under the same id. The recipient deduplicates by id. */
     fun retry(messageId: String): Boolean {
         val message = store.message(messageId) ?: return false
@@ -72,6 +110,17 @@ class DeliveryEngine(
         val contact = store.contact(message.peerId) ?: return false
         if (contact.blocked) return false
         val now = clock()
+        val mediaFile = message.mediaFile
+        if (mediaFile != null && message.mediaKind != null) {
+            val directory = mediaDirectory ?: return false
+            if (!File(directory, mediaFile).exists()) return false
+            val parts = MediaNotes.split(File(directory, mediaFile).readBytes(), mediaChunkBytes).size
+            val job = MediaNotes.Job(message.mediaKind, message.mediaMime ?: "application/octet-stream", message.mediaName ?: "", message.body, parts, 0, mediaFile)
+            store.putMessage(message.copy(state = next, lastError = null, updatedAt = now))
+            store.putQueued(QueueItem(message.id, message.peerId, QueueKind.MESSAGE, MediaNotes.encodeJob(job), 0, now, now + ttlMs))
+            store.save()
+            return true
+        }
         val envelope = Envelopes.seal(keys, deviceId, message.peerId, bundleFor(contact).agreementPublic, message.id, EnvelopeType.MESSAGE, Encoding.utf8(message.body), now, ttlMs)
         store.putMessage(message.copy(state = next, lastError = null, updatedAt = now))
         store.putQueued(QueueItem(message.id, message.peerId, QueueKind.MESSAGE, envelope.encode(), 0, now, envelope.expiresAt))
@@ -84,9 +133,32 @@ class DeliveryEngine(
         val now = clock()
         for (item in store.queue()) {
             if (item.kind == QueueKind.MESSAGE) transition(item.id, DeliveryEvent.RECOVERED, null)
-            store.queued(item.id)?.let { store.putQueued(it.copy(sentAt = null, nextAttemptAt = minOf(it.nextAttemptAt, now))) }
+            store.queued(item.id)?.let { queued ->
+                store.putQueued(queued.copy(sentAt = null, nextAttemptAt = minOf(queued.nextAttemptAt, now), payload = rewind(queued.payload)))
+            }
         }
         store.save()
+    }
+
+    /**
+     * Seals the current photo and status for each accepted contact.
+     * Queued like a receipt: it is not a chat message, and it leaves the queue once written.
+     */
+    fun shareProfile(peerId: String? = null) {
+        val (keys, deviceId) = identity() ?: return
+        val profile = store.profile ?: return
+        val jpeg = profile.avatarJpegBase64?.let { runCatching { Encoding.fromBase64Url(it) }.getOrNull() }
+        val plain = Encoding.utf8(ProfileNotes.encode(profile.status, jpeg))
+        val now = clock()
+        val targets = store.contacts().filter { it.accepted && !it.blocked && (peerId == null || it.directId == peerId) }
+        for (contact in targets) {
+            val envelope = Envelopes.seal(
+                keys, deviceId, contact.directId, bundleFor(contact).agreementPublic,
+                "profile_${contact.directId}", EnvelopeType.PROFILE, plain, now, ttlMs,
+            )
+            store.putQueued(QueueItem("profile_${contact.directId}", contact.directId, QueueKind.RECEIPT, envelope.encode(), 0, now, now + ttlMs))
+        }
+        if (targets.isNotEmpty()) store.save()
     }
 
     /** The peer just became reachable. Retry everything queued for it without waiting for backoff. */
@@ -149,7 +221,7 @@ class DeliveryEngine(
                 continue
             }
             for (item in items) {
-                if (item.kind == QueueKind.MESSAGE) transition(item.id, DeliveryEvent.ATTEMPT, null)
+                if (item.kind == QueueKind.MESSAGE && !MediaNotes.isJob(item.payload)) transition(item.id, DeliveryEvent.ATTEMPT, null)
                 store.putQueued(item.copy(attempts = item.attempts + 1))
             }
             store.save()
@@ -158,6 +230,10 @@ class DeliveryEngine(
                 val current = store.queued(item.id) ?: continue
                 if (!connected) {
                     unreachable(current, "Recipient unavailable")
+                    continue
+                }
+                if (MediaNotes.isJob(current.payload)) {
+                    sendMediaChunks(current)
                     continue
                 }
                 if (links.send(peerId, Encoding.utf8(current.payload))) {
@@ -176,7 +252,9 @@ class DeliveryEngine(
     }
 
     private fun unreachable(item: QueueItem, reason: String) {
-        if (item.kind == QueueKind.MESSAGE) transition(item.id, DeliveryEvent.UNREACHABLE, reason)
+        if (item.kind == QueueKind.MESSAGE && transition(item.id, DeliveryEvent.UNREACHABLE, reason) == null && MediaNotes.isJob(item.payload)) {
+            store.message(item.id)?.let { store.putMessage(it.copy(lastError = reason, updatedAt = clock())) }
+        }
         store.queued(item.id)?.let {
             store.putQueued(it.copy(nextAttemptAt = clock() + Backoff.delayMs(it.attempts, random), lastError = reason))
         }
@@ -193,7 +271,7 @@ class DeliveryEngine(
             if (sentAt + receiptTimeoutMs > now) continue
             if (item.kind == QueueKind.MESSAGE) transition(item.id, DeliveryEvent.RECEIPT_TIMEOUT, "No receipt yet")
             store.queued(item.id)?.let {
-                store.putQueued(it.copy(sentAt = null, nextAttemptAt = now + Backoff.delayMs(it.attempts, random), lastError = "No receipt yet"))
+                store.putQueued(it.copy(sentAt = null, payload = rewind(it.payload), nextAttemptAt = now + Backoff.delayMs(it.attempts, random), lastError = "No receipt yet"))
             }
         }
     }
@@ -225,10 +303,33 @@ class DeliveryEngine(
         } catch (_: Exception) {
             return ReceiveOutcome.IGNORED
         }
-        val plaintext = try {
-            Encoding.text(Envelopes.open(keys, envelope))
+        val opened = try {
+            Envelopes.open(keys, envelope)
         } catch (_: Exception) {
             return ReceiveOutcome.IGNORED
+        }
+        val mediaPart = MediaNotes.decodePart(opened)
+        if (mediaPart != null) {
+            if (envelope.type != EnvelopeType.MESSAGE) return ReceiveOutcome.IGNORED
+            return ingestMedia(peerId, contact, mediaPart.first, mediaPart.second, envelope.createdAt)
+        }
+        val plaintext = Encoding.text(opened)
+        if (envelope.type == EnvelopeType.CALL) {
+            if (!contact.accepted) return ReceiveOutcome.IGNORED
+            onCall?.invoke(plaintext)
+            return ReceiveOutcome.RECEIPT
+        }
+        if (envelope.type == EnvelopeType.PROFILE) {
+            val note = ProfileNotes.parse(plaintext) ?: return ReceiveOutcome.IGNORED
+            val jpeg = note.avatarJpeg
+            val avatar = when {
+                note.clearAvatar -> null
+                jpeg != null -> Encoding.base64Url(jpeg)
+                else -> contact.avatarJpegBase64
+            }
+            store.putContact(contact.copy(about = note.status.trim().take(80), avatarJpegBase64 = avatar))
+            store.save()
+            return ReceiveOutcome.STORED
         }
         if (envelope.type != EnvelopeType.MESSAGE) {
             val (kind, messageId) = plaintext.split(":", limit = 2).let { if (it.size == 2) it[0] to it[1] else return ReceiveOutcome.IGNORED }
@@ -257,10 +358,29 @@ class DeliveryEngine(
         val unread = store.messagesWith(peerId).filter { it.direction == Direction.INCOMING && !it.read }
         for (message in unread) {
             store.putMessage(message.copy(read = true, updatedAt = clock()))
+            if (message.mediaKind == "call") continue
             queueReceipt(contact, EnvelopeType.READ, message.id)
         }
         if (unread.isNotEmpty()) store.save()
         return unread.size
+    }
+
+    /** A call signal is sealed and returned. The caller writes it now. It is not queued. */
+    fun sealCall(peerId: String, plain: String): ByteArray? {
+        val (keys, deviceId) = identity() ?: return null
+        val contact = store.contact(peerId) ?: return null
+        if (!contact.accepted || contact.blocked) return null
+        val bundle = try {
+            bundleFor(contact)
+        } catch (_: Exception) {
+            return null
+        }
+        val now = clock()
+        val envelope = Envelopes.seal(
+            keys, deviceId, peerId, bundle.agreementPublic,
+            Encoding.newId("call"), EnvelopeType.CALL, Encoding.utf8(plain), now, ttlMs,
+        )
+        return Encoding.utf8(envelope.encode())
     }
 
     private fun queueReceipt(contact: ContactRecord, type: EnvelopeType, messageId: String) {
@@ -271,6 +391,96 @@ class DeliveryEngine(
             Encoding.newId(type.wire), type, Encoding.utf8("${type.wire}:$messageId"), now, ttlMs,
         )
         store.putQueued(QueueItem(envelope.id, contact.directId, QueueKind.RECEIPT, envelope.encode(), 0, now, envelope.expiresAt))
+    }
+
+    private fun rewind(payload: String): String {
+        val job = MediaNotes.parseJob(payload) ?: return payload
+        return MediaNotes.encodeJob(job.copy(nextPart = 0))
+    }
+
+    /** Writes every remaining chunk. The message stays queued until the last chunk is on the channel. */
+    private suspend fun sendMediaChunks(item: QueueItem) {
+        val initial = MediaNotes.parseJob(item.payload) ?: return
+        val (keys, deviceId) = identity() ?: return
+        val contact = store.contact(item.peerId) ?: return
+        val directory = mediaDirectory
+        val file = directory?.let { File(it, initial.fileName) }
+        if (file == null || !file.exists()) {
+            transition(item.id, DeliveryEvent.EXPIRED, "The attachment is no longer on this phone.")
+            store.removeQueued(item.id)
+            return
+        }
+        val parts = MediaNotes.split(file.readBytes(), mediaChunkBytes)
+        var part = initial.nextPart.coerceIn(0, parts.size)
+        var job = initial
+        while (part < parts.size) {
+            val plain = MediaNotes.encodePart(
+                MediaNotes.Part(item.id, job.kind, job.mime, job.name, part, parts.size, job.caption),
+                parts[part],
+            )
+            val envelope = Envelopes.seal(
+                keys, deviceId, item.peerId, bundleFor(contact).agreementPublic,
+                "${item.id}.$part", EnvelopeType.MESSAGE, plain, clock(), ttlMs,
+            )
+            if (!links.send(item.peerId, Encoding.utf8(envelope.encode()))) {
+                val latest = store.queued(item.id) ?: return
+                store.putQueued(
+                    latest.copy(
+                        payload = MediaNotes.encodeJob(job.copy(nextPart = part)),
+                        nextAttemptAt = clock() + Backoff.delayMs(latest.attempts, random),
+                        lastError = "Channel closed before the write",
+                    ),
+                )
+                store.message(item.id)?.let { store.putMessage(it.copy(lastError = "Channel closed before the write", updatedAt = clock())) }
+                return
+            }
+            part += 1
+            job = job.copy(nextPart = part)
+            store.queued(item.id)?.let { store.putQueued(it.copy(payload = MediaNotes.encodeJob(job), lastError = null)) }
+        }
+        if (transition(item.id, DeliveryEvent.ATTEMPT, null) != null &&
+            transition(item.id, DeliveryEvent.WRITTEN, null) == MessageState.SENT
+        ) {
+            store.queued(item.id)?.let { store.putQueued(it.copy(sentAt = clock(), lastError = null, payload = MediaNotes.encodeJob(job))) }
+        }
+    }
+
+    private fun ingestMedia(peerId: String, contact: ContactRecord, header: MediaNotes.Part, chunk: ByteArray, createdAt: Long): ReceiveOutcome {
+        val directory = mediaDirectory ?: return ReceiveOutcome.IGNORED
+        val partsDir = File(directory, "parts/${header.mediaId}")
+        partsDir.mkdirs()
+        File(partsDir, header.part.toString()).writeBytes(chunk)
+        val complete = (0 until header.parts).all { File(partsDir, it.toString()).exists() }
+        val label = MediaNotes.label(header.kind) ?: "Attachment"
+        if (!complete) {
+            val have = (0 until header.parts).count { File(partsDir, it.toString()).exists() }
+            val body = "Receiving $label ($have/${header.parts})"
+            val existing = store.message(header.mediaId)
+            store.putMessage(
+                existing?.copy(body = body, updatedAt = clock())
+                    ?: MessageRecord(
+                        header.mediaId, peerId, Direction.INCOMING, body, createdAt,
+                        mediaKind = header.kind, mediaMime = header.mime, mediaName = header.name,
+                    ),
+            )
+            store.save()
+            return ReceiveOutcome.STORED
+        }
+        val assembled = (0 until header.parts).fold(ByteArray(0)) { acc, index -> acc + File(partsDir, index.toString()).readBytes() }
+        val fileName = "${header.mediaId}.bin"
+        File(directory, fileName).writeBytes(assembled)
+        partsDir.deleteRecursively()
+        val already = store.message(header.mediaId)?.mediaFile != null
+        val caption = header.caption.ifBlank { label }
+        store.putMessage(
+            MessageRecord(
+                header.mediaId, peerId, Direction.INCOMING, caption, createdAt,
+                mediaKind = header.kind, mediaMime = header.mime, mediaName = header.name, mediaFile = fileName,
+            ),
+        )
+        queueReceipt(contact, EnvelopeType.ACK, header.mediaId)
+        store.save()
+        return if (already) ReceiveOutcome.DUPLICATE else ReceiveOutcome.STORED
     }
 
     private fun bundleFor(contact: ContactRecord): PublicBundle =

@@ -14,16 +14,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -34,21 +45,23 @@ import app.direct.core.delivery.MessageState
 import app.direct.core.signaling.BootstrapStatus
 
 object Ink {
-    val foreground = Color(0xFF111111)
-    val muted = Color(0xFF6B6B6B)
-    val border = Color(0xFFE6E6E6)
-    val surface = Color(0xFFF7F7F7)
-    val background = Color.White
-    val success = Color(0xFF1F7A4D)
-    val warning = Color(0xFFB26B00)
-    val danger = Color(0xFFB3261E)
+    val foreground = Color(0xFF1C1C1E)
+    val muted = Color(0xFF8E8E93)
+    val border = Color(0xFFE5E5EA)
+    val surface = Color.White
+    val background = Color(0xFFF2F2F7)
+    val accent = Color(0xFF0B57D0)
+    val accentSoft = Color(0xFFE8F0FE)
+    val success = Color(0xFF1E8E3E)
+    val warning = Color(0xFFE37400)
+    val danger = Color(0xFFD93025)
 }
 
 @Composable
 fun DirectTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
-            primary = Ink.foreground,
+            primary = Ink.accent,
             onPrimary = Color.White,
             background = Ink.background,
             surface = Ink.background,
@@ -76,34 +89,67 @@ fun Mono(text: String) = Text(text, fontFamily = FontFamily.Monospace, fontSize 
 fun PrimaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) = Button(
     onClick = onClick,
     enabled = enabled,
-    shape = RoundedCornerShape(8.dp),
-    colors = ButtonDefaults.buttonColors(containerColor = Ink.foreground, contentColor = Color.White),
+    shape = RoundedCornerShape(16.dp),
+    colors = ButtonDefaults.buttonColors(containerColor = Ink.accent, contentColor = Color.White, disabledContainerColor = Ink.border, disabledContentColor = Ink.muted),
     modifier = Modifier.fillMaxWidth().height(48.dp),
 ) { Text(label, fontWeight = FontWeight.Medium) }
 
 @Composable
-fun SecondaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) = OutlinedButton(
+fun SecondaryButton(label: String, icon: ImageVector? = null, enabled: Boolean = true, onClick: () -> Unit) = OutlinedButton(
     onClick = onClick,
     enabled = enabled,
-    shape = RoundedCornerShape(8.dp),
+    shape = RoundedCornerShape(16.dp),
     border = BorderStroke(1.dp, Ink.border),
     colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.foreground),
     contentPadding = PaddingValues(horizontal = 16.dp),
     modifier = Modifier.fillMaxWidth().height(48.dp),
-) { Text(label, fontWeight = FontWeight.Medium) }
+) {
+    if (icon != null) Icon(icon, null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+    Text(label, fontWeight = FontWeight.Medium)
+}
 
 @Composable
-fun Field(value: String, onChange: (String) -> Unit, placeholder: String, singleLine: Boolean = true, minLines: Int = 1) = OutlinedTextField(
-    value = value,
-    onValueChange = onChange,
-    placeholder = { Text(placeholder, color = Ink.muted) },
-    singleLine = singleLine,
-    minLines = minLines,
-    shape = RoundedCornerShape(8.dp),
-    textStyle = TextStyle(fontSize = 16.sp),
-    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Ink.foreground, unfocusedBorderColor = Ink.border),
-    modifier = Modifier.fillMaxWidth(),
-)
+fun Field(value: String, onChange: (String) -> Unit, placeholder: String, singleLine: Boolean = true, minLines: Int = 1) {
+    val focus = LocalFocusManager.current
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        placeholder = { Text(placeholder, color = Ink.muted) },
+        singleLine = singleLine,
+        minLines = minLines,
+        keyboardOptions = KeyboardOptions(imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
+        keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+        shape = RoundedCornerShape(16.dp),
+        textStyle = TextStyle(fontSize = 16.sp),
+        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Ink.foreground, unfocusedBorderColor = Ink.border),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * Closes the keyboard on a tap the text field did not use.
+ * The down event is not consumed, so a field can still take focus and open the keyboard.
+ */
+@Composable
+fun Modifier.dismissKeyboardOnOutsideTap(): Modifier {
+    val focus = LocalFocusManager.current
+    return pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.changedToDownIgnoreConsumed() }
+                ?: return@awaitEachGesture
+            val pointerId = down.id
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Final)
+                val change = event.changes.firstOrNull { it.id == pointerId } ?: return@awaitEachGesture
+                if (change.changedToUp()) {
+                    if (!change.isConsumed) focus.clearFocus()
+                    return@awaitEachGesture
+                }
+                if (change.isConsumed || !change.pressed) return@awaitEachGesture
+            }
+        }
+    }
+}
 
 @Composable
 fun Dot(color: Color) = Box(Modifier.size(8.dp).padding(0.dp)) {
@@ -125,9 +171,9 @@ fun StatusRow(label: String, value: String, color: Color = Ink.muted) = Row(
 
 @Composable
 fun Card(content: @Composable () -> Unit) = Surface(
-    shape = RoundedCornerShape(8.dp),
+    shape = RoundedCornerShape(16.dp),
     border = BorderStroke(1.dp, Ink.border),
-    color = Ink.background,
+    color = Ink.surface,
     modifier = Modifier.fillMaxWidth(),
 ) { Column { content() } }
 

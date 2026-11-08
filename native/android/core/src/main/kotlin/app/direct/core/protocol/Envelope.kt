@@ -16,7 +16,9 @@ class EnvelopeException(message: String) : Exception(message)
 enum class EnvelopeType(val wire: String) {
     MESSAGE("message"),
     ACK("ack"),
-    READ("read");
+    READ("read"),
+    PROFILE("profile"),
+    CALL("call");
 
     companion object {
         fun fromWire(value: String?): EnvelopeType? = entries.firstOrNull { it.wire == value }

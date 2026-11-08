@@ -9,7 +9,15 @@ Phones run DIRECT as a native app. Android is Kotlin in `native/android`. iOS is
 On a computer both phones can reach:
 
 ```bash
+git clone https://github.com/hyper-realm/direct.git
+cd direct
 pnpm install
+pnpm server
+```
+
+`pnpm server` downloads the desktop app the first time, then opens it. On a Mac, double-click `Start Server.command` in the project folder. `Direct.app` is the iPhone build. macOS will not open that file. Start server, then share the `ws://` address it shows. The window lists each phone that connects. `pnpm signaling` runs the same server in the terminal and prints those addresses. The steps are also on the page in `site/index.html`.
+
+```bash
 pnpm signaling
 ```
 
@@ -26,6 +34,8 @@ Both phones must save the same bootstrap, for example `ws://192.168.1.20:8787`. 
 3. On one phone, add the other by DIRECT ID. The lookup reads the public bundle the other phone announced. Pasting that bundle skips the lookup.
 4. Send. The envelope is sealed and queued before any network attempt. If the other phone is closed, the row stays `Queued` and retries with backoff.
 5. The recipient sees a message request. Accepting it sends read receipts. Declining it blocks that DIRECT ID.
+6. A profile photo and status are sealed to each accepted contact when they change, when you add or accept that contact, and again when a queued update is still waiting and that phone becomes reachable. The picture is not part of the signed bundle, and the bootstrap never receives it. Android applies the photo's EXIF orientation before saving it, so a portrait shot stays portrait. The chat header places the photo to the left of the name, with the status on the line under the name.
+7. An accepted chat has an audio call button and a video call button. The invite, the answer, and the call's own addresses are sealed on the data channel. A second peer connection carries the microphone and, for video, the camera. The bootstrap never hears the call. Both phones have to be open and already able to reach each other. A call is not queued. If the other phone is closed, the row says Unreachable and a message can still wait on this phone. A missed call stays in the chat. The phone rings for 45 seconds.
 
 Outgoing states, in order: Queued, Sending, Sent (written to the data channel), Delivered (the recipient stored it and signed an `ack`, including when it is still a request), Read (the recipient accepted the conversation and opened it). Failed means the envelope expired or the contact was blocked; tap it to seal a fresh envelope under the same id.
 
@@ -87,7 +97,10 @@ This repository's CI environment can compile the Android debug APK and run the K
 
 ## Limits
 
+- Photos, video, GIFs, stickers, and voice notes are sealed in the same envelopes as text, in chunks, up to 6 MB. The bootstrap never sees those bytes. Video is not transcoded: a file over 6 MB is refused. The sticker tray is a pack of 16 drawings, the same on both phones. Android voice notes show a live waveform while recording and while playing.
+- A QR code carries the signed identity bundle, the bootstrap server address, plus an optional status and a small photo. The status and photo are display-only. They are not part of the signature. Scanning one adds the contact without a lookup and saves that server address when the card includes one. Share sends a picture of that code with the name, DIRECT ID, and server address written on it. The signed bundle stays inside the code.
+- The first launch shows a short explanation of how two phones talk. It is not shown again after the person finishes it.
 - The seal is one-shot X25519 + HKDF-SHA256 + AES-256-GCM. It is not the Signal Double Ratchet.
 - The local store is one encrypted snapshot file, not a SQL database.
 - Writing to the data channel is Sent. Delivered requires the recipient's signed `ack`.
-- A closed app cannot receive. Android retries while WorkManager is allowed to run. iOS retries on the next foreground or background refresh.
+- A closed app cannot receive. Android retries while WorkManager is allowed to run. iOS retries on the next foreground or background refresh. A call is live only: there is no push, so a force-quit phone cannot ring. Android keeps a call notification so the microphone can stay on while the screen is locked. iOS keeps the audio session while the app is in the background. The same STUN servers are used. A symmetric NAT still needs a TURN server you operate, or the call stays on Connecting.

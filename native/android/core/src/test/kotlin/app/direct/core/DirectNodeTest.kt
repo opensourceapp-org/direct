@@ -1,8 +1,10 @@
 package app.direct.core
 
 import app.direct.core.delivery.MessageState
+import app.direct.core.node.CallPhase
 import app.direct.core.node.DirectException
 import app.direct.core.node.DirectNode
+import app.direct.core.protocol.ProfileCards
 import app.direct.core.signaling.BootstrapStatus.Phase
 import app.direct.core.store.Direction
 import app.direct.core.store.MemorySecretStore
@@ -137,6 +139,55 @@ class DirectNodeTest {
     }
 
     @Test
+    fun `a shared profile saves the server`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-share")
+        val bo = node(MemorySecretStore(), "bo-share")
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        val bundle = ada.state.value.bundle!!
+        val card = ProfileCards.encode(bundle, "Here", null, "192.168.1.20")
+        val added = bo.addFromShare(card)
+        assertEquals(ada.state.value.profile!!.directId, added.directId)
+        assertEquals("Here", added.about)
+        assertEquals("ws://192.168.1.20:8787", bo.state.value.bootstrapUrl)
+        settle()
+        assertEquals(Phase.OPEN, bo.state.value.bootstrap.phase)
+        ada.close()
+        bo.close()
+    }
+
+    @Test
+    fun `a profile photo reaches the other phone and can be cleared`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-photo")
+        val bo = node(MemorySecretStore(), "bo-photo")
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        ada.setBootstrap("192.168.1.20")
+        bo.setBootstrap("192.168.1.20")
+        settle()
+        val adaId = ada.state.value.profile!!.directId
+        val boId = bo.state.value.profile!!.directId
+        ada.addContact(boId)
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte())
+        ada.setAvatar(jpeg)
+        ada.setStatus("At work")
+        settle()
+        val seen = bo.state.value.contacts.single { it.directId == adaId }
+        assertEquals(Encoding.base64Url(jpeg), seen.avatarJpegBase64)
+        assertEquals("At work", seen.about)
+        assertTrue(hub.received.none { Encoding.base64Url(jpeg) in it }, "the bootstrap never sees the photo")
+        ada.clearAvatar()
+        settle()
+        assertEquals(null, bo.state.value.contacts.single { it.directId == adaId }.avatarJpegBase64)
+        ada.close()
+        bo.close()
+    }
+
+    @Test
     fun `a disconnected bootstrap is reported as offline, not as a missing phone`() = runTest {
         val ada = node(MemorySecretStore(), "ada3")
         ada.start()
@@ -152,5 +203,69 @@ class DirectNodeTest {
         settle()
         assertEquals(Phase.OPEN, ada.state.value.bootstrap.phase)
         ada.close()
+    }
+
+    @Test
+    fun `an audio call is sealed on the data channel and the bootstrap never sees it`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-call")
+        val bo = node(MemorySecretStore(), "bo-call")
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        ada.setBootstrap("192.168.1.20")
+        bo.setBootstrap("192.168.1.20")
+        settle()
+        val adaId = ada.state.value.profile!!.directId
+        val boId = bo.state.value.profile!!.directId
+        ada.addContact(boId)
+        settle()
+        bo.acceptRequest(adaId)
+        settle()
+
+        ada.placeCall(boId, false)
+        settle()
+        val incoming = bo.state.value.call
+        assertEquals(CallPhase.INCOMING, incoming?.phase)
+        assertEquals(false, incoming?.video)
+        assertEquals(boId, ada.state.value.call?.peerId)
+
+        bo.acceptCall()
+        settle()
+        assertEquals(CallPhase.CONNECTING, ada.state.value.call?.phase)
+        ada.relayOffer("direct-call-offer")
+        settle()
+        bo.relayAnswer("direct-call-answer")
+        ada.markCallLive()
+        bo.markCallLive()
+        settle()
+        assertEquals(CallPhase.ACTIVE, ada.state.value.call?.phase)
+        assertEquals(CallPhase.ACTIVE, bo.state.value.call?.phase)
+        assertTrue(hub.received.none { "direct-call-offer" in it || "direct-call-answer" in it || "\"op\":\"invite\"" in it })
+
+        ada.endCall()
+        settle()
+        assertEquals(CallPhase.ENDED, bo.state.value.call?.phase)
+        assertTrue(ada.state.value.messages.getValue(boId).any { it.mediaKind == "call" && it.body.startsWith("Audio call") })
+        assertTrue(bo.state.value.messages.getValue(adaId).any { it.mediaKind == "call" && it.body.startsWith("Audio call") })
+
+        ada.dismissCall()
+        bo.dismissCall()
+        ada.placeCall(boId, true)
+        settle()
+        assertEquals(true, bo.state.value.call?.video)
+        bo.endCall()
+        settle()
+        assertEquals("Call declined", ada.state.value.call?.reason)
+        assertEquals("Declined", bo.state.value.call?.reason)
+
+        ada.dismissCall()
+        bo.dismissCall()
+        network.goOffline(boId)
+        val missed = assertFailsWith<DirectException> { ada.placeCall(boId, false) }
+        assertEquals(DirectException.Reason.REJECTED, missed.reason)
+        assertEquals("Unreachable", ada.state.value.call?.reason)
+        ada.close()
+        bo.close()
     }
 }

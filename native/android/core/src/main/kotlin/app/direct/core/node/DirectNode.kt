@@ -7,7 +7,10 @@ import app.direct.core.crypto.IdentityKeys
 import app.direct.core.crypto.PublicBundle
 import app.direct.core.delivery.DeliveryEngine
 import app.direct.core.delivery.DeliveryRejected
+import app.direct.core.protocol.CallNotes
 import app.direct.core.protocol.Envelopes
+import app.direct.core.protocol.MediaNotes
+import app.direct.core.protocol.ProfileCards
 import app.direct.core.signaling.BootstrapClient
 import app.direct.core.signaling.BootstrapStatus
 import app.direct.core.signaling.BootstrapUrl
@@ -67,6 +70,7 @@ data class NodeState(
     val foreground: Boolean = true,
     val networkAvailable: Boolean = true,
     val storageError: String? = null,
+    val call: CallSnapshot? = null,
 )
 
 /**
@@ -100,9 +104,27 @@ class DirectNode(
     private val online = HashSet<String>()
     private var foreground = true
     private var networkAvailable = true
+    private var mediaDir: File? = null
+    private var callPlain: String? = null
+
+    /** Media (microphone, camera, and the call's own peer connection) listens here. */
+    var onCallEvent: ((CallEvent) -> Unit)? = null
+
+    private val board by lazy {
+        CallBoard(
+            clock = clock,
+            selfId = { keys?.directId },
+            send = { peerId, note -> sendCall(peerId, note) },
+            record = { peerId, id, outgoing, label, missed -> recordCall(peerId, id, outgoing, label, missed) },
+            changed = { publish() },
+            signal = { onCallEvent?.invoke(it) },
+        )
+    }
 
     suspend fun start() = onNode {
         if (_state.value.ready) return@onNode
+        val mediaParent = storeFile?.parentFile ?: File(System.getProperty("java.io.tmpdir"))
+        mediaDir = File(mediaParent, "direct-media-" + (storeFile?.nameWithoutExtension ?: "memory")).apply { mkdirs() }
         try {
             store = if (storeFile == null) LocalStore.inMemory() else LocalStore.open(storeFile, vault.storageKey())
         } catch (error: Exception) {
@@ -194,7 +216,9 @@ class DirectNode(
     }
 
     /** Adds a contact from the bundle in their QR code, with no bootstrap involved. */
-    suspend fun addContactBundle(serialized: String): ContactRecord = onNode {
+    suspend fun addContactBundle(serialized: String): ContactRecord = onNode { addBundle(serialized) }
+
+    private fun addBundle(serialized: String): ContactRecord {
         val self = keys ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
         val bundle = try {
             Bundles.parse(serialized)
@@ -202,7 +226,7 @@ class DirectNode(
             throw DirectException(DirectException.Reason.BAD_BUNDLE, error.message ?: "That identity bundle could not be verified.")
         }
         if (bundle.directId == self.directId) throw DirectException(DirectException.Reason.SELF, "This DIRECT ID belongs to this phone.")
-        saveContact(bundle, accepted = true)
+        return saveContact(bundle, accepted = true)
     }
 
     suspend fun send(peerId: String, body: String): MessageRecord = onNode {
@@ -219,12 +243,114 @@ class DirectNode(
         message
     }
 
+    /** Photo, video, GIF, sticker, or voice note. The bytes are sealed and queued on this phone. */
+    suspend fun sendMedia(peerId: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String): MessageRecord = onNode {
+        val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+        if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+        if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before replying.")
+        val message = try {
+            requireEngine().queueMedia(peerId, kind, mime, name, bytes, caption)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "Attachment was not queued.")
+        }
+        publish()
+        wake.trySend(Unit)
+        message
+    }
+
+    /** Rings an accepted contact. The invite is sealed and written now; it is not queued. */
+    suspend fun placeCall(peerId: String, video: Boolean) = onNode {
+        val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+        if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+        if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before calling.")
+        if (keys == null) throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+        try {
+            board.place(peerId, video, Encoding.newId("call"))
+        } catch (error: CallRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "The call could not start.")
+        }
+    }
+
+    suspend fun acceptCall() = onNode { board.accept() }
+
+    suspend fun endCall() = onNode { board.end() }
+
+    suspend fun dismissCall() = onNode { board.dismiss() }
+
+    suspend fun relayOffer(sdp: String) = onNode { board.relayOffer(sdp) }
+
+    suspend fun relayAnswer(sdp: String) = onNode { board.relayAnswer(sdp) }
+
+    suspend fun relayIce(candidate: String, mid: String, line: Int) = onNode { board.relayIce(candidate, mid, line) }
+
+    suspend fun markCallLive() = onNode { board.markLive() }
+
+    suspend fun setCallMuted(muted: Boolean) = onNode { board.update(muted = muted) }
+
+    suspend fun setCallSpeaker(speaker: Boolean) = onNode { board.update(speaker = speaker) }
+
+    suspend fun setCallCamera(enabled: Boolean) = onNode { board.update(camera = enabled) }
+
+    suspend fun readMedia(messageId: String): ByteArray? = onNode {
+        val name = store.message(messageId)?.mediaFile ?: return@onNode null
+        val file = mediaDir?.let { File(it, name) } ?: return@onNode null
+        if (!file.exists()) null else file.readBytes()
+    }
+
+    suspend fun setStatus(text: String) = onNode {
+        val profile = store.profile ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+        store.profile = profile.copy(status = text.trim().take(80))
+        store.save()
+        engine?.shareProfile()
+        publish()
+        wake.trySend(Unit)
+    }
+
+    suspend fun setAvatar(jpeg: ByteArray) = onNode {
+        val profile = store.profile ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+        if (jpeg.size > MediaNotes.MAX_AVATAR_BYTES || jpeg.size < 3 || jpeg[0] != 0xFF.toByte() || jpeg[1] != 0xD8.toByte()) {
+            throw DirectException(DirectException.Reason.REJECTED, "Choose a smaller JPEG photo.")
+        }
+        store.profile = profile.copy(avatarJpegBase64 = Encoding.base64Url(jpeg))
+        store.save()
+        engine?.shareProfile()
+        publish()
+        wake.trySend(Unit)
+    }
+
+    suspend fun clearAvatar() = onNode {
+        val profile = store.profile ?: return@onNode
+        store.profile = profile.copy(avatarJpegBase64 = null)
+        store.save()
+        engine?.shareProfile()
+        publish()
+        wake.trySend(Unit)
+    }
+
+    /** Adds the signed bundle inside a QR or share card, keeps the unsigned status and photo, and saves the server address when the card includes one. */
+    suspend fun addFromShare(text: String): ContactRecord = onNode {
+        val card = ProfileCards.parse(text)
+        val contact = addBundle(card.bundle)
+        val shared = BootstrapUrl.normalize(card.bootstrap)
+        if (shared is BootstrapUrl.Result.Ok && shared.url != store.settings.bootstrapUrl) {
+            store.settings = store.settings.copy(bootstrapUrl = shared.url)
+            bootstrap.configure(shared.url)
+        }
+        val avatar = card.avatarJpeg?.takeIf { it.size in 1..MediaNotes.MAX_AVATAR_BYTES && it.size >= 2 && it[0] == 0xFF.toByte() }
+        store.putContact(contact.copy(about = card.status.trim().take(80), avatarJpegBase64 = avatar?.let(Encoding::base64Url) ?: contact.avatarJpegBase64))
+        store.save()
+        refreshWatch()
+        publish()
+        store.contact(contact.directId) ?: contact
+    }
+
     suspend fun acceptRequest(peerId: String) = onNode {
         val contact = store.contact(peerId) ?: return@onNode
         store.putContact(contact.copy(accepted = true, blocked = false))
         store.save()
         requireEngine().markRead(peerId)
         refreshWatch()
+        requireEngine().shareProfile(peerId)
         publish()
         wake.trySend(Unit)
     }
@@ -326,7 +452,10 @@ class DirectNode(
         transport?.closeAll()
         keys = identity
         val profile = store.profile ?: return
-        engine = DeliveryEngine(store, { keys?.let { it to profile.deviceId } }, linksProxy, clock, random, ttlMs).also { it.recover() }
+        engine = DeliveryEngine(store, { keys?.let { it to profile.deviceId } }, linksProxy, clock, random, ttlMs, mediaDirectory = mediaDir).also {
+            it.recover()
+            it.onCall = { text -> callPlain = text }
+        }
         transport = transportFactory(bootstrap, identity.directId, scope).also { it.setListener(listener) }
         bootstrap.announce(identity.directId, Bundles.create(identity, profile.name, profile.deviceId).encode())
         refreshWatch()
@@ -372,7 +501,10 @@ class DirectNode(
             }
             saveContact(bundle, accepted = false)
         }
+        callPlain = null
         requireEngine().receive(peerId, payload)
+        val plain = callPlain
+        if (plain != null) board.onRemote(peerId, plain)
         publish()
         wake.trySend(Unit)
     }
@@ -396,9 +528,12 @@ class DirectNode(
     private suspend fun runLoop() {
         while (scope.isActive) {
             engine?.flush()
+            board.tick()
             publish()
             val next = engine?.nextWakeAt()
-            val wait = if (next == null) IDLE_WAKE_MS else (next - clock()).coerceIn(MIN_WAKE_MS, IDLE_WAKE_MS)
+            val engineWait = if (next == null) IDLE_WAKE_MS else (next - clock()).coerceIn(MIN_WAKE_MS, IDLE_WAKE_MS)
+            val ringWait = board.ringUntil?.let { (it - clock()).coerceIn(MIN_WAKE_MS, IDLE_WAKE_MS) }
+            val wait = if (ringWait == null) engineWait else minOf(engineWait, ringWait)
             withTimeoutOrNull(wait) { wake.receive() }
         }
     }
@@ -414,11 +549,15 @@ class DirectNode(
             accepted = accepted || existing?.accepted == true,
             blocked = existing?.blocked == true,
             createdAt = existing?.createdAt ?: clock(),
+            about = existing?.about.orEmpty(),
+            avatarJpegBase64 = existing?.avatarJpegBase64,
         )
         store.putContact(contact)
         store.save()
         refreshWatch()
+        if (contact.accepted && !contact.blocked) engine?.shareProfile(contact.directId)
         publish()
+        wake.trySend(Unit)
         return contact
     }
 
@@ -457,7 +596,7 @@ class DirectNode(
             Conversation(
                 peerId = contact.directId,
                 name = contact.name,
-                lastBody = thread.lastOrNull()?.body,
+                lastBody = thread.lastOrNull()?.let { message -> message.body.ifBlank { MediaNotes.label(message.mediaKind) } },
                 lastAt = thread.lastOrNull()?.createdAt ?: contact.createdAt,
                 unread = thread.count { it.direction == Direction.INCOMING && !it.read },
                 request = !contact.accepted && !contact.blocked,
@@ -477,7 +616,30 @@ class DirectNode(
             pending = engine?.pendingCount() ?: 0,
             foreground = foreground,
             networkAvailable = networkAvailable,
+            call = board.snapshot,
         )
+    }
+
+    private suspend fun sendCall(peerId: String, note: CallNotes.Note): Boolean {
+        val bytes = engine?.sealCall(peerId, CallNotes.encode(note)) ?: return false
+        if (!linksProxy.isConnected(peerId) && !linksProxy.connect(peerId)) return false
+        return linksProxy.send(peerId, bytes)
+    }
+
+    private fun recordCall(peerId: String, id: String, outgoing: Boolean, label: String, missed: Boolean) {
+        val now = clock()
+        store.putMessage(
+            MessageRecord(
+                id = id,
+                peerId = peerId,
+                direction = if (outgoing) Direction.OUTGOING else Direction.INCOMING,
+                body = label,
+                createdAt = now,
+                read = !missed,
+                mediaKind = "call",
+            ),
+        )
+        store.save()
     }
 
     private suspend fun <T> onNode(block: suspend () -> T): T = withContext(dispatcher) { block() }

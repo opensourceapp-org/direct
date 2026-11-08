@@ -1,16 +1,36 @@
 import DirectCore
 import SwiftUI
+import UIKit
 
 enum Ink {
-    static let background = Color(red: 0.04, green: 0.05, blue: 0.07)
-    static let surface = Color(red: 0.08, green: 0.09, blue: 0.12)
-    static let line = Color.white.opacity(0.08)
-    static let text = Color(red: 0.93, green: 0.94, blue: 0.96)
-    static let muted = Color(red: 0.56, green: 0.59, blue: 0.65)
-    static let accent = Color(red: 0.42, green: 0.65, blue: 1.0)
-    static let success = Color(red: 0.36, green: 0.84, blue: 0.56)
-    static let warning = Color(red: 0.98, green: 0.77, blue: 0.36)
-    static let danger = Color(red: 1.0, green: 0.42, blue: 0.42)
+    static let background = adaptive(light: 0xF2F2F7, dark: 0x0A0C12)
+    static let surface = adaptive(light: 0xFFFFFF, dark: 0x14171F)
+    static let line = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor.white.withAlphaComponent(0.08) : UIColor.black.withAlphaComponent(0.08)
+    })
+    static let text = adaptive(light: 0x1C1C1E, dark: 0xEDF0F5)
+    static let muted = adaptive(light: 0x8E8E93, dark: 0x8F96A6)
+    /// Apple system blue and green, so light and dark mode each get the system color.
+    static let accent = Color(uiColor: .systemBlue)
+    static let incoming = adaptive(light: 0xE9E9EB, dark: 0x3A3A3C)
+    static let success = Color(uiColor: .systemGreen)
+    static let warning = Color(uiColor: .systemOrange)
+    static let danger = Color(uiColor: .systemRed)
+
+    private static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            ui(traits.userInterfaceStyle == .dark ? dark : light)
+        })
+    }
+
+    private static func ui(_ hex: UInt32) -> UIColor {
+        UIColor(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
+    }
 }
 
 extension MessageState {
@@ -60,8 +80,64 @@ struct PrimaryButton: View {
             Text(title).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 12)
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.large)
         .tint(Ink.accent)
+        // The screen's text color would otherwise paint this label dark in light mode.
+        .foregroundStyle(Color.white)
         .disabled(!enabled)
+    }
+}
+
+enum Keyboard {
+    static func dismiss() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+/// A tap outside a text field closes the keyboard. Taps on the field itself are left alone, and other controls still receive the touch.
+final class KeyboardDismiss: NSObject, UIGestureRecognizerDelegate {
+    static let shared = KeyboardDismiss()
+    private var started = false
+    private var watched = Set<ObjectIdentifier>()
+
+    func install() {
+        if !started {
+            started = true
+            NotificationCenter.default.addObserver(self, selector: #selector(attachWindows), name: UIWindow.didBecomeKeyNotification, object: nil)
+        }
+        attachWindows()
+    }
+
+    @objc private func attachWindows() {
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+        for window in windows {
+            guard watched.insert(ObjectIdentifier(window)).inserted else { continue }
+            let tap = UITapGestureRecognizer(target: self, action: #selector(close))
+            tap.cancelsTouchesInView = false
+            tap.delaysTouchesBegan = false
+            tap.delaysTouchesEnded = false
+            tap.delegate = self
+            window.addGestureRecognizer(tap)
+        }
+    }
+
+    @objc private func close() { Keyboard.dismiss() }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard let view = touch.view else { return true }
+        if isTextInput(view) || isTextInput(view.superview) { return false }
+        if view.subviews.contains(where: isTextInput) { return false }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    private func isTextInput(_ view: UIView?) -> Bool {
+        view is UITextField || view is UITextView
     }
 }
 
@@ -81,6 +157,27 @@ struct Field: View {
     }
 }
 
+struct Avatar: View {
+    let name: String
+    let jpeg: String?
+    var size: CGFloat = 44
+
+    var body: some View {
+        Group {
+            if let data = jpeg.flatMap({ Encoding.fromBase64Url($0) }), let image = UIImage(data: data) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Text(String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
+                    .font(.system(size: size * 0.38, weight: .semibold))
+                    .foregroundStyle(Color.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Ink.accent)
+        .clipShape(Circle())
+    }
+}
+
 struct StatusDot: View {
     let color: Color
     var body: some View { Circle().fill(color).frame(width: 8, height: 8) }
@@ -94,4 +191,16 @@ struct Muted: View {
 
 func formatTime(_ ms: Int64) -> String {
     Date(timeIntervalSince1970: TimeInterval(ms) / 1000).formatted(date: .omitted, time: .shortened)
+}
+
+func messageBubble(_ outgoing: Bool, tail: Bool) -> UnevenRoundedRectangle {
+    let round: CGFloat = 18
+    let corner: CGFloat = tail ? 5 : 18
+    return UnevenRoundedRectangle(
+        topLeadingRadius: round,
+        bottomLeadingRadius: outgoing ? round : corner,
+        bottomTrailingRadius: outgoing ? corner : round,
+        topTrailingRadius: round,
+        style: .continuous
+    )
 }

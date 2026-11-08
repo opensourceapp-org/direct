@@ -22,7 +22,6 @@ struct DirectApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model)
-                .preferredColorScheme(.dark)
                 .onAppear { model.start() }
         }
         .onChange(of: scenePhase) { phase in model.scenePhaseChanged(phase) }

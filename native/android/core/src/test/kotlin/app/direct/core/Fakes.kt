@@ -147,7 +147,8 @@ class FakePeerNetwork {
             if (!bootstrap.status.value.isOpen) return false
             val reachable = bootstrap.sendNegotiation(SignalFrame.Offer(peerId, selfId, "v=0"))
             val remote = transports[peerId]
-            if (!reachable || remote == null) return false
+            // The offer wait can outlive the other phone. A forwarded offer is not a live link.
+            if (!reachable || remote == null || !remote.bootstrap.status.value.isOpen) return false
             links += peerId
             remote.links += selfId
             listener?.onPeerConnected(peerId)

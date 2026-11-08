@@ -10,7 +10,15 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 @Serializable
-data class Profile(val name: String, val deviceId: String, val directId: String)
+data class Profile(
+    val name: String,
+    val deviceId: String,
+    val directId: String,
+    /** A short line the user wrote, shared only when they show their QR or use Share. */
+    val status: String = "",
+    /** Small JPEG, base64url. Null until they choose a photo. */
+    val avatarJpegBase64: String? = null,
+)
 
 @Serializable
 data class Settings(val bootstrapUrl: String? = null)
@@ -26,6 +34,9 @@ data class ContactRecord(
     val accepted: Boolean = true,
     val blocked: Boolean = false,
     val createdAt: Long,
+    /** Status text copied from their QR. It is not signed. */
+    val about: String = "",
+    val avatarJpegBase64: String? = null,
 )
 
 @Serializable
@@ -44,6 +55,12 @@ data class MessageRecord(
     val read: Boolean = false,
     val lastError: String? = null,
     val updatedAt: Long = createdAt,
+    /** image, video, gif, sticker, or audio. Null for a text message. */
+    val mediaKind: String? = null,
+    val mediaMime: String? = null,
+    val mediaName: String? = null,
+    /** File name inside the media directory. The bytes are not in this snapshot. */
+    val mediaFile: String? = null,
 )
 
 @Serializable
