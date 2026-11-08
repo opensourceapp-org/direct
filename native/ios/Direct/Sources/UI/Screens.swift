@@ -42,6 +42,7 @@ struct RootView: View {
         }
         .foregroundStyle(Ink.text)
         .scrollDismissesKeyboard(.interactively)
+        .onAppear { KeyboardDismiss.shared.install() }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()

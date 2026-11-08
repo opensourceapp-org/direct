@@ -96,7 +96,7 @@ fun DirectRoot(node: DirectNode) {
         introSeen = true
         replayIntro = false
     }
-    Box(Modifier.fillMaxSize().safeDrawingPadding().hideKeyboardOnScroll()) {
+    Box(Modifier.fillMaxSize().safeDrawingPadding().hideKeyboardOnScroll().dismissKeyboardOnOutsideTap()) {
         when {
             !state.ready -> Centered("Opening DIRECT")
             state.storageError != null -> Centered(state.storageError!!)

@@ -94,6 +94,53 @@ enum Keyboard {
     }
 }
 
+/// A tap outside a text field closes the keyboard. Taps on the field itself are left alone, and other controls still receive the touch.
+final class KeyboardDismiss: NSObject, UIGestureRecognizerDelegate {
+    static let shared = KeyboardDismiss()
+    private var started = false
+    private var watched = Set<ObjectIdentifier>()
+
+    func install() {
+        if !started {
+            started = true
+            NotificationCenter.default.addObserver(self, selector: #selector(attachWindows), name: UIWindow.didBecomeKeyNotification, object: nil)
+        }
+        attachWindows()
+    }
+
+    @objc private func attachWindows() {
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+        for window in windows {
+            guard watched.insert(ObjectIdentifier(window)).inserted else { continue }
+            let tap = UITapGestureRecognizer(target: self, action: #selector(close))
+            tap.cancelsTouchesInView = false
+            tap.delaysTouchesBegan = false
+            tap.delaysTouchesEnded = false
+            tap.delegate = self
+            window.addGestureRecognizer(tap)
+        }
+    }
+
+    @objc private func close() { Keyboard.dismiss() }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard let view = touch.view else { return true }
+        if isTextInput(view) || isTextInput(view.superview) { return false }
+        if view.subviews.contains(where: isTextInput) { return false }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    private func isTextInput(_ view: UIView?) -> Bool {
+        view is UITextField || view is UITextView
+    }
+}
+
 struct Field: View {
     let placeholder: String
     @Binding var text: String
