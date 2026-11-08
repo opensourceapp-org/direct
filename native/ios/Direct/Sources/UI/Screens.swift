@@ -526,9 +526,9 @@ private struct ServerHelp: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Clone DIRECT from https://github.com/hyper-realm/direct. On a Mac, double-click Start Server.command in that folder. On any computer, the commands below open the server window. It shows the address to share and lists each phone that connects. Direct.app is the iPhone app. macOS will not open it.")
+                Text("Clone DIRECT from https://github.com/opensourceapp-org/direct. On a Mac, double-click Start Server.command in that folder. On any computer, the commands below open the server window. It shows the address to share and lists each phone that connects. Direct.app is the iPhone app. macOS will not open it.")
                     .foregroundStyle(Ink.muted)
-                helpCode("git clone https://github.com/hyper-realm/direct.git\ncd direct\npnpm install\npnpm server")
+                helpCode("git clone https://github.com/opensourceapp-org/direct.git\ncd direct\npnpm install\npnpm server")
                 Text("The server only introduces the two phones. It does not store messages, photos, voice notes, or calls.")
                     .foregroundStyle(Ink.muted)
                 helpBlock("What you need", "A computer both phones can reach, Node.js 22 or newer, pnpm, and this DIRECT project on that computer.")
