@@ -251,8 +251,11 @@ struct QrScannerView: UIViewControllerRepresentable {
 
 final class VoiceCapture: NSObject, ObservableObject {
     @Published var recording = false
+    @Published var levels: [CGFloat] = []
+    @Published var elapsed: TimeInterval = 0
     private var recorder: AVAudioRecorder?
     private var file: URL?
+    private var meter: Timer?
 
     func start() throws {
         let session = AVAudioSession.sharedInstance()
@@ -264,13 +267,33 @@ final class VoiceCapture: NSObject, ObservableObject {
             AVSampleRateKey: 44_100,
             AVNumberOfChannelsKey: 1,
         ])
+        recorder.isMeteringEnabled = true
         recorder.record()
         self.recorder = recorder
         file = url
+        levels = []
+        elapsed = 0
         recording = true
+        meter?.invalidate()
+        meter = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+            self?.sampleLevel()
+        }
+    }
+
+    private func sampleLevel() {
+        guard let recorder, recorder.isRecording else { return }
+        recorder.updateMeters()
+        let decibels = recorder.averagePower(forChannel: 0)
+        let amplitude = min(1, max(0, pow(10, decibels / 20) * 5))
+        var next = levels
+        next.append(CGFloat(amplitude))
+        if next.count > 36 { next.removeFirst(next.count - 36) }
+        levels = next
+        elapsed = recorder.currentTime
     }
 
     func stop() throws -> Data {
+        finishMeter()
         recorder?.stop()
         recorder = nil
         recording = false
@@ -284,11 +307,17 @@ final class VoiceCapture: NSObject, ObservableObject {
     }
 
     func cancel() {
+        finishMeter()
         recorder?.stop()
         recorder = nil
         recording = false
         if let file { try? FileManager.default.removeItem(at: file) }
         file = nil
+    }
+
+    private func finishMeter() {
+        meter?.invalidate()
+        meter = nil
     }
 }
 
@@ -337,26 +366,33 @@ struct AttachmentBar: View {
     }
 
     private var recordingRow: some View {
-        HStack(spacing: 12) {
-            Circle().fill(Ink.danger).frame(width: 8, height: 8)
-            Text("Recording").font(.subheadline).foregroundStyle(Ink.text)
-            Spacer(minLength: 8)
-            Button("Cancel") { voice.cancel() }
-                .font(.subheadline)
-                .foregroundStyle(Ink.muted)
+        HStack(spacing: 10) {
+            Button { voice.cancel() } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Ink.danger)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(ComposerPressStyle())
+            VoiceWave(levels: voice.levels, progress: 1, played: Ink.success, idle: Ink.success.opacity(0.35))
+                .frame(maxWidth: .infinity)
+            Text(voiceClock(voice.elapsed))
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .foregroundStyle(Ink.text)
+                .frame(width: 40, alignment: .trailing)
             Button {
                 do { onVoice(try voice.stop()) } catch { onError((error as? PrepError)?.message ?? "That recording was not sent.") }
             } label: {
-                Text("Send")
-                    .font(.subheadline.weight(.semibold))
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Color.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Ink.accent, in: Capsule())
+                    .frame(width: 32, height: 32)
+                    .background(Ink.accent, in: Circle())
             }
             .buttonStyle(ComposerPressStyle())
         }
         .padding(.horizontal, 4)
+        .padding(.vertical, 4)
     }
 
     private var attachmentChoices: some View {
@@ -445,7 +481,7 @@ struct MediaBubble: View {
     var showReceipt = false
     @EnvironmentObject private var model: AppModel
     @State private var bytes: Data?
-    @State private var playing = false
+    @State private var videoOpen = false
 
     var body: some View {
         let outgoing = message.direction == .outgoing
@@ -472,9 +508,9 @@ struct MediaBubble: View {
         }
         .onAppear { model.loadMedia(message.id) { bytes = $0 } }
         .onChange(of: message.mediaFile) { _ in model.loadMedia(message.id) { bytes = $0 } }
-        .sheet(isPresented: $playing) {
+        .sheet(isPresented: $videoOpen) {
             if let bytes {
-                PlayerSheet(data: bytes, mime: message.mediaMime ?? "video/mp4", name: message.mediaKind == "audio" ? "voice.m4a" : "video.mp4")
+                PlayerSheet(data: bytes, mime: message.mediaMime ?? "video/mp4", name: "video.mp4")
             }
         }
     }
@@ -508,12 +544,18 @@ struct MediaBubble: View {
                     textBubble(message.body, outgoing: outgoing, fill: fill)
                 }
             }
-        } else if kind == "video" || kind == "audio" {
-            Button { playing = true } label: {
+        } else if kind == "audio" {
+            if let bytes {
+                VoiceNoteBubble(data: bytes, outgoing: outgoing, tail: tail)
+            } else if !message.body.isEmpty {
+                textBubble(message.body, outgoing: outgoing, fill: fill)
+            }
+        } else if kind == "video" {
+            Button { videoOpen = true } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: kind == "audio" ? "play.fill" : "video.fill")
+                    Image(systemName: "video.fill")
                         .font(.system(size: 13, weight: .bold))
-                    Text(kind == "audio" ? "Voice message" : "Video")
+                    Text("Video")
                         .font(.system(size: 17))
                 }
                 .foregroundStyle(outgoing ? Color.white : Ink.text)
@@ -536,6 +578,165 @@ struct MediaBubble: View {
             .padding(.vertical, 8)
             .background(fill, in: messageBubble(outgoing, tail: tail))
     }
+}
+
+struct VoiceWave: View {
+    let levels: [CGFloat]
+    var progress: Double = 1
+    var played: Color
+    var idle: Color
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(0..<bars.count, id: \.self) { index in
+                let reached = bars.count <= 1 || Double(index) / Double(bars.count - 1) <= progress
+                Capsule()
+                    .fill(reached ? played : idle)
+                    .frame(width: 3, height: max(4, 26 * bars[index]))
+            }
+        }
+        .frame(height: 28)
+    }
+
+    private var bars: [CGFloat] {
+        if levels.isEmpty { return Array(repeating: 0.2, count: 18) }
+        return levels
+    }
+}
+
+struct VoiceNoteBubble: View {
+    let data: Data
+    let outgoing: Bool
+    let tail: Bool
+    @StateObject private var playback = VoicePlayback()
+    @State private var peaks: [CGFloat] = []
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { playback.toggle(data) } label: {
+                Image(systemName: playback.playing ? "pause.fill" : "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(outgoing ? Ink.accent : Color.white)
+                    .frame(width: 32, height: 32)
+                    .background(outgoing ? Color.white : Ink.success, in: Circle())
+            }
+            .buttonStyle(ComposerPressStyle())
+            VoiceWave(
+                levels: peaks,
+                progress: playback.playing || playback.progress > 0 ? playback.progress : 0,
+                played: outgoing ? Color.white : Ink.success,
+                idle: (outgoing ? Color.white : Ink.text).opacity(0.35)
+            )
+            Text(voiceClock(playback.current > 0 ? playback.current : playback.duration))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(outgoing ? Color.white.opacity(0.9) : Ink.muted)
+                .frame(width: 36, alignment: .trailing)
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 10)
+        .padding(.vertical, 6)
+        .background(outgoing ? Ink.accent : Ink.incoming, in: messageBubble(outgoing, tail: tail))
+        .task(id: data.count) {
+            let samples = await Task.detached(priority: .userInitiated) { voicePeaks(data) }.value
+            peaks = samples
+            playback.prepare(data)
+        }
+        .onDisappear { playback.stop() }
+        .onReceive(NotificationCenter.default.publisher(for: .directVoiceStarted)) { note in
+            if note.object as? UUID != playback.id { playback.pause() }
+        }
+    }
+}
+
+extension Notification.Name {
+    static let directVoiceStarted = Notification.Name("direct.voice.started")
+}
+
+final class VoicePlayback: ObservableObject {
+    let id = UUID()
+    @Published var playing = false
+    @Published var progress: Double = 0
+    @Published var duration: TimeInterval = 0
+    @Published var current: TimeInterval = 0
+    private var player: AVAudioPlayer?
+    private var timer: Timer?
+
+    func prepare(_ data: Data) {
+        guard player == nil else { return }
+        player = try? AVAudioPlayer(data: data)
+        player?.prepareToPlay()
+        duration = player?.duration ?? 0
+    }
+
+    func toggle(_ data: Data) {
+        prepare(data)
+        guard let player else { return }
+        if playing {
+            pause()
+            return
+        }
+        NotificationCenter.default.post(name: .directVoiceStarted, object: id)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        player.play()
+        playing = true
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self, let player = self.player else { return }
+            self.current = player.currentTime
+            self.progress = player.duration > 0 ? player.currentTime / player.duration : 0
+            if !player.isPlaying {
+                self.playing = false
+                self.progress = 0
+                self.current = 0
+                self.timer?.invalidate()
+            }
+        }
+    }
+
+    func pause() {
+        player?.pause()
+        playing = false
+        timer?.invalidate()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        player?.stop()
+        playing = false
+    }
+}
+
+func voiceClock(_ seconds: TimeInterval) -> String {
+    guard seconds.isFinite, seconds > 0 else { return "0:00" }
+    let total = Int(seconds.rounded())
+    return String(format: "%d:%02d", total / 60, total % 60)
+}
+
+func voicePeaks(_ data: Data, bars: Int = 28) -> [CGFloat] {
+    let quiet = Array(repeating: CGFloat(0.25), count: bars)
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("direct-wave-\(UUID().uuidString).m4a")
+    defer { try? FileManager.default.removeItem(at: url) }
+    guard (try? data.write(to: url, options: .atomic)) != nil,
+          let file = try? AVAudioFile(forReading: url),
+          file.length > 0,
+          let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096) else { return quiet }
+    let total = Int(file.length)
+    var peaks = Array(repeating: Float(0), count: bars)
+    var frame = 0
+    while frame < total {
+        buffer.frameLength = 0
+        guard (try? file.read(into: buffer)) != nil, buffer.frameLength > 0, let channel = buffer.floatChannelData?[0] else { break }
+        let count = Int(buffer.frameLength)
+        for index in 0..<count {
+            let bin = min(bars - 1, (frame + index) * bars / max(total, 1))
+            peaks[bin] = max(peaks[bin], abs(channel[index]))
+        }
+        frame += count
+    }
+    let loudest = peaks.max() ?? 0
+    guard loudest > 0.001 else { return quiet }
+    return peaks.map { CGFloat(max(0.12, min(1, $0 / loudest))) }
 }
 
 struct ComposerPressStyle: ButtonStyle {
