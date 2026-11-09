@@ -273,6 +273,76 @@ describe('signaling contract', () => {
     }
   });
 
+  test('admission uses the socket address unless the peer is a local proxy', () => {
+    const { clientIp } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/createServer.cjs'),
+    ) as {
+      clientIp: (request: {
+        headers: Record<string, string | undefined>;
+        socket: { remoteAddress?: string };
+      }) => string;
+    };
+    const req = (peer: string, forwarded?: string) => ({
+      headers: forwarded === undefined ? {} : { 'x-forwarded-for': forwarded },
+      socket: { remoteAddress: peer },
+    });
+    expect(clientIp(req('203.0.113.10', '198.51.100.1'))).toBe('203.0.113.10');
+    expect(clientIp(req('::ffff:203.0.113.10', '198.51.100.1'))).toBe('203.0.113.10');
+    expect(clientIp(req('2001:db8::10', '198.51.100.1'))).toBe('2001:db8::10');
+    expect(clientIp(req('127.0.0.1', '198.51.100.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('127.0.0.1', '10.0.0.1, 198.51.100.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('127.0.0.1', '1.1.1.1, 2.2.2.2, 198.51.100.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('::1', '198.51.100.1, 127.0.0.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('::ffff:127.0.0.1', '198.51.100.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('127.0.0.1'))).toBe('127.0.0.1');
+    expect(clientIp(req('127.0.0.1', 'not-an-ip'))).toBe('127.0.0.1');
+    expect(clientIp(req('127.0.0.1', 'evil.example'))).toBe('127.0.0.1');
+  });
+
+  test('a flood of sockets from one address is refused even with spoofed forwarded-for', async () => {
+    const { createSignalingServer, MAX_CONNECTS_PER_WINDOW, lanUrls } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/createServer.cjs'),
+    ) as {
+      createSignalingServer: () => {
+        listen(port: number, host: string): Promise<{ port: number }>;
+        close(): Promise<void>;
+      };
+      MAX_CONNECTS_PER_WINDOW: number;
+      lanUrls: (port: number) => string[];
+    };
+    const WebSocket = createRequire(__filename)('ws') as new (
+      url: string,
+      options?: { headers?: Record<string, string> },
+    ) => {
+      once(event: 'open' | 'error' | 'unexpected-response', listener: (...args: never[]) => void): void;
+      close(): void;
+    };
+    const server = createSignalingServer();
+    const info = await server.listen(0, '0.0.0.0');
+    const lan = lanUrls(info.port)[0];
+    const url = lan ?? `ws://127.0.0.1:${info.port}`;
+    const sockets: InstanceType<typeof WebSocket>[] = [];
+    try {
+      let refused = 0;
+      for (let i = 0; i <= MAX_CONNECTS_PER_WINDOW; i += 1) {
+        const phone = new WebSocket(url, lan ? { headers: { 'X-Forwarded-For': `198.51.100.${i + 1}` } } : undefined);
+        sockets.push(phone);
+        const outcome = await new Promise<'open' | number>((resolve) => {
+          phone.once('unexpected-response', (_request, response: { statusCode: number }) => resolve(response.statusCode));
+          phone.once('open', () => resolve('open'));
+          phone.once('error', () => {});
+        });
+        if (outcome === 'open') continue;
+        expect(outcome).toBe(429);
+        refused += 1;
+      }
+      expect(refused).toBeGreaterThan(0);
+    } finally {
+      for (const socket of sockets) socket.close();
+      await server.close();
+    }
+  });
+
   test('the operator roster lists a phone only while its socket is open', () => {
     const hub = createSignalHub();
     const phone = socket();

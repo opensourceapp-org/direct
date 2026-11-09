@@ -1,6 +1,7 @@
 const { readFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 const { createServer } = require('node:http');
+const { isIP } = require('node:net');
 const { networkInterfaces } = require('node:os');
 const { WebSocketServer } = require('ws');
 const { createSignalHub } = require('./hub.cjs');
@@ -14,9 +15,18 @@ function lanUrls(port) {
     .map((entry) => `ws://${entry.address}:${port}`);
 }
 
+function normalizeIp(address) {
+  let host = String(address || '').trim().toLowerCase();
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  if (host.startsWith('::ffff:') && isIP(host.slice(7)) === 4) return host.slice(7);
+  return host;
+}
+
 function isLoopback(address) {
-  const host = String(address || '');
-  return host === '127.0.0.1' || host === '::1' || host === '::ffff:127.0.0.1';
+  const host = normalizeIp(address);
+  if (host === '::1') return true;
+  if (isIP(host) === 4) return host.split('.')[0] === '127';
+  return false;
 }
 
 const MAX_CONNECTIONS = 2048;
@@ -39,10 +49,23 @@ function originAllowed(origin, request) {
   return true;
 }
 
+function forwardedIps(value) {
+  return String(value || '')
+    .split(',')
+    .map((part) => normalizeIp(part))
+    .filter((part) => isIP(part) === 4 || isIP(part) === 6);
+}
+
 function clientIp(request) {
-  const forwarded = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  if (forwarded) return forwarded;
-  return request.socket.remoteAddress || 'unknown';
+  const peer = normalizeIp(request.socket.remoteAddress) || 'unknown';
+  // Only a local reverse proxy can tell us the public client address.
+  // Direct callers can send any X-Forwarded-For value, so ignore it there.
+  if (!isLoopback(peer)) return peer;
+  const chain = forwardedIps(request.headers['x-forwarded-for']);
+  for (let i = chain.length - 1; i >= 0; i -= 1) {
+    if (!isLoopback(chain[i])) return chain[i];
+  }
+  return peer;
 }
 
 /**
@@ -150,4 +173,13 @@ function createSignalingServer() {
   return { hub, listen, close, lanUrls };
 }
 
-module.exports = { createSignalingServer, lanUrls, isLoopback, originAllowed, MAX_CONNECTIONS, MAX_PER_IP };
+module.exports = {
+  createSignalingServer,
+  lanUrls,
+  isLoopback,
+  originAllowed,
+  clientIp,
+  MAX_CONNECTIONS,
+  MAX_PER_IP,
+  MAX_CONNECTS_PER_WINDOW,
+};
