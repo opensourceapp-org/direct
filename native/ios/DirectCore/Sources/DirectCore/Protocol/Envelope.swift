@@ -12,6 +12,7 @@ public enum EnvelopeType: String, Codable, CaseIterable {
     case read
     case profile
     case call
+    case group
 }
 
 /// Signed, sealed unit that moves between devices over the data channel.

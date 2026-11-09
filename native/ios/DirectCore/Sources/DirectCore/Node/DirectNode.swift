@@ -25,8 +25,22 @@ public struct Conversation: Equatable, Identifiable, Sendable {
     /// An unknown sender's message waiting for Accept or Decline.
     public let request: Bool
     public let blocked: Bool
+    public let group: Bool
+    public let memberCount: Int
 
     public var id: String { peerId }
+
+    public init(peerId: String, name: String, lastBody: String?, lastAt: Int64, unread: Int, request: Bool, blocked: Bool, group: Bool = false, memberCount: Int = 0) {
+        self.peerId = peerId
+        self.name = name
+        self.lastBody = lastBody
+        self.lastAt = lastAt
+        self.unread = unread
+        self.request = request
+        self.blocked = blocked
+        self.group = group
+        self.memberCount = memberCount
+    }
 }
 
 public struct NodeState: Equatable, Sendable {
@@ -36,6 +50,7 @@ public struct NodeState: Equatable, Sendable {
     public var bootstrapUrl: String?
     public var bootstrap = BootstrapStatus(phase: .notConfigured, url: nil)
     public var contacts: [ContactRecord] = []
+    public var groups: [GroupRecord] = []
     public var conversations: [Conversation] = []
     public var messages: [String: [MessageRecord]] = [:]
     public var online: Set<String> = []
@@ -258,18 +273,58 @@ public final class DirectNode {
 
     @discardableResult
     public func send(_ peerId: String, _ body: String) throws -> MessageRecord {
-        guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
-        guard !contact.blocked else { throw DirectError(.blocked, "This contact is blocked.") }
-        guard contact.accepted else { throw DirectError(.notAccepted, "Accept the message request before replying.") }
         let message: MessageRecord
         do {
-            message = try requireEngine().queueText(peerId, body)
+            if GroupNotes.isGroupId(peerId) {
+                guard let group = store.group(peerId) else { throw DirectError(.notFound, "That group is not on this phone.") }
+                guard let selfId = keys?.directId else { throw DirectError(.noIdentity, "Create your identity first.") }
+                message = try requireEngine().queueGroupText(group, selfId, body)
+            } else {
+                guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
+                guard !contact.blocked else { throw DirectError(.blocked, "This contact is blocked.") }
+                guard contact.accepted else { throw DirectError(.notAccepted, "Accept the message request before replying.") }
+                message = try requireEngine().queueText(peerId, body)
+            }
         } catch let error as DeliveryRejected {
             throw DirectError(.rejected, error.message)
         }
         publish()
         wake.fire()
         return message
+    }
+
+    /// Creates a group of accepted contacts and seals an invite to each member.
+    @discardableResult
+    public func createGroup(name: String, memberIds: [String]) throws -> GroupRecord {
+        guard let selfKeys = keys else { throw DirectError(.noIdentity, "Create your identity first.") }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw DirectError(.rejected, "Enter a group name.") }
+        guard trimmed.utf16.count <= Bundles.maxNameUtf16 else { throw DirectError(.rejected, "Use 32 characters or fewer.") }
+        var unique: [String] = [selfKeys.directId]
+        var seen: Set<String> = [selfKeys.directId]
+        for raw in memberIds {
+            guard let id = DirectIds.normalize(raw) else { throw DirectError(.invalidId, "That DIRECT ID is not valid.") }
+            if id == selfKeys.directId || !seen.insert(id).inserted { continue }
+            guard let contact = store.contact(id) else { throw DirectError(.notFound, "Add each member as a contact first.") }
+            if contact.blocked { throw DirectError(.blocked, "Unblock \(contact.name) before adding them.") }
+            if !contact.accepted { throw DirectError(.notAccepted, "Accept \(contact.name) before adding them.") }
+            unique.append(id)
+        }
+        guard unique.count >= 2 else { throw DirectError(.rejected, "Add at least one contact.") }
+        guard unique.count <= GroupNotes.maxMembers else { throw DirectError(.rejected, "A group can have \(GroupNotes.maxMembers) people.") }
+        let group = GroupRecord(
+            id: Encoding.newId("grp"),
+            name: trimmed,
+            members: unique,
+            createdBy: selfKeys.directId,
+            createdAt: clock()
+        )
+        store.putGroup(group)
+        try store.save()
+        try requireEngine().queueGroupInvite(group, selfKeys.directId)
+        publish()
+        wake.fire()
+        return group
     }
 
     /// Photo, video, GIF, sticker, or voice note. The bytes are sealed and queued on this phone.
@@ -291,12 +346,22 @@ public final class DirectNode {
 
     /// Rings an accepted contact. The invite is sealed and written now; it is not queued.
     public func placeCall(_ peerId: String, video: Bool) async throws {
-        guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
-        if contact.blocked { throw DirectError(.blocked, "This contact is blocked.") }
-        if !contact.accepted { throw DirectError(.notAccepted, "Accept the message request before calling.") }
         guard keys != nil else { throw DirectError(.noIdentity, "Create your identity first.") }
         do {
-            try await board.place(peerId: peerId, video: video, id: Encoding.newId("call"))
+            if GroupNotes.isGroupId(peerId) {
+                guard let group = store.group(peerId) else { throw DirectError(.notFound, "That group is not on this phone.") }
+                let selfId = keys!.directId
+                let members = group.members.filter { id in
+                    id != selfId && store.contact(id).map { $0.accepted && !$0.blocked } == true
+                }
+                guard !members.isEmpty else { throw DirectError(.rejected, "No reachable members in this group.") }
+                try await board.place(peerId: peerId, video: video, id: Encoding.newId("call"), members: members)
+            } else {
+                guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
+                if contact.blocked { throw DirectError(.blocked, "This contact is blocked.") }
+                if !contact.accepted { throw DirectError(.notAccepted, "Accept the message request before calling.") }
+                try await board.place(peerId: peerId, video: video, id: Encoding.newId("call"))
+            }
         } catch let error as CallRejected {
             throw DirectError(.rejected, error.message)
         }
@@ -308,11 +373,11 @@ public final class DirectNode {
 
     public func dismissCall() { board.dismiss() }
 
-    public func relayOffer(_ sdp: String) async { await board.relayOffer(sdp) }
+    public func relayOffer(_ sdp: String, peerId: String? = nil) async { await board.relayOffer(sdp, toPeer: peerId) }
 
-    public func relayAnswer(_ sdp: String) async { await board.relayAnswer(sdp) }
+    public func relayAnswer(_ sdp: String, peerId: String? = nil) async { await board.relayAnswer(sdp, toPeer: peerId) }
 
-    public func relayIce(_ candidate: String, _ mid: String, _ line: Int) async { await board.relayIce(candidate, mid, line) }
+    public func relayIce(_ candidate: String, _ mid: String, _ line: Int, peerId: String? = nil) async { await board.relayIce(candidate, mid, line, toPeer: peerId) }
 
     public func markCallLive() { board.markLive() }
 
@@ -647,7 +712,7 @@ public final class DirectNode {
         var byPeer: [String: [MessageRecord]] = [:]
         for message in store.messages() { byPeer[message.peerId, default: []].append(message) }
         for (peer, list) in byPeer { byPeer[peer] = list.sorted { $0.createdAt < $1.createdAt } }
-        let conversations = contacts.compactMap { contact -> Conversation? in
+        let contactConversations = contacts.compactMap { contact -> Conversation? in
             let thread = byPeer[contact.directId] ?? []
             if contact.blocked && !contact.accepted { return nil }
             if thread.isEmpty && !contact.accepted { return nil }
@@ -662,13 +727,32 @@ public final class DirectNode {
                 request: !contact.accepted && !contact.blocked,
                 blocked: contact.blocked
             )
-        }.sorted { $0.lastAt > $1.lastAt }
+        }
+        let groups = store.groups()
+        let groupConversations = groups.map { group -> Conversation in
+            let thread = byPeer[group.id] ?? []
+            return Conversation(
+                peerId: group.id,
+                name: group.name,
+                lastBody: thread.last.flatMap { message in
+                    message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? MediaNotes.label(message.mediaKind) : message.body
+                },
+                lastAt: thread.last?.createdAt ?? group.createdAt,
+                unread: thread.filter { $0.direction == .incoming && !$0.read }.count,
+                request: false,
+                blocked: false,
+                group: true,
+                memberCount: group.members.count
+            )
+        }
+        let conversations = (contactConversations + groupConversations).sorted { $0.lastAt > $1.lastAt }
         var next = state
         next.profile = identity != nil ? store.profile : nil
         next.bundle = identity != nil ? currentBundle() : nil
         next.bootstrapUrl = store.settings.bootstrapUrl
         next.bootstrap = bootstrap.status
         next.contacts = contacts.sorted { $0.name.lowercased() < $1.name.lowercased() }
+        next.groups = groups
         next.conversations = conversations
         next.messages = byPeer
         next.online = online

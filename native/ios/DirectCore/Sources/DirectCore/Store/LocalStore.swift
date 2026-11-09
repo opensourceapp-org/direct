@@ -44,6 +44,22 @@ public struct Settings: Codable, Equatable, Sendable {
     public var bootstrapUrl: String?
 }
 
+public struct GroupRecord: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    public var members: [String]
+    public var createdBy: String
+    public var createdAt: Int64
+
+    public init(id: String, name: String, members: [String], createdBy: String, createdAt: Int64) {
+        self.id = id
+        self.name = name
+        self.members = members
+        self.createdBy = createdBy
+        self.createdAt = createdAt
+    }
+}
+
 public struct ContactRecord: Codable, Equatable, Identifiable, Sendable {
     public var directId: String
     public var name: String
@@ -129,12 +145,14 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
     public var mediaName: String?
     /// File name inside the media directory. The bytes are not in this snapshot.
     public var mediaFile: String?
+    /// Incoming group messages: the member who wrote it.
+    public var senderId: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, peerId, direction, body, createdAt, state, read, lastError, updatedAt, mediaKind, mediaMime, mediaName, mediaFile
+        case id, peerId, direction, body, createdAt, state, read, lastError, updatedAt, mediaKind, mediaMime, mediaName, mediaFile, senderId
     }
 
-    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil, mediaKind: String? = nil, mediaMime: String? = nil, mediaName: String? = nil, mediaFile: String? = nil) {
+    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil, mediaKind: String? = nil, mediaMime: String? = nil, mediaName: String? = nil, mediaFile: String? = nil, senderId: String? = nil) {
         self.id = id
         self.peerId = peerId
         self.direction = direction
@@ -148,6 +166,7 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         self.mediaMime = mediaMime
         self.mediaName = mediaName
         self.mediaFile = mediaFile
+        self.senderId = senderId
     }
 
     public init(from decoder: Decoder) throws {
@@ -165,6 +184,7 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         mediaMime = try container.decodeIfPresent(String.self, forKey: .mediaMime)
         mediaName = try container.decodeIfPresent(String.self, forKey: .mediaName)
         mediaFile = try container.decodeIfPresent(String.self, forKey: .mediaFile)
+        senderId = try container.decodeIfPresent(String.self, forKey: .senderId)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -182,6 +202,7 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         try container.encodeIfPresent(mediaMime, forKey: .mediaMime)
         try container.encodeIfPresent(mediaName, forKey: .mediaName)
         try container.encodeIfPresent(mediaFile, forKey: .mediaFile)
+        try container.encodeIfPresent(senderId, forKey: .senderId)
     }
 }
 
@@ -202,8 +223,10 @@ public struct QueueItem: Codable, Equatable {
     public var expiresAt: Int64
     public var sentAt: Int64?
     public var lastError: String?
+    /// Group fan-out: the local message this envelope belongs to.
+    public var messageId: String?
 
-    public init(id: String, peerId: String, kind: QueueKind, payload: String, attempts: Int = 0, nextAttemptAt: Int64, expiresAt: Int64, sentAt: Int64? = nil, lastError: String? = nil) {
+    public init(id: String, peerId: String, kind: QueueKind, payload: String, attempts: Int = 0, nextAttemptAt: Int64, expiresAt: Int64, sentAt: Int64? = nil, lastError: String? = nil, messageId: String? = nil) {
         self.id = id
         self.peerId = peerId
         self.kind = kind
@@ -213,7 +236,10 @@ public struct QueueItem: Codable, Equatable {
         self.expiresAt = expiresAt
         self.sentAt = sentAt
         self.lastError = lastError
+        self.messageId = messageId
     }
+
+    public func logicalId() -> String { messageId ?? id }
 }
 
 struct Snapshot: Codable {
@@ -223,6 +249,32 @@ struct Snapshot: Codable {
     var contacts: [ContactRecord] = []
     var messages: [MessageRecord] = []
     var queue: [QueueItem] = []
+    var groups: [GroupRecord] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case version, profile, settings, contacts, messages, queue, groups
+    }
+
+    init(version: Int = 1, profile: Profile? = nil, settings: Settings = Settings(), contacts: [ContactRecord] = [], messages: [MessageRecord] = [], queue: [QueueItem] = [], groups: [GroupRecord] = []) {
+        self.version = version
+        self.profile = profile
+        self.settings = settings
+        self.contacts = contacts
+        self.messages = messages
+        self.queue = queue
+        self.groups = groups
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        profile = try container.decodeIfPresent(Profile.self, forKey: .profile)
+        settings = try container.decodeIfPresent(Settings.self, forKey: .settings) ?? Settings()
+        contacts = try container.decodeIfPresent([ContactRecord].self, forKey: .contacts) ?? []
+        messages = try container.decodeIfPresent([MessageRecord].self, forKey: .messages) ?? []
+        queue = try container.decodeIfPresent([QueueItem].self, forKey: .queue) ?? []
+        groups = try container.decodeIfPresent([GroupRecord].self, forKey: .groups) ?? []
+    }
 }
 
 /// The whole local database: profile, contacts, messages, and the outgoing queue.
@@ -239,6 +291,8 @@ public final class LocalStore {
     private var messageMap: [String: MessageRecord]
     private var queueOrder: [String]
     private var queueMap: [String: QueueItem]
+    private var groupOrder: [String]
+    private var groupMap: [String: GroupRecord]
     private let file: URL?
     private let key: Data?
 
@@ -253,6 +307,8 @@ public final class LocalStore {
         messageMap = Dictionary(snapshot.messages.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         queueOrder = snapshot.queue.map(\.id)
         queueMap = Dictionary(snapshot.queue.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        groupOrder = snapshot.groups.map(\.id)
+        groupMap = Dictionary(snapshot.groups.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     }
 
     public func contact(_ directId: String) -> ContactRecord? { contactMap[directId] }
@@ -286,10 +342,26 @@ public final class LocalStore {
         queueMap[id] = nil
         queueOrder.removeAll { $0 == id }
     }
+    public func removeQueuedForMessage(_ messageId: String) {
+        for item in queue() where item.logicalId() == messageId {
+            removeQueued(item.id)
+        }
+    }
+
+    public func group(_ id: String) -> GroupRecord? { groupMap[id] }
+    public func groups() -> [GroupRecord] { groupOrder.compactMap { groupMap[$0] } }
+    public func putGroup(_ group: GroupRecord) {
+        if groupMap[group.id] == nil { groupOrder.append(group.id) }
+        groupMap[group.id] = group
+    }
+    public func removeGroup(_ id: String) {
+        groupMap[id] = nil
+        groupOrder.removeAll { $0 == id }
+    }
 
     public func save() throws {
         guard let file, let key else { return }
-        let snapshot = Snapshot(profile: profile, settings: settings, contacts: contacts(), messages: messages(), queue: queue())
+        let snapshot = Snapshot(profile: profile, settings: settings, contacts: contacts(), messages: messages(), queue: queue(), groups: groups())
         let sealed = try Seal.sealAtRest(key: key, plaintext: try JSONEncoder().encode(snapshot))
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         // .atomic writes a sibling temp file and renames it over the target.

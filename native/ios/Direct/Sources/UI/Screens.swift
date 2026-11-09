@@ -145,6 +145,7 @@ struct ChatsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(conversation.name).font(.headline)
+                                if conversation.group { Text("Group").font(.caption).foregroundStyle(Ink.accent) }
                                 if conversation.request { Text("Request").font(.caption).foregroundStyle(Ink.warning) }
                             }
                             Text(conversation.lastBody ?? "No messages").font(.subheadline).foregroundStyle(Ink.muted).lineLimit(1)
@@ -160,6 +161,14 @@ struct ChatsView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle("Chats")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink { NewGroupView() } label: {
+                    Image(systemName: "person.3")
+                }
+                .accessibilityLabel("New group")
+            }
+        }
         .navigationDestination(for: String.self) { ChatView(peerId: $0) }
     }
 }
@@ -188,6 +197,9 @@ struct ChatView: View {
     @State private var attachments = false
 
     private var contact: ContactRecord? { model.state.contacts.first { $0.directId == peerId } }
+    private var group: GroupRecord? { model.state.groups.first { $0.id == peerId } }
+    private var conversation: Conversation? { model.state.conversations.first { $0.peerId == peerId } }
+    private var isGroup: Bool { group != nil || conversation?.group == true }
     private var messages: [MessageRecord] { model.state.messages[peerId] ?? [] }
 
     var body: some View {
@@ -208,6 +220,13 @@ struct ChatView: View {
                                         .frame(maxWidth: .infinity)
                                         .padding(.top, 12)
                                         .padding(.bottom, 4)
+                                }
+                                if isGroup, message.direction == .incoming, let sender = senderName(message) {
+                                    Text(sender)
+                                        .font(.caption2)
+                                        .foregroundStyle(Ink.muted)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.leading, 8)
                                 }
                                 MediaBubble(message: message, tail: !continues, showReceipt: !continues && message.direction == .outgoing)
                             }
@@ -240,7 +259,7 @@ struct ChatView: View {
                 .padding()
             } else if contact?.blocked == true {
                 Muted("Blocked. Messages from this DIRECT ID are dropped.").padding()
-            } else {
+            } else if isGroup || contact != nil {
                 composer
             }
         }
@@ -263,9 +282,9 @@ struct ChatView: View {
                         .frame(width: 28, height: 40)
                 }
                 .buttonStyle(.plain)
-                Avatar(name: contact?.name ?? "?", jpeg: contact?.avatarJpegBase64, size: 40)
+                Avatar(name: contact?.name ?? conversation?.name ?? "?", jpeg: contact?.avatarJpegBase64, size: 40)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(contact?.name ?? peerId)
+                    Text(contact?.name ?? conversation?.name ?? peerId)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Ink.text)
                         .lineLimit(1)
@@ -275,7 +294,7 @@ struct ChatView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                if contact?.accepted == true, contact?.blocked != true {
+                if isGroup || (contact?.accepted == true && contact?.blocked != true) {
                     Button { model.placeCall(peerId, video: false) } label: {
                         Image(systemName: "phone.fill").font(.system(size: 18)).foregroundStyle(Ink.accent).frame(width: 36, height: 40)
                     }
@@ -297,12 +316,18 @@ struct ChatView: View {
     }
 
     private var presence: String {
+        if isGroup { return "\(group?.members.count ?? conversation?.memberCount ?? 0) members" }
         guard let contact else { return "Not a contact" }
         if contact.blocked { return "Blocked" }
         if !contact.accepted { return "Message request" }
         if model.state.connected.contains(peerId) { return "Connected directly" }
         if model.state.online.contains(peerId) { return "On the bootstrap" }
         return "Offline · messages wait on this phone"
+    }
+
+    private func senderName(_ message: MessageRecord) -> String? {
+        guard let id = message.senderId else { return nil }
+        return model.state.contacts.first { $0.directId == id }?.name ?? id
     }
 
     private var canSend: Bool {
@@ -316,25 +341,29 @@ struct ChatView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
-            AttachmentBar(expanded: $attachments,
-                onPhoto: { sendAttachment(kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0) },
-                onVideo: { sendAttachment(kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0) },
-                onGif: { sendAttachment(kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0) },
-                onSticker: { sendAttachment(kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: "") },
-                onVoice: { sendAttachment(kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0) },
-                onError: { model.toast = $0 }
-            )
+            if !isGroup {
+                AttachmentBar(expanded: $attachments,
+                    onPhoto: { sendAttachment(kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0) },
+                    onVideo: { sendAttachment(kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0) },
+                    onGif: { sendAttachment(kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0) },
+                    onSticker: { sendAttachment(kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: "") },
+                    onVoice: { sendAttachment(kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0) },
+                    onError: { model.toast = $0 }
+                )
+            }
             HStack(alignment: .bottom, spacing: 8) {
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) { attachments.toggle() }
-                } label: {
-                    Image(systemName: attachments ? "xmark" : "plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Ink.accent)
-                        .frame(width: 36, height: 36)
-                        .background(Ink.surface, in: Circle())
+                if !isGroup {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) { attachments.toggle() }
+                    } label: {
+                        Image(systemName: attachments ? "xmark" : "plus")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Ink.accent)
+                            .frame(width: 36, height: 36)
+                            .background(Ink.surface, in: Circle())
+                    }
+                    .buttonStyle(ComposerPressStyle())
                 }
-                .buttonStyle(ComposerPressStyle())
                 TextField("Message", text: $draft, axis: .vertical)
                     .font(.body)
                     .foregroundStyle(Ink.text)
@@ -408,6 +437,56 @@ struct Bubble: View {
             }
             if !outgoing { Spacer(minLength: 48) }
         }
+    }
+}
+
+struct NewGroupView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var selected: Set<String> = []
+
+    private var people: [ContactRecord] {
+        model.state.contacts.filter { $0.accepted && !$0.blocked }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Field(placeholder: "Weekend", text: $name)
+                PrimaryButton(title: "Create group", enabled: !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !selected.isEmpty) {
+                    model.createGroup(name: name, memberIds: Array(selected)) { id in
+                        dismiss()
+                    }
+                }
+                Muted("Pick at least one accepted contact. Each member gets their own sealed invite.")
+            }
+            .listRowBackground(Ink.surface)
+            Section("Members") {
+                if people.isEmpty {
+                    Muted("Add an accepted contact before you create a group.")
+                }
+                ForEach(people) { contact in
+                    Button {
+                        if selected.contains(contact.directId) { selected.remove(contact.directId) } else { selected.insert(contact.directId) }
+                    } label: {
+                        HStack {
+                            Avatar(name: contact.name, jpeg: contact.avatarJpegBase64)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(contact.name).font(.headline).foregroundStyle(Ink.text)
+                                Text(contact.directId).font(.system(.caption, design: .monospaced)).foregroundStyle(Ink.muted)
+                            }
+                            Spacer()
+                            Image(systemName: selected.contains(contact.directId) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selected.contains(contact.directId) ? Ink.accent : Ink.muted)
+                        }
+                    }
+                }
+            }
+            .listRowBackground(Ink.surface)
+        }
+        .scrollContentBackground(.hidden)
+        .navigationTitle("New group")
     }
 }
 
