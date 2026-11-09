@@ -72,7 +72,7 @@ public enum CallNotes {
             return Note(op: op, id: id, candidate: candidate, mid: mid ?? "0", line: line ?? 0, groupId: groupId)
         case "member":
             guard let peer, !peer.isEmpty else { return nil }
-            return Note(op: op, id: id, peer: peer, groupId: groupId)
+            return Note(op: op, id: id, groupId: groupId, peer: peer)
         default:
             return Note(op: op, id: id, groupId: groupId)
         }

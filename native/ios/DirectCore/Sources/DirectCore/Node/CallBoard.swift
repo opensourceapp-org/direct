@@ -335,8 +335,8 @@ final class CallBoard {
         guard let live = snapshot, live.group else { return }
         let others = joined.filter { $0 != joinedPeer }
         for member in others {
-            _ = await send(member, CallNotes.Note(op: "member", id: live.id, peer: joinedPeer, groupId: live.peerId))
-            _ = await send(joinedPeer, CallNotes.Note(op: "member", id: live.id, peer: member, groupId: live.peerId))
+            _ = await send(member, CallNotes.Note(op: "member", id: live.id, groupId: live.peerId, peer: joinedPeer))
+            _ = await send(joinedPeer, CallNotes.Note(op: "member", id: live.id, groupId: live.peerId, peer: member))
         }
     }
 
