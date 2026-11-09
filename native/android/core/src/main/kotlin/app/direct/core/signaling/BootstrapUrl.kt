@@ -4,6 +4,14 @@ package app.direct.core.signaling
 object BootstrapUrl {
     const val DEFAULT_PORT = 8787
 
+    /** Public hosted bootstrap. Phones save this on first start unless a different address is already stored. */
+    const val DEFAULT = "wss://direct-signaling.apps.grok.bot"
+
+    fun storedOrDefault(stored: String?): String {
+        val value = stored?.trim().orEmpty()
+        return value.ifEmpty { DEFAULT }
+    }
+
     enum class Error(val message: String) {
         EMPTY("Enter the bootstrap address, such as ws://192.168.1.20:8787."),
         SCHEME("Use a ws:// or wss:// address."),

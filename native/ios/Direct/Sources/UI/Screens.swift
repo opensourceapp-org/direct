@@ -490,9 +490,9 @@ struct NetworkView: View {
             }
             .listRowBackground(Ink.surface)
             Section("Bootstrap address") {
-                Field(placeholder: "ws://192.168.1.20:8787", text: $input, monospaced: true)
+                Field(placeholder: BootstrapUrl.defaultUrl, text: $input, monospaced: true)
                 PrimaryButton(title: "Save", enabled: !input.isEmpty) { model.setBootstrap(input) }
-                Muted("Run the signaling server on a computer, then enter the same ws://<computer address>:8787 on both phones. localhost does not work on a phone. The bootstrap only sees public bundles, presence, and connection setup; message text goes phone to phone.")
+                Muted("This phone uses the public DIRECT signaling server unless you save a different address. Both phones must use the same value. localhost does not work on a phone. The bootstrap only sees public bundles, presence, and connection setup; message text goes phone to phone.")
             }
             .listRowBackground(Ink.surface)
         }
@@ -518,7 +518,7 @@ struct NetworkView: View {
                     }
             }
         }
-        .onAppear { input = model.state.bootstrapUrl ?? "" }
+        .onAppear { input = model.state.bootstrapUrl ?? BootstrapUrl.defaultUrl }
     }
 }
 
@@ -526,7 +526,10 @@ private struct ServerHelp: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Download Direct Server for Mac, Windows, or Linux from https://direct-server.apps.grok.bot. Open the app, press Start server, and share the address it shows. Each phone that connects is listed in the window.")
+                Text("Phones already use the public DIRECT signaling server. Open Network and you will see that address filled in. Save a different address only if you want both phones on your own server.")
+                    .foregroundStyle(Ink.muted)
+                helpCode(BootstrapUrl.defaultUrl)
+                Text("To run your own server, download Direct Server for Mac, Windows, or Linux from https://direct-server.apps.grok.bot. Open the app, press Start server, and share the address it shows. Each phone that connects is listed in the window.")
                     .foregroundStyle(Ink.muted)
                 helpCode("https://direct-server.apps.grok.bot")
                 Text("To run it from source instead, clone the project. On a Mac, double-click Start Server.command in that folder. Direct.app is the iPhone app. macOS will not open it.")

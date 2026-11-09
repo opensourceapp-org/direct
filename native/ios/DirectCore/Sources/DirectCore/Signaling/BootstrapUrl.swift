@@ -4,6 +4,14 @@ import Foundation
 public enum BootstrapUrl {
     public static let defaultPort = 8787
 
+    /// Public hosted bootstrap. Phones save this on first start unless a different address is already stored.
+    public static let defaultUrl = "wss://direct-signaling.apps.grok.bot"
+
+    public static func storedOrDefault(_ stored: String?) -> String {
+        let value = stored?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? defaultUrl : value
+    }
+
     public enum Failure: String, Error, CaseIterable {
         case empty, scheme, host, port, userinfo, query, loopback
 

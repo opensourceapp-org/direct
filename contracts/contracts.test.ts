@@ -12,7 +12,7 @@ import {
   seal,
   toPublicIdentity,
 } from '@direct/crypto';
-import { aadFor, decodeEnvelope, encodeEnvelope, nextDelayMs, normalizeBootstrapUrl } from '@direct/protocol';
+import { aadFor, decodeEnvelope, encodeEnvelope, HOSTED_BOOTSTRAP_URL, nextDelayMs, normalizeBootstrapUrl } from '@direct/protocol';
 import type { Envelope } from '@direct/protocol';
 import { base64UrlToBytes, bytesToBase64Url, text, utf8 } from '@direct/shared';
 
@@ -35,6 +35,7 @@ const { createSignalHub } = createRequire(__filename)(
 const here = (name: string) => path.join(__dirname, name);
 const signaling = JSON.parse(readFileSync(here('signaling.json'), 'utf8'));
 const urls = JSON.parse(readFileSync(here('bootstrap-url.json'), 'utf8')) as {
+  hostedDefault: string;
   cases: { input: string; url?: string; error?: string }[];
 };
 
@@ -64,6 +65,12 @@ describe('bootstrap address contract', () => {
     const result = normalizeBootstrapUrl(input);
     if (url) expect(result).toEqual({ ok: true, url });
     else expect(result).toEqual({ ok: false, error });
+  });
+
+  test('the hosted default is a public wss address both phones share', () => {
+    expect(urls.hostedDefault).toBe(HOSTED_BOOTSTRAP_URL);
+    expect(normalizeBootstrapUrl(HOSTED_BOOTSTRAP_URL)).toEqual({ ok: true, url: HOSTED_BOOTSTRAP_URL });
+    expect(normalizeBootstrapUrl('https://direct-signaling.apps.grok.bot/')).toEqual({ ok: true, url: HOSTED_BOOTSTRAP_URL });
   });
 
   test('both phones typing the same computer in different ways get one address', () => {
@@ -169,6 +176,12 @@ describe('signaling contract', () => {
     };
     const server = createSignalingServer();
     const info = await server.listen(0, '127.0.0.1');
+    const health = await fetch(`http://127.0.0.1:${info.port}/health`);
+    expect(health.headers.get('content-type')).toMatch(/application\/json/);
+    expect(await health.json()).toEqual({ ok: true, service: 'direct-signaling', contract: 1 });
+    const home = await fetch(`http://127.0.0.1:${info.port}/`);
+    expect(home.headers.get('content-type')).toMatch(/text\/html/);
+    expect(await home.text()).toContain('Signaling is running.');
     const phone = new WebSocket(`ws://127.0.0.1:${info.port}`);
     try {
       await new Promise<void>((resolve, reject) => {

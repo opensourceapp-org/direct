@@ -92,7 +92,10 @@ final class ContractTests: XCTestCase {
     }
 
     func testBootstrapAddressesNormalizeLikeTheContract() {
-        for row in Contracts.json("bootstrap-url.json")["cases"]!.array! {
+        let contract = Contracts.json("bootstrap-url.json")
+        XCTAssertEqual(contract["hostedDefault"]?.string, BootstrapUrl.defaultUrl)
+        XCTAssertEqual(BootstrapUrl.defaultUrl, BootstrapUrl.storedOrDefault(nil))
+        for row in contract["cases"]!.array! {
             let input = row["input"]!.string!
             switch BootstrapUrl.normalize(input) {
             case let .success(url): XCTAssertEqual(row["url"]?.string, url, input)

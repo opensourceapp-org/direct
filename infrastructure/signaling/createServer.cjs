@@ -1,7 +1,11 @@
+const { readFileSync, existsSync } = require('node:fs');
+const { join } = require('node:path');
 const { createServer } = require('node:http');
 const { networkInterfaces } = require('node:os');
 const { WebSocketServer } = require('ws');
 const { createSignalHub } = require('./hub.cjs');
+
+const PAGE = join(__dirname, 'index.html');
 
 function lanUrls(port) {
   return Object.values(networkInterfaces())
@@ -38,7 +42,16 @@ function createSignalingServer() {
       response.end(JSON.stringify({ users: hub.roster() }));
       return;
     }
-    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+    if ((url === '/' || url === '/index.html') && existsSync(PAGE)) {
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+      });
+      response.end(readFileSync(PAGE));
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
     response.end('DIRECT signaling. Public bundles, presence, and WebRTC session descriptions only.\n');
   });
   const wss = new WebSocketServer({ server, maxPayload: 80 * 1024 });

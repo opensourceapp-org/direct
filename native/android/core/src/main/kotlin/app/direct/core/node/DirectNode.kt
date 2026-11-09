@@ -134,7 +134,12 @@ class DirectNode(
         val loaded = vault.load()
         val profile = store.profile
         if (loaded != null && profile != null && profile.directId == loaded.directId) activate(loaded)
-        bootstrap.configure(store.settings.bootstrapUrl)
+        val bootstrapUrl = BootstrapUrl.storedOrDefault(store.settings.bootstrapUrl)
+        if (store.settings.bootstrapUrl != bootstrapUrl) {
+            store.settings = store.settings.copy(bootstrapUrl = bootstrapUrl)
+            store.save()
+        }
+        bootstrap.configure(bootstrapUrl)
         bootstrap.start()
         watchers = listOf(
             scope.launch { bootstrap.status.collect { status -> onBootstrapStatus(status) } },
@@ -195,7 +200,7 @@ class DirectNode(
             return@onNode accepted
         }
         val url = bootstrap.url
-            ?: throw DirectException(DirectException.Reason.NO_BOOTSTRAP, "Set the bootstrap first. Use the same address on both phones, such as ws://192.168.1.20:8787, while the signaling server is running.")
+            ?: throw DirectException(DirectException.Reason.NO_BOOTSTRAP, "Set the bootstrap first. Phones use ${BootstrapUrl.DEFAULT} unless you save a different address.")
         if (!bootstrap.status.value.isOpen) {
             bootstrap.reconnectNow()
             withTimeoutOrNull(CONNECT_WAIT_MS) { bootstrap.status.first { it.isOpen } }

@@ -100,7 +100,11 @@ class ContractTest {
 
     @Test
     fun `bootstrap addresses normalize like contracts bootstrap-url json`() {
-        val cases = Contracts.json("bootstrap-url.json").jsonObject.getValue("cases").jsonArray
+        val contract = Contracts.json("bootstrap-url.json").jsonObject
+        assertEquals(contract.getValue("hostedDefault").jsonPrimitive.content, BootstrapUrl.DEFAULT)
+        assertEquals(BootstrapUrl.Result.Ok(BootstrapUrl.DEFAULT), BootstrapUrl.normalize(BootstrapUrl.DEFAULT))
+        assertEquals(BootstrapUrl.DEFAULT, BootstrapUrl.storedOrDefault(null))
+        val cases = contract.getValue("cases").jsonArray
         for (case in cases) {
             val row = case.jsonObject
             val result = BootstrapUrl.normalize(row.s("input"))

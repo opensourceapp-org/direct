@@ -6,7 +6,9 @@ Phones run DIRECT as a native app. Android is Kotlin in `native/android`. iOS is
 
 ## Signaling server
 
-On a computer both phones can reach, download Direct Server for macOS, Windows, or Linux from [direct-server.apps.grok.bot](https://direct-server.apps.grok.bot). Open it, press Start server, and share the `ws://` address it shows. The window lists each phone that connects. Builds are tagged on GitHub, starting at [v0.1.0](https://github.com/opensourceapp-org/direct/releases/tag/v0.1.0).
+iOS and Android save `wss://direct-signaling.apps.grok.bot` on first start and connect with that address. Open Network to see it already filled in. Save a different address only if both phones should use your own server.
+
+To run your own server on a computer both phones can reach, download Direct Server for macOS, Windows, or Linux from [direct-server.apps.grok.bot](https://direct-server.apps.grok.bot). Open it, press Start server, and share the `ws://` address it shows. The window lists each phone that connects. Builds are tagged on GitHub, starting at [v0.1.0](https://github.com/opensourceapp-org/direct/releases/tag/v0.1.0).
 
 To run the same window from source:
 
@@ -32,7 +34,7 @@ Both phones must save the same bootstrap, for example `ws://192.168.1.20:8787`. 
 ## What each phone does
 
 1. Create an identity. The 32-byte seed is generated on the device. Android stores it with an Android Keystore AES-256-GCM key in `noBackupFilesDir`. iOS stores it in the Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) and, on a device with a Secure Enclave, wraps it to a non-exportable enclave key. The recovery phrase is BIP-39, 24 words, and is shown once.
-2. Set the bootstrap to the address printed by `pnpm signaling`.
+2. The Network screen already has the hosted bootstrap. Leave it, or save the address printed by `pnpm signaling` if you are using your own server.
 3. On one phone, add the other by DIRECT ID. The lookup reads the public bundle the other phone announced. Pasting that bundle skips the lookup.
 4. Send. The envelope is sealed and queued before any network attempt. If the other phone is closed, the row stays `Queued` and retries with backoff.
 5. The recipient sees a message request. Accepting it sends read receipts. Declining it blocks that DIRECT ID.

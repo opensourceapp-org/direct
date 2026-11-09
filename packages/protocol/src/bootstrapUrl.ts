@@ -1,5 +1,8 @@
 export const DEFAULT_BOOTSTRAP_PORT = 8787;
 
+/** Public hosted bootstrap. Native phones use this until the user saves a different address. */
+export const HOSTED_BOOTSTRAP_URL = 'wss://direct-signaling.apps.grok.bot';
+
 export type BootstrapUrlError = 'empty' | 'scheme' | 'host' | 'port' | 'userinfo' | 'query' | 'loopback';
 
 export type BootstrapUrlResult = { ok: true; url: string } | { ok: false; error: BootstrapUrlError };

@@ -154,7 +154,12 @@ public final class DirectNode {
             self?.publish()
         }
         bootstrap.onPresence = { [weak self] id, isOnline in self?.presence(id, isOnline) }
-        bootstrap.configure(store.settings.bootstrapUrl)
+        let bootstrapUrl = BootstrapUrl.storedOrDefault(store.settings.bootstrapUrl)
+        if store.settings.bootstrapUrl != bootstrapUrl {
+            store.settings.bootstrapUrl = bootstrapUrl
+            try? store.save()
+        }
+        bootstrap.configure(bootstrapUrl)
         bootstrap.start()
         state.ready = true
         loop = Task { @DirectActor [weak self] in await self?.runLoop() }
@@ -220,7 +225,7 @@ public final class DirectNode {
             return existing
         }
         guard let url = bootstrap.url else {
-            throw DirectError(.noBootstrap, "Set the bootstrap first. Use the same address on both phones, such as ws://192.168.1.20:8787, while the signaling server is running.")
+            throw DirectError(.noBootstrap, "Set the bootstrap first. Phones use \(BootstrapUrl.defaultUrl) unless you save a different address.")
         }
         if !bootstrap.status.isOpen {
             bootstrap.reconnectNow()

@@ -17,3 +17,9 @@ signaling.listen(port, host).then((info) => {
   console.error(error && error.message ? error.message : error);
   process.exit(1);
 });
+
+function shutdown() {
+  signaling.close().finally(() => process.exit(0));
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

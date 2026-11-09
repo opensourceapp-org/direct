@@ -57,7 +57,8 @@ final class DirectNodeTests: XCTestCase {
         let adaId = ada.state.profile!.directId
         let boId = bo.state.profile!.directId
 
-        _ = await assertThrows(.noBootstrap) { try await ada.addContact(boId) }
+        XCTAssertEqual(BootstrapUrl.defaultUrl, ada.state.bootstrapUrl)
+        XCTAssertEqual(BootstrapUrl.defaultUrl, bo.state.bootstrapUrl)
 
         XCTAssertEqual("ws://192.168.1.20:8787", try ada.setBootstrap("192.168.1.20"))
         XCTAssertEqual("ws://192.168.1.20:8787", try bo.setBootstrap("ws://192.168.1.20:8787/"))
@@ -203,7 +204,14 @@ final class DirectNodeTests: XCTestCase {
         await ada.start()
         let error = await assertThrows(.invalidBootstrap) { try ada.setBootstrap("ws://localhost:8787") }
         XCTAssertTrue(error?.message.contains("the phone itself") == true)
-        XCTAssertNil(ada.state.bootstrapUrl)
+        XCTAssertEqual(BootstrapUrl.defaultUrl, ada.state.bootstrapUrl)
+        ada.close()
+    }
+
+    func testHostedBootstrapIsSavedOnFirstStart() async throws {
+        let ada = node(MemorySecretStore(), "ada-hosted")
+        await ada.start()
+        XCTAssertEqual(BootstrapUrl.defaultUrl, ada.state.bootstrapUrl)
         ada.close()
     }
 

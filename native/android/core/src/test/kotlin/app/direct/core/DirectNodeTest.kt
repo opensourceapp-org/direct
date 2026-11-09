@@ -4,6 +4,7 @@ import app.direct.core.delivery.MessageState
 import app.direct.core.node.CallPhase
 import app.direct.core.node.DirectException
 import app.direct.core.node.DirectNode
+import app.direct.core.signaling.BootstrapUrl
 import app.direct.core.protocol.ProfileCards
 import app.direct.core.signaling.BootstrapStatus.Phase
 import app.direct.core.store.Direction
@@ -56,8 +57,8 @@ class DirectNodeTest {
         val adaId = ada.state.value.profile!!.directId
         val boId = bo.state.value.profile!!.directId
 
-        val noBootstrap = assertFailsWith<DirectException> { ada.addContact(boId) }
-        assertEquals(DirectException.Reason.NO_BOOTSTRAP, noBootstrap.reason)
+        assertEquals(BootstrapUrl.DEFAULT, ada.state.value.bootstrapUrl)
+        assertEquals(BootstrapUrl.DEFAULT, bo.state.value.bootstrapUrl)
 
         assertEquals("ws://192.168.1.20:8787", ada.setBootstrap("192.168.1.20"))
         assertEquals("ws://192.168.1.20:8787", bo.setBootstrap("ws://192.168.1.20:8787/"))
@@ -267,5 +268,20 @@ class DirectNodeTest {
         assertEquals("Unreachable", ada.state.value.call?.reason)
         ada.close()
         bo.close()
+    }
+
+    @Test
+    fun `the hosted bootstrap is saved on first start and used to connect`() = runTest {
+        val secrets = MemorySecretStore()
+        val ada = node(secrets, "ada-hosted")
+        ada.start()
+        assertEquals(BootstrapUrl.DEFAULT, ada.state.value.bootstrapUrl)
+        settle()
+        assertEquals(Phase.OPEN, ada.state.value.bootstrap.phase)
+        ada.close()
+        val again = node(secrets, "ada-hosted")
+        again.start()
+        assertEquals(BootstrapUrl.DEFAULT, again.state.value.bootstrapUrl)
+        again.close()
     }
 }
