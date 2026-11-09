@@ -626,7 +626,10 @@ public final class DeliveryEngine {
             if !others { transition(logicalId, .expired, "The attachment is no longer on this phone.") }
             return
         }
-        let groupId = store.message(logicalId)?.peerId.flatMap { GroupNotes.isGroupId($0) ? $0 : nil }
+        let groupId: String? = {
+            guard let threadId = store.message(logicalId)?.peerId, GroupNotes.isGroupId(threadId) else { return nil }
+            return threadId
+        }()
         let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes)
         var part = min(max(initial.nextPart, 0), parts.count)
         var job = initial
@@ -675,9 +678,9 @@ public final class DeliveryEngine {
         guard let directory = mediaDirectory else { return .ignored }
         let selfId = identity()?.0.directId
         let groupId = header.groupId
-        let group = groupId.flatMap { store.group($0) }
-        if let groupId, let group, (!group.members.contains(peerId) || !(selfId.map(group.members.contains) ?? false)) {
-            return .ignored
+        if let groupId, let group = store.group(groupId) {
+            let selfOk = selfId.map { group.members.contains($0) } ?? false
+            if !group.members.contains(peerId) || !selfOk { return .ignored }
         }
         let threadId = groupId ?? peerId
         let senderId = groupId == nil ? nil : peerId

@@ -111,11 +111,15 @@ final class WebRTCTransport: PeerTransport {
             guard let session = sessions[from], let connection = session.connection else { return }
             guard await connection.setRemote(RTCSessionDescription(type: .answer, sdp: sdp)) else { return close(from) }
             session.remoteReady = true
-            drainIce(session)
+            await drainIce(session)
         case let .ice(_, from, candidate, sdpMid, sdpMLineIndex):
             guard let session = sessions[from] else { return }
             let ice = RTCIceCandidate(sdp: candidate, sdpMLineIndex: Int32(sdpMLineIndex ?? 0), sdpMid: sdpMid ?? "0")
-            if session.remoteReady { session.connection?.add(ice) { _ in } } else { session.pendingIce.append(ice) }
+            if session.remoteReady {
+                try? await session.connection?.add(ice)
+            } else {
+                session.pendingIce.append(ice)
+            }
         default:
             break
         }
@@ -134,14 +138,16 @@ final class WebRTCTransport: PeerTransport {
         guard let session = newSession(peerId, opened: opened), let connection = session.connection else { return }
         guard await connection.setRemote(RTCSessionDescription(type: .offer, sdp: sdp)) else { return close(peerId) }
         session.remoteReady = true
-        drainIce(session)
+        await drainIce(session)
         guard let answer = await connection.create(offer: false), await connection.setLocal(answer) else { return close(peerId) }
         _ = await bootstrap.sendNegotiation(.answer(to: peerId, from: selfId, sdp: answer.sdp))
         Task { @DirectActor in _ = await self.awaitOpen(session) }
     }
 
-    private func drainIce(_ session: Session) {
-        session.pendingIce.forEach { session.connection?.add($0) { _ in } }
+    private func drainIce(_ session: Session) async {
+        for ice in session.pendingIce {
+            try? await session.connection?.add(ice)
+        }
         session.pendingIce.removeAll()
     }
 
