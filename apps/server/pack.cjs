@@ -9,7 +9,7 @@ const signalingDest = path.join(appDir, 'build', 'signaling');
 function copySignaling() {
   fs.rmSync(signalingDest, { recursive: true, force: true });
   fs.mkdirSync(signalingDest, { recursive: true });
-  for (const name of ['createServer.cjs', 'hub.cjs', 'verify.cjs']) {
+  for (const name of ['createServer.cjs', 'hub.cjs', 'verify.cjs', 'httpHandler.cjs', 'httpHub.cjs', 'store.cjs']) {
     fs.copyFileSync(path.join(signalingSrc, name), path.join(signalingDest, name));
   }
   const serverFile = path.join(signalingDest, 'createServer.cjs');

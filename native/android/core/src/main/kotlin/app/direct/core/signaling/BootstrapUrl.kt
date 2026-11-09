@@ -10,6 +10,19 @@ object BootstrapUrl {
     /** Bumped when the public hosted bootstrap became the default. */
     const val HOSTED_DEFAULT_VERSION = 1
 
+    fun usesHttpSignal(url: String): Boolean {
+        val value = url.trim()
+        return value.startsWith("wss://", ignoreCase = true) || value.startsWith("https://", ignoreCase = true)
+    }
+
+    fun httpSignalUrl(url: String): String {
+        val next = url.trim()
+            .replace(Regex("^ws://", RegexOption.IGNORE_CASE), "http://")
+            .replace(Regex("^wss://", RegexOption.IGNORE_CASE), "https://")
+            .trimEnd('/')
+        return if (next.endsWith("/signal")) next else "$next/signal"
+    }
+
     fun storedOrDefault(stored: String?): String {
         val value = stored?.trim().orEmpty()
         return value.ifEmpty { DEFAULT }

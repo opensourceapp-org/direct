@@ -13,7 +13,7 @@ import {
   signBytes,
   toPublicIdentity,
 } from '@direct/crypto';
-import { aadFor, applyHostedDefault, decodeEnvelope, encodeEnvelope, HOSTED_BOOTSTRAP_URL, HOSTED_DEFAULT_VERSION, nextDelayMs, normalizeBootstrapUrl, signalProofMessage } from '@direct/protocol';
+import { aadFor, applyHostedDefault, decodeEnvelope, encodeEnvelope, HOSTED_BOOTSTRAP_URL, HOSTED_DEFAULT_VERSION, httpSignalUrl, nextDelayMs, normalizeBootstrapUrl, signalProofMessage, usesHttpSignal } from '@direct/protocol';
 import type { Envelope } from '@direct/protocol';
 import { base64UrlToBytes, bytesToBase64Url, text, utf8 } from '@direct/shared';
 
@@ -80,6 +80,9 @@ describe('bootstrap address contract', () => {
       version: HOSTED_DEFAULT_VERSION,
     });
     expect(applyHostedDefault('wss://signals.example.com', 0)).toEqual({ url: 'wss://signals.example.com', version: HOSTED_DEFAULT_VERSION });
+    expect(usesHttpSignal(HOSTED_BOOTSTRAP_URL)).toBe(true);
+    expect(httpSignalUrl(HOSTED_BOOTSTRAP_URL)).toBe('https://direct-signaling.apps.grok.bot/signal');
+    expect(usesHttpSignal('ws://192.168.1.20:8787')).toBe(false);
   });
 
   test('both phones typing the same computer in different ways get one address', () => {
@@ -349,6 +352,33 @@ describe('signaling contract', () => {
       for (const socket of sockets) socket.close();
       await server.close();
     }
+  });
+
+  test('HTTP long-poll signaling finds another phone by DIRECT ID', async () => {
+    const { exchange, createMemoryStore } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/httpHub.cjs'),
+    ) as {
+      createMemoryStore: () => object;
+      exchange: (
+        body: { session?: string; frames?: unknown[]; waitMs?: number },
+        options?: { store?: object },
+      ) => Promise<{ session: string; nonce: string; frames: { kind?: string; nonce?: string; present?: boolean; bundle?: string | null }[] }>;
+    };
+    const store = createMemoryStore();
+    const adaSession = await exchange({ frames: [], waitMs: 0 }, { store });
+    const boSession = await exchange({ frames: [], waitMs: 0 }, { store });
+    expect(adaSession.frames[0]?.kind).toBe('challenge');
+    expect(boSession.frames[0]?.kind).toBe('challenge');
+    await exchange({ session: adaSession.session, frames: [signedHello('ada', adaSession.nonce)], waitMs: 0 }, { store });
+    await exchange({ session: boSession.session, frames: [signedHello('bo', boSession.nonce)], waitMs: 0 }, { store });
+    const lookup = await exchange({
+      session: adaSession.session,
+      frames: [{ kind: 'lookup', requestId: 'req-http', directId: bo }],
+      waitMs: 0,
+    }, { store });
+    const found = lookup.frames.find((frame) => frame.kind === 'lookup');
+    expect(found?.present).toBe(true);
+    expect(found?.bundle).toContain(bo);
   });
 
   test('the operator roster lists a phone only while its socket is open', () => {

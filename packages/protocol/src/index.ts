@@ -5,8 +5,10 @@ export {
   HOSTED_BOOTSTRAP_URL,
   HOSTED_DEFAULT_VERSION,
   applyHostedDefault,
+  httpSignalUrl,
   isLegacyLanDefault,
   normalizeBootstrapUrl,
+  usesHttpSignal,
 } from './bootstrapUrl';
 export { SIGNAL_PROOF_PREFIX, signalProofMessage } from './signalProof';
 export type { BootstrapUrlError, BootstrapUrlResult } from './bootstrapUrl';

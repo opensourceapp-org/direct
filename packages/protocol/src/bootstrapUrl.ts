@@ -102,6 +102,16 @@ export function isLegacyLanDefault(input: string): boolean {
   return privateIpv4(host);
 }
 
+/** Hosted wss:// hubs speak JSON over HTTPS POST /signal. LAN ws:// hubs still use a WebSocket. */
+export function usesHttpSignal(url: string): boolean {
+  return /^(wss|https):\/\//i.test(url.trim());
+}
+
+export function httpSignalUrl(url: string): string {
+  const next = url.trim().replace(/^ws:\/\//i, 'http://').replace(/^wss:\/\//i, 'https://').replace(/\/$/, '');
+  return next.endsWith('/signal') ? next : `${next}/signal`;
+}
+
 export function applyHostedDefault(stored: string | null | undefined, version = 0): { url: string; version: number } {
   if (version >= HOSTED_DEFAULT_VERSION) {
     const value = (stored ?? '').trim();

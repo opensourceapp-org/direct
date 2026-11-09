@@ -10,6 +10,22 @@ public enum BootstrapUrl {
     /// Bumped when the public hosted bootstrap became the default.
     public static let hostedDefaultVersion = 1
 
+    public static func usesHttpSignal(_ url: String) -> Bool {
+        let value = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return value.hasPrefix("wss://") || value.hasPrefix("https://")
+    }
+
+    public static func httpSignalUrl(_ url: String) -> String {
+        var next = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if next.lowercased().hasPrefix("ws://") {
+            next = "http://" + next.dropFirst(5)
+        } else if next.lowercased().hasPrefix("wss://") {
+            next = "https://" + next.dropFirst(6)
+        }
+        while next.hasSuffix("/") { next.removeLast() }
+        return next.hasSuffix("/signal") ? next : next + "/signal"
+    }
+
     public static func storedOrDefault(_ stored: String?) -> String {
         let value = stored?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return value.isEmpty ? defaultUrl : value

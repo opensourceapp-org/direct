@@ -1,12 +1,9 @@
-const { readFileSync, existsSync } = require('node:fs');
-const { join } = require('node:path');
 const { createServer } = require('node:http');
 const { isIP } = require('node:net');
 const { networkInterfaces } = require('node:os');
 const { WebSocketServer } = require('ws');
 const { createSignalHub } = require('./hub.cjs');
-
-const PAGE = join(__dirname, 'index.html');
+const { handleHttp } = require('./httpHandler.cjs');
 
 function lanUrls(port) {
   return Object.values(networkInterfaces())
@@ -76,9 +73,17 @@ function createSignalingServer() {
   const hub = createSignalHub();
   const server = createServer((request, response) => {
     const url = String(request.url || '/').split('?')[0];
-    if (url === '/health') {
-      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      response.end(JSON.stringify({ ok: true, service: 'direct-signaling', contract: 1 }));
+    if (url !== '/roster') {
+      handleHttp(request, response).then((handled) => {
+        if (handled) return;
+        response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+        response.end('DIRECT signaling. Public bundles, presence, and WebRTC session descriptions only.\n');
+      }).catch(() => {
+        if (!response.headersSent) {
+          response.writeHead(500, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+          response.end(JSON.stringify({ error: 'Signaling is temporarily unavailable.' }));
+        }
+      });
       return;
     }
     if (url === '/roster') {
@@ -89,19 +94,7 @@ function createSignalingServer() {
       }
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       response.end(JSON.stringify({ users: hub.roster() }));
-      return;
     }
-    if ((url === '/' || url === '/index.html') && existsSync(PAGE)) {
-      response.writeHead(200, {
-        'content-type': 'text/html; charset=utf-8',
-        'cache-control': 'no-store',
-        'x-content-type-options': 'nosniff',
-      });
-      response.end(readFileSync(PAGE));
-      return;
-    }
-    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-    response.end('DIRECT signaling. Public bundles, presence, and WebRTC session descriptions only.\n');
   });
   const ipConnections = new Map();
   const connectTimes = new Map();
