@@ -354,6 +354,56 @@ describe('signaling contract', () => {
     }
   });
 
+  test('rewritten hosted paths still speak signaling JSON', async () => {
+    const { handler } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/httpHandler.cjs'),
+    ) as {
+      handler: (
+        request: { method?: string; url?: string; headers?: Record<string, string>; body?: string },
+        response: {
+          setHeader(name: string, value: string): void;
+          writeHead(status: number, headers?: Record<string, string>): void;
+          end(body?: string): void;
+        },
+      ) => Promise<void>;
+    };
+
+    function call(method: string, url: string, body?: object, headers: Record<string, string> = {}) {
+      return new Promise<{ status: number; type: string; body: string }>((resolve) => {
+        let status = 0;
+        const outHeaders: Record<string, string> = {};
+        const request = { method, url, headers, body: body === undefined ? '' : JSON.stringify(body) };
+        const response = {
+          setHeader(name: string, value: string) {
+            outHeaders[name.toLowerCase()] = value;
+          },
+          writeHead(code: number, next?: Record<string, string>) {
+            status = code;
+            for (const [name, value] of Object.entries(next || {})) outHeaders[name.toLowerCase()] = value;
+          },
+          end(payload?: string) {
+            resolve({ status, type: outHeaders['content-type'] || '', body: String(payload || '') });
+          },
+        };
+        void handler(request, response);
+      });
+    }
+
+    const posted = await call('POST', '/api', { frames: [], waitMs: 0 });
+    expect(posted.status).toBe(200);
+    expect(posted.type).toMatch(/application\/json/);
+    expect(JSON.parse(posted.body).frames[0].kind).toBe('challenge');
+
+    const signal = await call('POST', '/signal', { frames: [], waitMs: 0 });
+    expect(JSON.parse(signal.body).frames[0].kind).toBe('challenge');
+
+    const health = await call('GET', '/api');
+    expect(JSON.parse(health.body)).toEqual({ ok: true, service: 'direct-signaling', contract: 1 });
+
+    const forwarded = await call('GET', '/api', undefined, { 'x-forwarded-uri': '/health' });
+    expect(JSON.parse(forwarded.body)).toEqual({ ok: true, service: 'direct-signaling', contract: 1 });
+  });
+
   test('HTTP long-poll signaling finds another phone by DIRECT ID', async () => {
     const { exchange, createMemoryStore } = createRequire(__filename)(
       path.resolve(__dirname, '../infrastructure/signaling/httpHub.cjs'),

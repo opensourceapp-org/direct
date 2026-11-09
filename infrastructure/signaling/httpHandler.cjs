@@ -50,8 +50,49 @@ function handleOptions(response) {
   response.end();
 }
 
+function headerValue(request, name) {
+  const headers = request.headers || {};
+  const value = headers[name] || headers[name.toLowerCase()];
+  if (Array.isArray(value)) return String(value[0] || '');
+  return String(value || '');
+}
+
+function normalizePath(value) {
+  let path = String(value || '').trim();
+  if (!path) return '';
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      path = new URL(path).pathname;
+    } catch {
+      path = path.replace(/^https?:\/\/[^/]+/i, '') || '/';
+    }
+  }
+  path = path.split('?')[0];
+  if (!path.startsWith('/')) path = `/${path}`;
+  if (path.length > 1) path = path.replace(/\/+$/, '');
+  return path;
+}
+
+function isFunctionPath(path) {
+  return path === '/api' || path === '/index.js' || path === '/api/index' || path === '/api/index.js';
+}
+
 function pathOf(request) {
-  return String(request.url || '/').split('?')[0];
+  const candidates = [
+    request.url,
+    headerValue(request, 'x-forwarded-uri'),
+    headerValue(request, 'x-invoke-path'),
+    headerValue(request, 'x-matched-path'),
+    headerValue(request, 'x-vercel-original-path'),
+  ]
+    .map(normalizePath)
+    .filter(Boolean);
+  const original = candidates.find((path) => !isFunctionPath(path));
+  return original || candidates[0] || '/';
+}
+
+function isHealthPath(url) {
+  return url === '/health' || url.endsWith('/health');
 }
 
 async function handleHttp(request, response) {
@@ -63,12 +104,13 @@ async function handleHttp(request, response) {
     return true;
   }
 
-  if (method === 'GET' && url === '/health') {
+  if (method === 'GET' && isHealthPath(url)) {
     sendJson(response, 200, { ok: true, service: 'direct-signaling', contract: 1 });
     return true;
   }
 
-  if (method === 'POST' && (url === '/signal' || url === '/')) {
+  // Hosted apps rewrite /signal to /api, so every POST is a long-poll exchange.
+  if (method === 'POST') {
     let parsed;
     try {
       const raw = await readBody(request);
@@ -77,8 +119,9 @@ async function handleHttp(request, response) {
       sendJson(response, 400, { error: 'Expected a JSON signaling body.' });
       return true;
     }
-    if (parsed.session == null && request.headers['x-direct-session']) {
-      parsed.session = String(request.headers['x-direct-session']);
+    const headers = request.headers || {};
+    if (parsed.session == null && (headers['x-direct-session'] || headers['X-Direct-Session'])) {
+      parsed.session = String(headers['x-direct-session'] || headers['X-Direct-Session']);
     }
     try {
       const result = await exchange(parsed);
@@ -101,8 +144,8 @@ async function handleHttp(request, response) {
     return true;
   }
 
-  if (method === 'GET' && url === '/signal') {
-    sendJson(response, 200, { ok: true, service: 'direct-signaling', use: 'POST JSON { session, frames, waitMs }' });
+  if (method === 'GET') {
+    sendJson(response, 200, { ok: true, service: 'direct-signaling', contract: 1 });
     return true;
   }
 
