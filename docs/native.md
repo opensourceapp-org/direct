@@ -57,7 +57,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 Open `native/android` in Android Studio and run the `app` configuration. The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. Cleartext `ws://` is allowed by `network_security_config.xml` so a LAN bootstrap works. Use `wss://` for a public bootstrap and tighten that config.
 
-The app process owns one `DirectNode` on a single-thread dispatcher. Foreground reconnects the bootstrap immediately. Background schedules a WorkManager pass (a one-shot retry and a 15-minute periodic job that requires a network).
+The app process owns one `DirectNode` on a single-thread dispatcher. Foreground reconnects the bootstrap immediately. Background starts a connected foreground service so inbound messages can still arrive and raise a local notification, and schedules a WorkManager pass for the outgoing queue (a one-shot retry and a 15-minute periodic job that requires a network).
 
 ## Xcode
 
@@ -67,7 +67,7 @@ Open `native/ios/Direct.xcodeproj`. The project file is in the repository, so th
 
 `App.xcodeproj` was the previous shell and is not part of this tree. A checkout that still has `apps/mobile/ios/App/App.xcodeproj` on disk, without `project.pbxproj` inside it, makes Xcode say the project does not contain a project definition file. Close that window and delete the leftover `apps/mobile/ios` directory. `project.yml` is only for regenerating `Direct.xcodeproj` with XcodeGen after the spec changes.
 
-`Info.plist` allows local networking and cleartext `ws://` for a development bootstrap, and registers `app.direct.messaging.delivery` as a `BGAppRefreshTask`. iOS decides when that task runs. Leaving the app also starts a short background flush. There is no push service, so a suspended or force-quit app cannot receive.
+`Info.plist` allows local networking and cleartext `ws://` for a development bootstrap, and registers `app.direct.messaging.delivery` as a `BGAppRefreshTask`. iOS decides when that task runs. Leaving the app asks iOS for a short keep-alive so inbound messages can still notify. After iOS suspends the process, or after a force-quit, nothing can arrive until the app opens again: there is no Apple push service.
 
 `DirectCore` itself builds on Linux:
 
@@ -108,4 +108,4 @@ This repository's CI environment can compile the Android debug APK and run the K
 - The seal is one-shot X25519 + HKDF-SHA256 + AES-256-GCM. It is not the Signal Double Ratchet.
 - The local store is one encrypted snapshot file, not a SQL database.
 - Writing to the data channel is Sent. Delivered requires the recipient's signed `ack`.
-- A closed app cannot receive. Android retries while WorkManager is allowed to run. iOS retries on the next foreground or background refresh. A call is live only: there is no push, so a force-quit phone cannot ring. Android keeps a call notification so the microphone can stay on while the screen is locked. iOS keeps the audio session while the app is in the background. The same STUN servers are used. A symmetric NAT still needs a TURN server you operate, or the call stays on Connecting.
+- Android stays connected after you leave the app or lock the screen (a silent “DIRECT is connected” notification) and shows a local notification for each inbound message. A force-stop still cannot receive. iOS shows a local notification while the process is still running (locked, or for a short time after you leave). After iOS suspends or you swipe the app away, inbound messages wait on the sender. A call is live only: there is no Apple/Google push, so a force-quit phone cannot ring. Android keeps a call notification so the microphone can stay on while the screen is locked. iOS keeps the audio session while the app is in the background. The same STUN servers are used. A symmetric NAT still needs a TURN server you operate, or the call stays on Connecting.

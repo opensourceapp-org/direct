@@ -140,6 +140,37 @@ class DirectNodeTest {
     }
 
     @Test
+    fun `an inbound message raises an alert the app can show while the screen is off`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-alert")
+        val bo = node(MemorySecretStore(), "bo-alert")
+        val alerts = mutableListOf<app.direct.core.node.InboundAlert>()
+        bo.onInboundAlert = { alerts.add(it) }
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        ada.setBootstrap("10.0.0.9")
+        bo.setBootstrap("10.0.0.9")
+        settle()
+        val adaId = ada.state.value.profile!!.directId
+        val boId = bo.state.value.profile!!.directId
+        ada.addContact(boId)
+        ada.send(boId, "Are you there?")
+        settle()
+        assertEquals(1, alerts.size)
+        assertEquals(adaId, alerts.single().threadId)
+        assertEquals("Ada", alerts.single().title)
+        assertEquals("Are you there?", alerts.single().body)
+        bo.acceptRequest(adaId)
+        settle()
+        ada.setStatus("Out")
+        settle()
+        assertEquals(1, alerts.size)
+        ada.close()
+        bo.close()
+    }
+
+    @Test
     fun `a shared profile saves the server`() = runTest {
         val ada = node(MemorySecretStore(), "ada-share")
         val bo = node(MemorySecretStore(), "bo-share")

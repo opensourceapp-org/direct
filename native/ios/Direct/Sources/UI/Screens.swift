@@ -115,14 +115,27 @@ struct OnboardingView: View {
 }
 
 struct HomeView: View {
+    @EnvironmentObject private var model: AppModel
+
     var body: some View {
-        TabView {
-            NavigationStack { ChatsView() }.tabItem { Label("Chats", systemImage: "bubble.left.and.bubble.right") }
-            NavigationStack { ContactsView() }.tabItem { Label("Contacts", systemImage: "person.2") }
-            NavigationStack { NetworkView() }.tabItem { Label("Network", systemImage: "antenna.radiowaves.left.and.right") }
-            NavigationStack { IdentityView() }.tabItem { Label("Settings", systemImage: "gearshape") }
+        TabView(selection: $model.tab) {
+            NavigationStack(path: $model.chatPath) { ChatsView() }
+                .tabItem { Label("Chats", systemImage: "bubble.left.and.bubble.right") }
+                .tag(HomeTab.chats)
+            NavigationStack { ContactsView() }
+                .tabItem { Label("Contacts", systemImage: "person.2") }
+                .tag(HomeTab.contacts)
+            NavigationStack { NetworkView() }
+                .tabItem { Label("Network", systemImage: "antenna.radiowaves.left.and.right") }
+                .tag(HomeTab.network)
+            NavigationStack { IdentityView() }
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(HomeTab.settings)
         }
         .tint(Ink.accent)
+        .onChange(of: model.chatPath) { path in
+            if let peer = path.last { MessageAlerts.cancel(threadId: peer) }
+        }
     }
 }
 

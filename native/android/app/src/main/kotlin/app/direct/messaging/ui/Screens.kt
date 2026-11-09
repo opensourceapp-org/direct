@@ -124,6 +124,8 @@ import app.direct.core.protocol.ProfileCards
 import app.direct.core.store.Direction
 import app.direct.core.store.MessageRecord
 import app.direct.core.store.Profile
+import app.direct.messaging.DirectApp
+import app.direct.messaging.platform.MessageAlerts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -209,9 +211,21 @@ private fun Onboarding(node: DirectNode) {
 
 @Composable
 private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
+    val context = LocalContext.current
+    val app = context.applicationContext as DirectApp
+    val pending by app.openPeer.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.CHATS) }
     var openPeer by rememberSaveable { mutableStateOf<String?>(null) }
     var newGroup by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(pending) {
+        val target = pending ?: return@LaunchedEffect
+        openPeer = target
+        newGroup = false
+        app.consumeOpenPeer()
+    }
+    LaunchedEffect(openPeer) {
+        openPeer?.let { MessageAlerts.cancel(context, it) }
+    }
     val peer = openPeer
     if (peer != null) {
         BackHandler { openPeer = null }

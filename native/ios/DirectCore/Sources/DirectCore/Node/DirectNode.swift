@@ -43,6 +43,20 @@ public struct Conversation: Equatable, Identifiable, Sendable {
     }
 }
 
+public struct InboundAlert: Equatable, Sendable {
+    public let threadId: String
+    public let title: String
+    public let body: String
+    public let messageId: String
+
+    public init(threadId: String, title: String, body: String, messageId: String) {
+        self.threadId = threadId
+        self.title = title
+        self.body = body
+        self.messageId = messageId
+    }
+}
+
 public struct NodeState: Equatable, Sendable {
     public var ready = false
     public var profile: Profile?
@@ -88,6 +102,9 @@ public final class DirectNode {
 
     /// Media (microphone, camera, and the call's own peer connection) listens here.
     public var onCallEvent: ((CallEvent) -> Void)?
+
+    /// A new inbound chat item. The app shows a notification when the UI is not on screen.
+    public var onInboundAlert: ((InboundAlert) -> Void)?
 
     private var callPlain: String?
     private lazy var board: CallBoard = {
@@ -573,6 +590,7 @@ public final class DirectNode {
         )
         try? engine?.recover()
         engine?.onCall = { [weak self] text in self?.callPlain = text }
+        engine?.onInbound = { [weak self] message in self?.notifyInbound(message) }
         let next = transportFactory(bootstrap, identity.directId)
         next.setListener(listener)
         transport = next
@@ -789,10 +807,30 @@ public final class DirectNode {
 
     private func recordCall(_ peerId: String, _ id: String, _ outgoing: Bool, _ label: String, _ missed: Bool) {
         let now = clock()
-        store.putMessage(MessageRecord(
+        let message = MessageRecord(
             id: id, peerId: peerId, direction: outgoing ? .outgoing : .incoming,
             body: label, createdAt: now, read: !missed, mediaKind: "call"
-        ))
+        )
+        store.putMessage(message)
         try? store.save()
+        if !outgoing && missed { notifyInbound(message) }
+    }
+
+    private func notifyInbound(_ message: MessageRecord) {
+        let threadId = message.peerId
+        let group = store.group(threadId)
+        let sender = store.contact(message.senderId ?? threadId)
+        let title = group?.name ?? sender?.name ?? threadId
+        let body: String
+        if message.mediaKind == "group" || message.mediaKind == "call" {
+            body = message.body
+        } else if let kind = message.mediaKind, !kind.isEmpty {
+            body = MediaNotes.label(kind) ?? "Attachment"
+        } else {
+            let trimmed = message.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            body = String((trimmed.isEmpty ? "New message" : trimmed).prefix(140))
+        }
+        onInboundAlert?(InboundAlert(threadId: threadId, title: title, body: body, messageId: message.id))
+    }
     }
 }

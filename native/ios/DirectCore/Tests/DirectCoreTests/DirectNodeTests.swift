@@ -136,6 +136,36 @@ final class DirectNodeTests: XCTestCase {
         bo.close()
     }
 
+    func testAnInboundMessageRaisesAnAlertTheAppCanShowWhileTheScreenIsOff() async throws {
+        let ada = node(MemorySecretStore(), "ada-alert")
+        let bo = node(MemorySecretStore(), "bo-alert")
+        var alerts: [InboundAlert] = []
+        bo.onInboundAlert = { alerts.append($0) }
+        await ada.start()
+        await bo.start()
+        _ = try ada.createIdentity("Ada")
+        _ = try bo.createIdentity("Bo")
+        try ada.setBootstrap("10.0.0.9")
+        try bo.setBootstrap("10.0.0.9")
+        await settle()
+        let adaId = ada.state.profile!.directId
+        let boId = bo.state.profile!.directId
+        try await ada.addContact(boId)
+        try ada.send(boId, "Are you there?")
+        await settle()
+        XCTAssertEqual(1, alerts.count)
+        XCTAssertEqual(adaId, alerts.first?.threadId)
+        XCTAssertEqual("Ada", alerts.first?.title)
+        XCTAssertEqual("Are you there?", alerts.first?.body)
+        try bo.acceptRequest(adaId)
+        await settle()
+        try ada.setStatus("Out")
+        await settle()
+        XCTAssertEqual(1, alerts.count)
+        ada.close()
+        bo.close()
+    }
+
     func testADisconnectedBootstrapIsReportedAsOfflineNotAsAMissingPhone() async throws {
         let ada = node(MemorySecretStore(), "ada3")
         await ada.start()

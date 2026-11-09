@@ -42,6 +42,9 @@ public final class DeliveryEngine {
     /// Plaintext of a call signal, invoked on DirectActor before `receive` returns.
     public var onCall: ((String) -> Void)?
 
+    /// A new incoming chat message, photo, or group invite the UI can turn into a notification.
+    public var onInbound: ((MessageRecord) -> Void)?
+
     public init(
         store: LocalStore,
         identity: @escaping () -> (IdentityKeys, String)?,
@@ -538,9 +541,11 @@ public final class DeliveryEngine {
             try store.save()
             return .duplicate
         }
-        store.putMessage(MessageRecord(id: envelope.id, peerId: peerId, direction: .incoming, body: plaintext, createdAt: envelope.createdAt))
+        let stored = MessageRecord(id: envelope.id, peerId: peerId, direction: .incoming, body: plaintext, createdAt: envelope.createdAt)
+        store.putMessage(stored)
         try queueReceipt(contact, .ack, envelope.id)
         try store.save()
+        onInbound?(stored)
         return .stored
     }
 
@@ -713,12 +718,14 @@ public final class DeliveryEngine {
         try? FileManager.default.removeItem(at: partsDir)
         let already = store.message(header.mediaId)?.mediaFile != nil
         let caption = header.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? label : header.caption
-        store.putMessage(MessageRecord(
+        let stored = MessageRecord(
             id: header.mediaId, peerId: threadId, direction: .incoming, body: caption, createdAt: createdAt,
             mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, mediaFile: fileName, senderId: senderId
-        ))
+        )
+        store.putMessage(stored)
         try queueReceipt(contact, .ack, header.mediaId)
         try store.save()
+        if !already { onInbound?(stored) }
         return already ? .duplicate : .stored
     }
 
@@ -738,7 +745,7 @@ public final class DeliveryEngine {
         )
         store.putGroup(group)
         if existing == nil {
-            store.putMessage(MessageRecord(
+            let stored = MessageRecord(
                 id: Encoding.newId("sys"),
                 peerId: group.id,
                 direction: .incoming,
@@ -746,7 +753,9 @@ public final class DeliveryEngine {
                 createdAt: createdAt,
                 mediaKind: "group",
                 senderId: peerId
-            ))
+            )
+            store.putMessage(stored)
+            onInbound?(stored)
         }
         try store.save()
         return .stored
@@ -761,9 +770,11 @@ public final class DeliveryEngine {
             try store.save()
             return .duplicate
         }
-        store.putMessage(MessageRecord(id: mid, peerId: group.id, direction: .incoming, body: body, createdAt: createdAt, senderId: peerId))
+        let stored = MessageRecord(id: mid, peerId: group.id, direction: .incoming, body: body, createdAt: createdAt, senderId: peerId)
+        store.putMessage(stored)
         try queueReceipt(contact, .ack, mid)
         try store.save()
+        onInbound?(stored)
         return .stored
     }
 

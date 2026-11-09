@@ -60,6 +60,13 @@ data class Conversation(
     val memberCount: Int = 0,
 )
 
+data class InboundAlert(
+    val threadId: String,
+    val title: String,
+    val body: String,
+    val messageId: String,
+)
+
 data class NodeState(
     val ready: Boolean = false,
     val profile: Profile? = null,
@@ -115,6 +122,9 @@ class DirectNode(
 
     /** Media (microphone, camera, and the call's own peer connection) listens here. */
     var onCallEvent: ((CallEvent) -> Unit)? = null
+
+    /** A new inbound chat item. The app shows a notification when the UI is not on screen. */
+    var onInboundAlert: ((InboundAlert) -> Unit)? = null
 
     private val board by lazy {
         CallBoard(
@@ -521,6 +531,7 @@ class DirectNode(
         engine = DeliveryEngine(store, { keys?.let { it to profile.deviceId } }, linksProxy, clock, random, ttlMs, mediaDirectory = mediaDir).also {
             it.recover()
             it.onCall = { text -> callPlain = text }
+            it.onInbound = { notifyInbound(it) }
         }
         transport = transportFactory(bootstrap, identity.directId, scope).also { it.setListener(listener) }
         bootstrap.announce(identity.directId, Bundles.create(identity, profile.name, profile.deviceId).encode()) { nonce ->
@@ -713,18 +724,31 @@ class DirectNode(
 
     private fun recordCall(peerId: String, id: String, outgoing: Boolean, label: String, missed: Boolean) {
         val now = clock()
-        store.putMessage(
-            MessageRecord(
-                id = id,
-                peerId = peerId,
-                direction = if (outgoing) Direction.OUTGOING else Direction.INCOMING,
-                body = label,
-                createdAt = now,
-                read = !missed,
-                mediaKind = "call",
-            ),
+        val message = MessageRecord(
+            id = id,
+            peerId = peerId,
+            direction = if (outgoing) Direction.OUTGOING else Direction.INCOMING,
+            body = label,
+            createdAt = now,
+            read = !missed,
+            mediaKind = "call",
         )
+        store.putMessage(message)
         store.save()
+        if (!outgoing && missed) notifyInbound(message)
+    }
+
+    private fun notifyInbound(message: MessageRecord) {
+        val threadId = message.peerId
+        val group = store.group(threadId)
+        val sender = store.contact(message.senderId ?: threadId)
+        val title = group?.name ?: sender?.name ?: threadId
+        val body = when {
+            message.mediaKind == "group" || message.mediaKind == "call" -> message.body
+            !message.mediaKind.isNullOrBlank() -> MediaNotes.label(message.mediaKind) ?: "Attachment"
+            else -> message.body.trim().ifBlank { "New message" }.take(140)
+        }
+        onInboundAlert?.invoke(InboundAlert(threadId, title, body, message.id))
     }
 
     private suspend fun <T> onNode(block: suspend () -> T): T = withContext(dispatcher) { block() }

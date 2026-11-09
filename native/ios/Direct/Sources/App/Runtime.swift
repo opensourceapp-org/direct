@@ -47,11 +47,12 @@ final class NetworkMonitor {
     }
 }
 
-/// iOS suspends the app shortly after it leaves the screen. Pending messages get one short
-/// background window right away, then BGAppRefreshTask passes when the system allows.
-/// Nothing can arrive while the app is suspended: there is no push service in this design.
+/// iOS suspends the app shortly after it leaves the screen. A background task keeps the
+/// bootstrap up for that short window so inbound messages can still notify. After suspend,
+/// the next chance is BGAppRefreshTask or opening the app. There is no Apple push service.
 enum BackgroundDelivery {
     static let taskId = "app.direct.messaging.delivery"
+    private static var keepAliveId: UIBackgroundTaskIdentifier = .invalid
 
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskId, using: nil) { task in
@@ -69,6 +70,22 @@ enum BackgroundDelivery {
         try? BGTaskScheduler.shared.submit(request)
     }
 
+    /// Ask iOS not to suspend yet so the bootstrap can keep receiving.
+    @MainActor
+    static func keepAlive() {
+        endKeepAlive()
+        keepAliveId = UIApplication.shared.beginBackgroundTask(withName: "direct.online") {
+            endKeepAlive()
+        }
+    }
+
+    @MainActor
+    static func endKeepAlive() {
+        guard keepAliveId != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(keepAliveId)
+        keepAliveId = .invalid
+    }
+
     private static func handle(_ task: BGAppRefreshTask) {
         let work = Task { @DirectActor in
             let pending = await Runtime.shared.node.backgroundFlush(budgetMs: 25_000)
@@ -76,22 +93,5 @@ enum BackgroundDelivery {
             task.setTaskCompleted(success: true)
         }
         task.expirationHandler = { work.cancel() }
-    }
-
-    /// Called when the app moves to the background with messages still waiting for a receipt.
-    @MainActor
-    static func flushBeforeSuspension() {
-        var identifier: UIBackgroundTaskIdentifier = .invalid
-        identifier = UIApplication.shared.beginBackgroundTask(withName: "direct.flush") {
-            UIApplication.shared.endBackgroundTask(identifier)
-            identifier = .invalid
-        }
-        Task { @DirectActor in
-            let pending = await Runtime.shared.node.backgroundFlush(budgetMs: 20_000)
-            if pending > 0 { schedule() }
-            await MainActor.run {
-                if identifier != .invalid { UIApplication.shared.endBackgroundTask(identifier) }
-            }
-        }
     }
 }
