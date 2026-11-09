@@ -1,6 +1,8 @@
 package app.direct.core.protocol
 
+import app.direct.core.crypto.DirectIds
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -11,7 +13,7 @@ import kotlinx.serialization.json.intOrNull
  * an invite that cannot be written now is dropped. The bootstrap never sees this JSON.
  */
 object CallNotes {
-    val OPS = setOf("invite", "accept", "reject", "busy", "hangup", "offer", "answer", "ice")
+    val OPS = setOf("invite", "accept", "reject", "busy", "hangup", "offer", "answer", "ice", "member")
 
     data class Note(
         val op: String,
@@ -21,6 +23,9 @@ object CallNotes {
         val candidate: String? = null,
         val mid: String? = null,
         val line: Int? = null,
+        val groupId: String? = null,
+        val peer: String? = null,
+        val members: List<String> = emptyList(),
     )
 
     fun encode(note: Note): String = buildString {
@@ -31,6 +36,16 @@ object CallNotes {
         note.candidate?.let { append(",\"candidate\":").append(quote(it)) }
         note.mid?.let { append(",\"mid\":").append(quote(it)) }
         note.line?.let { append(",\"line\":").append(it) }
+        note.groupId?.let { append(",\"groupId\":").append(quote(it)) }
+        note.peer?.let { append(",\"peer\":").append(quote(it)) }
+        if (note.members.isNotEmpty()) {
+            append(",\"members\":[")
+            note.members.forEachIndexed { index, id ->
+                if (index > 0) append(',')
+                append(quote(id))
+            }
+            append(']')
+        }
         append('}')
     }
 
@@ -50,11 +65,18 @@ object CallNotes {
         val candidate = json.string("candidate")?.takeIf { it.length in 1..8_000 }
         val mid = json.string("mid")?.takeIf { it.length in 1..32 }
         val line = (json["line"] as? JsonPrimitive)?.intOrNull?.takeIf { it in 0..64 }
+        val groupId = json.string("groupId")?.takeIf { GroupNotes.isGroupId(it) }
+        val peer = json.string("peer")?.let(DirectIds::normalize)
+        val members = (json["members"] as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.let(DirectIds::normalize) }
+            ?.distinct()
+            .orEmpty()
         return when (op) {
-            "invite" -> Note(op, id, kind = kind ?: "audio")
-            "offer", "answer" -> if (sdp == null) null else Note(op, id, sdp = sdp)
-            "ice" -> if (candidate == null) null else Note(op, id, candidate = candidate, mid = mid ?: "0", line = line ?: 0)
-            else -> Note(op, id)
+            "invite" -> Note(op, id, kind = kind ?: "audio", groupId = groupId, members = members)
+            "offer", "answer" -> if (sdp == null) null else Note(op, id, sdp = sdp, groupId = groupId)
+            "ice" -> if (candidate == null) null else Note(op, id, candidate = candidate, mid = mid ?: "0", line = line ?: 0, groupId = groupId)
+            "member" -> if (peer.isNullOrBlank()) null else Note(op, id, peer = peer, groupId = groupId)
+            else -> Note(op, id, groupId = groupId)
         }
     }
 

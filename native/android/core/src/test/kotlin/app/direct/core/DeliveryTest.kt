@@ -24,7 +24,10 @@ import app.direct.core.delivery.MessageState.SENDING
 import app.direct.core.delivery.MessageState.SENT
 import app.direct.core.delivery.PeerLinks
 import app.direct.core.delivery.ReceiveOutcome
+import app.direct.core.protocol.Envelopes
+import app.direct.core.protocol.GroupNotes
 import app.direct.core.store.ContactRecord
+import app.direct.core.store.GroupRecord
 import app.direct.core.store.LocalStore
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -226,5 +229,64 @@ class DeliveryEngineTest {
         val forged = Encoding.text(bytes).replace("\"signature\":\"", "\"signature\":\"A")
         assertEquals(ReceiveOutcome.IGNORED, bo.engine.receive(ada.keys.directId, Encoding.utf8(forged)))
         assertEquals(ReceiveOutcome.STORED, bo.engine.receive(ada.keys.directId, bytes))
+    }
+
+    @Test
+    fun `a group text is fanned out and accepted when every member acks`() = runTest {
+        var now = 1_000L
+        val adaLinks = Links().apply { reachable = true }
+        val boLinks = Links().apply { reachable = true }
+        val cyLinks = Links().apply { reachable = true }
+        val ada = Device("Ada", { now }, adaLinks)
+        val bo = Device("Bo", { now }, boLinks)
+        val cy = Device("Cy", { now }, cyLinks)
+        ada.know(bo)
+        ada.know(cy)
+        bo.know(ada)
+        bo.know(cy)
+        cy.know(ada)
+        cy.know(bo)
+        val members = listOf(ada.keys.directId, bo.keys.directId, cy.keys.directId)
+        val group = GroupRecord("grp_" + "ab".repeat(16), "Weekend", members, ada.keys.directId, now)
+        ada.store.putGroup(group)
+        bo.store.putGroup(group)
+        cy.store.putGroup(group)
+
+        ada.engine.queueGroupInvite(group, ada.keys.directId)
+        ada.engine.flush()
+        fun deliver(to: Device, from: Device, payloads: List<ByteArray>) {
+            for (payload in payloads) {
+                val header = Envelopes.peek(payload) ?: continue
+                if (header.to == to.keys.directId && header.from == from.keys.directId) {
+                    to.engine.receive(from.keys.directId, payload)
+                }
+            }
+        }
+        deliver(bo, ada, adaLinks.sent)
+        deliver(cy, ada, adaLinks.sent)
+        assertEquals("Weekend", bo.store.group(group.id)?.name)
+
+        adaLinks.sent.clear()
+        val message = ada.engine.queueGroupText(group, ada.keys.directId, "hello all")
+        assertEquals("hello all", GroupNotes.parsePrefixed(GroupNotes.encodeText(group.id, message.id, "hello all"))?.body)
+        assertEquals(2, ada.store.queue().count { it.messageId == message.id })
+        ada.engine.flush()
+        assertEquals(SENT, ada.store.message(message.id)?.state)
+        assertEquals(2, adaLinks.sent.size)
+        val toBo = adaLinks.sent.first { Envelopes.peek(it)?.to == bo.keys.directId }
+        val opened = Encoding.text(Envelopes.open(bo.keys, Envelopes.decode(toBo, ada.keys.signingPublic, now)))
+        assertEquals("hello all", GroupNotes.parsePrefixed(opened)?.body, opened)
+        assertEquals(ReceiveOutcome.STORED, bo.engine.receive(ada.keys.directId, toBo))
+        assertEquals(ReceiveOutcome.STORED, cy.engine.receive(ada.keys.directId, adaLinks.sent.first { Envelopes.peek(it)?.to == cy.keys.directId }))
+        val hello = bo.store.messagesWith(group.id).single { it.body == "hello all" }
+        assertEquals(ada.keys.directId, hello.senderId)
+        assertTrue(GroupNotes.parsePrefixed("DIRECT-GROUP/1\n{}") == null)
+        bo.engine.flush()
+        cy.engine.flush()
+        assertEquals(ReceiveOutcome.RECEIPT, ada.engine.receive(bo.keys.directId, boLinks.sent.last()))
+        assertEquals(SENT, ada.store.message(message.id)?.state)
+        assertEquals(ReceiveOutcome.RECEIPT, ada.engine.receive(cy.keys.directId, cyLinks.sent.last()))
+        assertEquals(ACCEPTED, ada.store.message(message.id)?.state)
+        assertTrue(ada.store.queue().none { it.logicalId() == message.id })
     }
 }

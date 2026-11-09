@@ -19,4 +19,6 @@ When Bob is reachable:
 
 A relay accept sets the transport hint to `relay` and leaves the status `pending`. Read receipts are a second signed envelope and never downgrade a message that is already read.
 
+A group chat still uses one-shot seals. The sender writes one local message and queues a sealed copy for each other member under the same logical id. Each recipient `ack`s their copy; the sender marks the message delivered only when no copies remain in the queue.
+
 Blocked contacts are rejected before send and dropped on receive.

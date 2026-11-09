@@ -67,6 +67,12 @@ final class MediaTests: XCTestCase {
         XCTAssertEqual("", ProfileCards.parse(ProfileCards.encode(bundle: bundle, status: "In the garden", avatarJpeg: nil)).bootstrap)
         XCTAssertEqual(bundle, ProfileCards.parse(bundle).bundle)
         XCTAssertEqual("", ProfileCards.parse(bundle).bootstrap)
+
+        let groupId = "grp_" + String(repeating: "ab", count: 16)
+        let grouped = MediaNotes.Part(mediaId: "med_1", kind: "image", mime: "image/jpeg", name: "a.jpg", part: 0, parts: 2, caption: "see you", groupId: groupId)
+        let opened = MediaNotes.decodePart(MediaNotes.encodePart(grouped, bytes))
+        XCTAssertEqual(grouped, opened?.0)
+        XCTAssertEqual(groupId, opened?.0.groupId)
     }
 
     func testAnOlderSnapshotStillOpens() throws {
@@ -116,5 +122,39 @@ final class MediaTests: XCTestCase {
         XCTAssertEqual(.receipt, try ada.engine.receive(bo.keys.directId, boLinks.sent.last!))
         XCTAssertEqual(.accepted, ada.store.message(message.id)?.state)
         XCTAssertFalse(bo.store.queue().contains { $0.id == message.id && MediaNotes.isJob($0.payload) })
+    }
+
+    @DirectActor
+    func testAGroupPhotoIsSealedToEachMemberAndStoredOnTheGroupThread() async throws {
+        let clock = Clock()
+        let adaLinks = Links()
+        let boLinks = Links()
+        let ada = Device("Ada", clock, adaLinks, chunk: 8)
+        let bo = Device("Bo", clock, boLinks, chunk: 8)
+        ada.know(bo)
+        bo.know(ada)
+        let members = [ada.keys.directId, bo.keys.directId]
+        let group = GroupRecord(id: "grp_" + String(repeating: "cd", count: 16), name: "Weekend", members: members, createdBy: ada.keys.directId, createdAt: clock.now)
+        ada.store.putGroup(group)
+        bo.store.putGroup(group)
+        let payload = Data([1, 2, 3, 4, 5])
+        let message = try ada.engine.queueGroupMedia(group, ada.keys.directId, kind: "image", mime: "image/jpeg", name: "pic.jpg", bytes: payload, caption: "pool")
+        XCTAssertEqual(1, ada.store.queue().filter { $0.messageId == message.id }.count)
+        try await ada.engine.flush()
+        XCTAssertEqual(.sent, ada.store.message(message.id)?.state)
+        XCTAssertFalse(adaLinks.sent.isEmpty)
+        for bytes in adaLinks.sent {
+            _ = try bo.engine.receive(ada.keys.directId, bytes)
+        }
+        let received = try XCTUnwrap(bo.store.messagesWith(group.id).first { $0.id == message.id })
+        XCTAssertEqual(ada.keys.directId, received.senderId)
+        XCTAssertEqual("pool", received.body)
+        XCTAssertEqual("image", received.mediaKind)
+        let file = try Data(contentsOf: bo.media.appendingPathComponent("\(message.id).bin"))
+        XCTAssertEqual(payload, file)
+        try await bo.engine.flush()
+        XCTAssertEqual(.receipt, try ada.engine.receive(bo.keys.directId, boLinks.sent.last!))
+        XCTAssertEqual(.accepted, ada.store.message(message.id)?.state)
+        XCTAssertFalse(ada.store.queue().contains { $0.logicalId() == message.id })
     }
 }

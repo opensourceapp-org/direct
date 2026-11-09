@@ -227,4 +227,61 @@ final class DeliveryEngineTests: XCTestCase {
         XCTAssertEqual(.ignored, try bo.engine.receive(ada.keys.directId, Encoding.utf8(forged)))
         XCTAssertEqual(.stored, try bo.engine.receive(ada.keys.directId, bytes))
     }
+
+    func testAGroupTextIsFannedOutAndAcceptedWhenEveryMemberAcks() async throws {
+        let clock = Clock()
+        let adaLinks = Links(); adaLinks.reachable = true
+        let boLinks = Links(); boLinks.reachable = true
+        let cyLinks = Links(); cyLinks.reachable = true
+        let ada = Device("Ada", clock, adaLinks)
+        let bo = Device("Bo", clock, boLinks)
+        let cy = Device("Cy", clock, cyLinks)
+        ada.know(bo)
+        ada.know(cy)
+        bo.know(ada)
+        bo.know(cy)
+        cy.know(ada)
+        cy.know(bo)
+        let members = [ada.keys.directId, bo.keys.directId, cy.keys.directId]
+        let group = GroupRecord(id: "grp_" + String(repeating: "ab", count: 16), name: "Weekend", members: members, createdBy: ada.keys.directId, createdAt: clock.now)
+        ada.store.putGroup(group)
+        bo.store.putGroup(group)
+        cy.store.putGroup(group)
+
+        try ada.engine.queueGroupInvite(group, ada.keys.directId)
+        try await ada.engine.flush()
+        func deliver(_ to: Device, _ from: Device, _ payloads: [Data]) throws {
+            for payload in payloads {
+                guard let header = Envelopes.peek(payload), header.to == to.keys.directId, header.from == from.keys.directId else { continue }
+                _ = try to.engine.receive(from.keys.directId, payload)
+            }
+        }
+        try deliver(bo, ada, adaLinks.sent)
+        try deliver(cy, ada, adaLinks.sent)
+        XCTAssertEqual("Weekend", bo.store.group(group.id)?.name)
+
+        adaLinks.sent.removeAll()
+        let message = try ada.engine.queueGroupText(group, ada.keys.directId, "hello all")
+        XCTAssertEqual("hello all", GroupNotes.parsePrefixed(GroupNotes.encodeText(groupId: group.id, mid: message.id, body: "hello all"))?.body)
+        XCTAssertEqual(2, ada.store.queue().filter { $0.messageId == message.id }.count)
+        try await ada.engine.flush()
+        XCTAssertEqual(.sent, ada.store.message(message.id)?.state)
+        XCTAssertEqual(2, adaLinks.sent.count)
+        let toBo = try XCTUnwrap(adaLinks.sent.first { Envelopes.peek($0)?.to == bo.keys.directId })
+        let opened = Encoding.text(try Envelopes.open(recipient: bo.keys, envelope: try Envelopes.decode(toBo, senderSigningPublic: ada.keys.signingPublic, now: clock.now)))
+        XCTAssertEqual("hello all", GroupNotes.parsePrefixed(opened)?.body, opened)
+        XCTAssertEqual(.stored, try bo.engine.receive(ada.keys.directId, toBo))
+        let toCy = try XCTUnwrap(adaLinks.sent.first { Envelopes.peek($0)?.to == cy.keys.directId })
+        XCTAssertEqual(.stored, try cy.engine.receive(ada.keys.directId, toCy))
+        let hello = try XCTUnwrap(bo.store.messagesWith(group.id).first { $0.body == "hello all" })
+        XCTAssertEqual(ada.keys.directId, hello.senderId)
+        XCTAssertNil(GroupNotes.parsePrefixed("DIRECT-GROUP/1\n{}"))
+        try await bo.engine.flush()
+        try await cy.engine.flush()
+        XCTAssertEqual(.receipt, try ada.engine.receive(bo.keys.directId, boLinks.sent.last!))
+        XCTAssertEqual(.sent, ada.store.message(message.id)?.state)
+        XCTAssertEqual(.receipt, try ada.engine.receive(cy.keys.directId, cyLinks.sent.last!))
+        XCTAssertEqual(.accepted, ada.store.message(message.id)?.state)
+        XCTAssertFalse(ada.store.queue().contains { $0.logicalId() == message.id })
+    }
 }

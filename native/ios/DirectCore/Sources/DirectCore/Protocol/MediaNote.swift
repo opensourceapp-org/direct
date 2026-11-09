@@ -19,8 +19,9 @@ public enum MediaNotes {
         public var part: Int
         public var parts: Int
         public var caption: String
+        public var groupId: String?
 
-        public init(mediaId: String, kind: String, mime: String, name: String, part: Int, parts: Int, caption: String) {
+        public init(mediaId: String, kind: String, mime: String, name: String, part: Int, parts: Int, caption: String, groupId: String? = nil) {
             self.mediaId = mediaId
             self.kind = kind
             self.mime = mime
@@ -28,6 +29,7 @@ public enum MediaNotes {
             self.part = part
             self.parts = parts
             self.caption = caption
+            self.groupId = groupId
         }
     }
 
@@ -76,7 +78,7 @@ public enum MediaNotes {
     }
 
     public static func encodePart(_ part: Part, _ chunk: Data) -> Data {
-        let header = JSON.object([
+        var pairs: [(String, JSON)] = [
             ("mediaId", .string(part.mediaId)),
             ("kind", .string(part.kind)),
             ("mime", .string(part.mime)),
@@ -84,7 +86,9 @@ public enum MediaNotes {
             ("part", .int(Int64(part.part))),
             ("parts", .int(Int64(part.parts))),
             ("caption", .string(part.caption)),
-        ]).serialized()
+        ]
+        if let groupId = part.groupId { pairs.append(("groupId", .string(groupId))) }
+        let header = JSON.object(pairs).serialized()
         return Encoding.utf8(partPrefix + header + "\n") + chunk
     }
 
@@ -107,7 +111,8 @@ public enum MediaNotes {
             name: json["name"]?.string ?? "",
             part: Int(part),
             parts: Int(parts),
-            caption: json["caption"]?.string ?? ""
+            caption: json["caption"]?.string ?? "",
+            groupId: json["groupId"]?.string.flatMap { GroupNotes.isGroupId($0) ? $0 : nil }
         )
         guard decoded.part >= 0, decoded.parts > 0, decoded.part < decoded.parts, kinds.contains(decoded.kind) else { return nil }
         return (decoded, Data(rest[(rest.index(after: newline))...]))

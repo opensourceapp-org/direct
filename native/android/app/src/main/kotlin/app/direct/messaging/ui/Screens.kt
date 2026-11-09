@@ -211,16 +211,22 @@ private fun Onboarding(node: DirectNode) {
 private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.CHATS) }
     var openPeer by rememberSaveable { mutableStateOf<String?>(null) }
+    var newGroup by rememberSaveable { mutableStateOf(false) }
     val peer = openPeer
     if (peer != null) {
         BackHandler { openPeer = null }
         ChatScreen(node, state, peer) { openPeer = null }
         return
     }
+    if (newGroup) {
+        BackHandler { newGroup = false }
+        NewGroupScreen(node, state, back = { newGroup = false }) { openPeer = it; newGroup = false }
+        return
+    }
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
             when (tab) {
-                Tab.CHATS -> ChatsScreen(state) { openPeer = it }
+                Tab.CHATS -> ChatsScreen(state, onNewGroup = { newGroup = true }) { openPeer = it }
                 Tab.CONTACTS -> ContactsScreen(node, state) { openPeer = it }
                 Tab.NETWORK -> NetworkScreen(node, state)
                 Tab.IDENTITY -> IdentityScreen(node, state, onHowItWorks)
@@ -255,9 +261,15 @@ private fun Header(eyebrow: String, title: String) = Column(Modifier.padding(sta
 }
 
 @Composable
-private fun ChatsScreen(state: NodeState, open: (String) -> Unit) {
+private fun ChatsScreen(state: NodeState, onNewGroup: () -> Unit, open: (String) -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        Header("Messages", "Chats")
+        Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Header("Messages", "Chats")
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onNewGroup) {
+                Icon(Icons.Outlined.Group, "New group", tint = Ink.accent)
+            }
+        }
         if (state.conversations.isEmpty()) {
             Column(
                 Modifier.weight(1f).fillMaxWidth().padding(32.dp),
@@ -286,6 +298,7 @@ private fun ChatsScreen(state: NodeState, open: (String) -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Label(conversation.name)
+                            if (conversation.group) Badge("Group", Ink.accent)
                             if (conversation.request) Badge("Request", Ink.warning)
                         }
                         Muted(conversation.lastBody ?: "No messages yet")
@@ -312,16 +325,20 @@ private fun Badge(text: String, color: Color = Ink.accent) = Text(
 private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back: () -> Unit) {
     val scope = rememberCoroutineScope()
     val contact = state.contacts.firstOrNull { it.directId == peerId }
+    val group = state.groups.firstOrNull { it.id == peerId }
+    val conversation = state.conversations.firstOrNull { it.peerId == peerId }
     val messages = state.messages[peerId].orEmpty()
     val request = contact != null && !contact.accepted && !contact.blocked
+    val isGroup = group != null || conversation?.group == true
     var draft by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     val list = rememberLazyListState()
-    LaunchedEffect(peerId, messages.size, contact?.accepted) {
-        if (contact?.accepted == true) node.openConversation(peerId)
+    LaunchedEffect(peerId, messages.size, contact?.accepted, isGroup) {
+        if (isGroup || contact?.accepted == true) node.openConversation(peerId)
         if (messages.isNotEmpty()) list.animateScrollToItem(messages.lastIndex)
     }
     val status = when {
+        isGroup -> "${group?.members?.size ?: conversation?.memberCount ?: 0} members"
         contact == null -> "Not a contact"
         contact.blocked -> "Blocked"
         request -> "Message request"
@@ -340,10 +357,10 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
             }
-            Avatar(contact?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 40.dp)
+            Avatar(contact?.name ?: conversation?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 40.dp)
             Column(Modifier.weight(1f).padding(start = 12.dp, top = 8.dp, bottom = 8.dp)) {
                 Text(
-                    contact?.name ?: peerId,
+                    contact?.name ?: conversation?.name ?: peerId,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Ink.foreground,
@@ -352,7 +369,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                 )
                 Text(status, fontSize = 13.sp, color = Ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            if (contact?.accepted == true && !contact.blocked) {
+            if (isGroup || (contact?.accepted == true && !contact.blocked)) {
                 CallActions(node, peerId) { error = it }
             }
         }
@@ -360,12 +377,13 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item { Spacer(Modifier.padding(4.dp)) }
             items(messages, key = { it.id }) { message ->
-                MessageBubble(node, message) { scope.attempt({ error = it }) { node.retry(message.id) } }
+                MessageBubble(node, state, message, isGroup) { scope.attempt({ error = it }) { node.retry(message.id) } }
             }
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
         HorizontalDivider(color = Ink.border)
         when {
+            isGroup -> Composer(node, peerId, draft, { draft = it }, { error = it })
             contact == null -> Unit
             request -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Muted("${contact.name} is not in your contacts. Accept to reply. Decline blocks this DIRECT ID.")
@@ -378,7 +396,74 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                 }
             }
             contact.blocked -> Muted("You blocked this DIRECT ID.", Modifier.padding(16.dp))
-            else -> Composer(node, peerId, draft, { draft = it }) { error = it }
+            else -> Composer(node, peerId, draft, { draft = it }, { error = it })
+        }
+    }
+}
+
+@Composable
+@Composable
+private fun NewGroupScreen(node: DirectNode, state: NodeState, back: () -> Unit, opened: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val people = state.contacts.filter { it.accepted && !it.blocked }
+    var name by rememberSaveable { mutableStateOf("") }
+    var selected by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(48.dp).clip(CircleShape).clickable(onClick = back),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
+            }
+            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                Text("New group", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink.foreground)
+                Text("Pick at least one contact", fontSize = 13.sp, color = Ink.muted)
+            }
+        }
+        HorizontalDivider(color = Ink.border)
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Label("Group name")
+            Field(name, { name = it.take(32) }, "Weekend")
+            error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
+            PrimaryButton("Create group", enabled = name.isNotBlank() && selected.isNotEmpty()) {
+                scope.attempt({ error = it }) {
+                    val group = node.createGroup(name, selected.toList())
+                    opened(group.id)
+                }
+            }
+        }
+        HorizontalDivider(color = Ink.border)
+        if (people.isEmpty()) {
+            Muted("Add an accepted contact before you create a group.", Modifier.padding(20.dp))
+        } else {
+            LazyColumn {
+                items(people, key = { it.directId }) { contact ->
+                    val on = contact.directId in selected
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            selected = if (on) selected - contact.directId else selected + contact.directId
+                        }.padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Avatar(contact.name, jpegBytes(contact.avatarJpegBase64))
+                        Column(Modifier.weight(1f)) {
+                            Label(contact.name)
+                            Mono(contact.directId)
+                        }
+                        Box(
+                            Modifier.size(22.dp).clip(CircleShape).background(if (on) Ink.accent else Color.Transparent)
+                                .border(androidx.compose.foundation.BorderStroke(1.dp, if (on) Ink.accent else Ink.border), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (on) Text("✓", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    HorizontalDivider(color = Ink.border)
+                }
+            }
         }
     }
 }
@@ -678,7 +763,7 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
 }
 
 @Composable
-private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (String) -> Unit, onError: (String?) -> Unit) {
+private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (String) -> Unit, onError: (String?) -> Unit, attachments: Boolean = true) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var attach by rememberSaveable { mutableStateOf(false) }
@@ -729,7 +814,7 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
         }
     }
     Column(Modifier.background(Ink.surface).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (stickers) {
+        if (attachments && stickers) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 stickersArt.forEach { (prepared, bitmap) ->
                     if (bitmap != null) {
@@ -747,7 +832,7 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
                 }
             }
         }
-        if (attach && !recording) {
+        if (attachments && attach && !recording) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 AttachChoice(Icons.Outlined.Image, "Photo") { photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
                 AttachChoice(Icons.Outlined.Videocam, "Video") { video.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
@@ -789,14 +874,16 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
         } else {
             val canSend = draft.isNotBlank()
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                RoundIcon(
-                    if (attach) Icons.Filled.Close else Icons.Filled.Add,
-                    Ink.accentSoft,
-                    Ink.accent,
-                    if (attach) "Close attachments" else "Add attachment",
-                ) {
-                    attach = !attach
-                    if (!attach) stickers = false
+                if (attachments) {
+                    RoundIcon(
+                        if (attach) Icons.Filled.Close else Icons.Filled.Add,
+                        Ink.accentSoft,
+                        Ink.accent,
+                        if (attach) "Close attachments" else "Add attachment",
+                    ) {
+                        attach = !attach
+                        if (!attach) stickers = false
+                    }
                 }
                 BasicTextField(
                     value = draft,
@@ -966,9 +1053,10 @@ private fun sendPrepared(
 }
 
 @Composable
-private fun MessageBubble(node: DirectNode, message: MessageRecord, onRetry: () -> Unit) {
+private fun MessageBubble(node: DirectNode, state: NodeState, message: MessageRecord, group: Boolean, onRetry: () -> Unit) {
     val outgoing = message.direction == Direction.OUTGOING
     val context = LocalContext.current
+    val sender = message.senderId?.let { id -> state.contacts.firstOrNull { it.directId == id }?.name ?: id }
     var bytes by remember(message.id, message.mediaFile) { mutableStateOf<ByteArray?>(null) }
     LaunchedEffect(message.id, message.mediaFile) {
         bytes = message.mediaFile?.let { node.readMedia(message.id) }
@@ -976,6 +1064,9 @@ private fun MessageBubble(node: DirectNode, message: MessageRecord, onRetry: () 
     val kind = message.mediaKind
     val sticker = kind == "sticker"
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start) {
+        if (group && !outgoing && sender != null) {
+            Text(sender, fontSize = 12.sp, color = Ink.muted, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
+        }
         Column(
             Modifier
                 .widthIn(min = if (kind == "audio") 220.dp else 0.dp, max = 280.dp)

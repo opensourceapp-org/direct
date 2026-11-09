@@ -40,6 +40,15 @@ data class ContactRecord(
 )
 
 @Serializable
+data class GroupRecord(
+    val id: String,
+    val name: String,
+    val members: List<String>,
+    val createdBy: String,
+    val createdAt: Long,
+)
+
+@Serializable
 enum class Direction { OUTGOING, INCOMING }
 
 @Serializable
@@ -61,6 +70,8 @@ data class MessageRecord(
     val mediaName: String? = null,
     /** File name inside the media directory. The bytes are not in this snapshot. */
     val mediaFile: String? = null,
+    /** Incoming group messages: the member who wrote it. */
+    val senderId: String? = null,
 )
 
 @Serializable
@@ -68,7 +79,7 @@ enum class QueueKind { MESSAGE, RECEIPT }
 
 @Serializable
 data class QueueItem(
-    /** Envelope id. For MESSAGE items this is also the message id. */
+    /** Envelope id. For 1:1 MESSAGE items this is also the message id. */
     val id: String,
     val peerId: String,
     val kind: QueueKind,
@@ -79,7 +90,11 @@ data class QueueItem(
     val expiresAt: Long,
     val sentAt: Long? = null,
     val lastError: String? = null,
-)
+    /** Group fan-out: the local message this envelope belongs to. */
+    val messageId: String? = null,
+) {
+    fun logicalId(): String = messageId ?: id
+}
 
 @Serializable
 data class Snapshot(
@@ -89,6 +104,7 @@ data class Snapshot(
     val contacts: List<ContactRecord> = emptyList(),
     val messages: List<MessageRecord> = emptyList(),
     val queue: List<QueueItem> = emptyList(),
+    val groups: List<GroupRecord> = emptyList(),
 )
 
 /**
@@ -104,6 +120,7 @@ class LocalStore private constructor(private val file: File?, private val key: B
     private val contacts = LinkedHashMap(snapshot.contacts.associateBy { it.directId })
     private val messages = LinkedHashMap(snapshot.messages.associateBy { it.id })
     private val queue = LinkedHashMap(snapshot.queue.associateBy { it.id })
+    private val groups = LinkedHashMap(snapshot.groups.associateBy { it.id })
 
     fun contact(directId: String): ContactRecord? = contacts[directId]
     fun contacts(): List<ContactRecord> = contacts.values.toList()
@@ -129,8 +146,23 @@ class LocalStore private constructor(private val file: File?, private val key: B
     fun removeQueued(id: String) {
         queue.remove(id)
     }
+    fun removeQueuedForMessage(messageId: String) {
+        queue.keys.filter { id -> queue[id]?.logicalId() == messageId }.forEach { queue.remove(it) }
+    }
 
-    fun snapshot(): Snapshot = Snapshot(1, profile, settings, contacts.values.toList(), messages.values.toList(), queue.values.toList())
+    fun group(id: String): GroupRecord? = groups[id]
+    fun groups(): List<GroupRecord> = groups.values.toList()
+    fun putGroup(group: GroupRecord) {
+        groups[group.id] = group
+    }
+    fun removeGroup(id: String) {
+        groups.remove(id)
+    }
+
+    fun snapshot(): Snapshot = Snapshot(
+        1, profile, settings,
+        contacts.values.toList(), messages.values.toList(), queue.values.toList(), groups.values.toList(),
+    )
 
     fun save() {
         val target = file ?: return
