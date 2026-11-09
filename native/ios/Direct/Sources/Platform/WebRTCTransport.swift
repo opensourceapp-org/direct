@@ -8,8 +8,11 @@ import WebRTC
 /// TURN relays encrypted channel bytes and cannot read them.
 @DirectActor
 final class WebRTCTransport: PeerTransport {
-    static let defaultIceServers = [RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"])]
-    static let openTimeoutMs: Int64 = 12_000
+    /// STUN URLs only. Safe to read from call media, which is not on DirectActor.
+    nonisolated static var defaultIceServers: [RTCIceServer] {
+        [RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"])]
+    }
+    nonisolated static let openTimeoutMs: Int64 = 12_000
 
     private static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
@@ -240,17 +243,29 @@ final class WebRTCTransport: PeerTransport {
 private extension RTCPeerConnection {
     func create(offer: Bool) async -> RTCSessionDescription? {
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
-        return await withCheckedContinuation { done in
-            let handler: (RTCSessionDescription?, Error?) -> Void = { description, _ in done.resume(returning: description) }
-            if offer { self.offer(for: constraints, completionHandler: handler) } else { self.answer(for: constraints, completionHandler: handler) }
+        do {
+            if offer { return try await self.offer(for: constraints) }
+            return try await self.answer(for: constraints)
+        } catch {
+            return nil
         }
     }
 
     func setLocal(_ description: RTCSessionDescription) async -> Bool {
-        await withCheckedContinuation { done in setLocalDescription(description) { done.resume(returning: $0 == nil) } }
+        do {
+            try await setLocalDescription(description)
+            return true
+        } catch {
+            return false
+        }
     }
 
     func setRemote(_ description: RTCSessionDescription) async -> Bool {
-        await withCheckedContinuation { done in setRemoteDescription(description) { done.resume(returning: $0 == nil) } }
+        do {
+            try await setRemoteDescription(description)
+            return true
+        } catch {
+            return false
+        }
     }
 }

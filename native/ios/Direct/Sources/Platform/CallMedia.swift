@@ -120,57 +120,64 @@ final class CallSession: NSObject, ObservableObject, RTCPeerConnectionDelegate {
             mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": video ? "true" : "false"],
             optionalConstraints: nil
         )
-        connections[peerId]?.offer(for: constraints) { [weak self] description, _ in
-            guard let self, let description else { return }
-            self.connections[peerId]?.setLocalDescription(description) { _ in
-                let sdp = description.sdp
-                Task { @DirectActor in await Runtime.shared.node.relayOffer(sdp, peerId: peerId) }
-            }
+        Task { [weak self] in
+            guard let self, let connection = self.connections[peerId] else { return }
+            guard let description = try? await connection.offer(for: constraints) else { return }
+            do { try await connection.setLocalDescription(description) } catch { return }
+            let sdp = description.sdp
+            Task { @DirectActor in await Runtime.shared.node.relayOffer(sdp, peerId: peerId) }
         }
     }
 
     private func onOffer(_ sdp: String, _ peerId: String) {
-        let description = RTCSessionDescription(type: .offer, sdp: sdp)
-        connections[peerId]?.setRemoteDescription(description) { [weak self] _ in
-            guard let self else { return }
+        Task { [weak self] in
+            guard let self, let connection = self.connections[peerId] else { return }
+            do { try await connection.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: sdp)) } catch { return }
             self.remoteReady.insert(peerId)
             self.flushIce(peerId)
             let constraints = RTCMediaConstraints(
                 mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": self.liveVideo ? "true" : "false"],
                 optionalConstraints: nil
             )
-            self.connections[peerId]?.answer(for: constraints) { description, _ in
-                guard let description else { return }
-                self.connections[peerId]?.setLocalDescription(description) { _ in
-                    let answer = description.sdp
-                    Task { @DirectActor in await Runtime.shared.node.relayAnswer(answer, peerId: peerId) }
-                }
-            }
+            guard let description = try? await connection.answer(for: constraints) else { return }
+            do { try await connection.setLocalDescription(description) } catch { return }
+            let answer = description.sdp
+            Task { @DirectActor in await Runtime.shared.node.relayAnswer(answer, peerId: peerId) }
         }
     }
 
     private func onAnswer(_ sdp: String, _ peerId: String) {
-        connections[peerId]?.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { [weak self] _ in
-            self?.remoteReady.insert(peerId)
-            self?.flushIce(peerId)
+        Task { [weak self] in
+            guard let self, let connection = self.connections[peerId] else { return }
+            do { try await connection.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) } catch { return }
+            self.remoteReady.insert(peerId)
+            self.flushIce(peerId)
         }
     }
 
     private func addIce(_ candidate: String, _ mid: String, _ line: Int, _ peerId: String) {
         let ice = RTCIceCandidate(sdp: candidate, sdpMLineIndex: Int32(line), sdpMid: mid)
-        if remoteReady.contains(peerId) { connections[peerId]?.add(ice) } else { pendingIce[peerId, default: []].append(ice) }
+        if remoteReady.contains(peerId) {
+            connections[peerId]?.add(ice) { _ in }
+        } else {
+            pendingIce[peerId, default: []].append(ice)
+        }
     }
 
     private func flushIce(_ peerId: String) {
-        pendingIce[peerId]?.forEach { connections[peerId]?.add($0) }
+        pendingIce[peerId]?.forEach { connections[peerId]?.add($0) { _ in } }
         pendingIce[peerId] = nil
     }
 
     private func configureAudio(video: Bool, speaker: Bool) {
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playAndRecord, mode: video ? .videoChat : .voiceChat, options: [.allowBluetooth, .duckOthers])
-        try? session.setActive(true)
-        try? session.overrideOutputAudioPort(speaker ? .speaker : .none)
+        let mode: AVAudioSession.Mode = video ? .videoChat : .voiceChat
+        let port: AVAudioSession.PortOverride = speaker ? .speaker : .none
+        Task.detached {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playAndRecord, mode: mode, options: [.allowBluetoothHFP, .duckOthers])
+            try? await CallAudio.setActive(true)
+            try? session.overrideOutputAudioPort(port)
+        }
     }
 
     private func stop() {
@@ -187,7 +194,9 @@ final class CallSession: NSObject, ObservableObject, RTCPeerConnectionDelegate {
         pendingIce.removeAll()
         remoteReady.removeAll()
         sessionLive = false
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        Task.detached {
+            try? await CallAudio.setActive(false)
+        }
     }
 
     private func peerId(for connection: RTCPeerConnection) -> String? {
@@ -232,6 +241,27 @@ final class CallSession: NSObject, ObservableObject, RTCPeerConnectionDelegate {
     func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
+}
+
+private enum CallAudio {
+    static func setActive(_ active: Bool) async throws {
+        let session = AVAudioSession.sharedInstance()
+        let options: AVAudioSession.SetActiveOptions = active ? [] : [.notifyOthersOnDeactivation]
+        if #available(iOS 17.0, *) {
+            try await session.setActive(active, options: options)
+        } else {
+            try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try session.setActive(active, options: options)
+                        done.resume()
+                    } catch {
+                        done.resume(throwing: error)
+                    }
+                }
+            }
+        }
+    }
 }
 
 struct CallVideo: UIViewRepresentable {
