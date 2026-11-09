@@ -22,15 +22,21 @@ enum SendFeedback {
         func play() {
             haptic.impactOccurred(intensity: 0.35)
             haptic.prepare()
-            let session = AVAudioSession.sharedInstance()
-            if session.category != .playback {
-                try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
-                try? session.setActive(true)
+            let clip = clip
+            DispatchQueue.global(qos: .userInitiated).async {
+                let session = AVAudioSession.sharedInstance()
+                if session.category != .playback {
+                    try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+                    try? session.setActive(true)
+                }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.player = try? AVAudioPlayer(data: clip)
+                    self.player?.volume = 0.45
+                    self.player?.prepareToPlay()
+                    self.player?.play()
+                }
             }
-            player = try? AVAudioPlayer(data: clip)
-            player?.volume = 0.45
-            player?.prepareToPlay()
-            player?.play()
         }
     }
 

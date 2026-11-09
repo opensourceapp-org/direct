@@ -832,5 +832,4 @@ public final class DirectNode {
         }
         onInboundAlert?(InboundAlert(threadId: threadId, title: title, body: body, messageId: message.id))
     }
-    }
 }
