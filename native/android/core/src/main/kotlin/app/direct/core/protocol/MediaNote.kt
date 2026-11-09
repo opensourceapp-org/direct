@@ -29,6 +29,7 @@ object MediaNotes {
         val part: Int,
         val parts: Int,
         val caption: String,
+        val groupId: String? = null,
     )
 
     data class Job(
@@ -64,7 +65,7 @@ object MediaNotes {
     }
 
     fun encodePart(part: Part, chunk: ByteArray): ByteArray {
-        val header = json(
+        val fields = mutableListOf(
             "mediaId" to part.mediaId,
             "kind" to part.kind,
             "mime" to part.mime,
@@ -72,8 +73,9 @@ object MediaNotes {
             "part" to part.part.toString(),
             "parts" to part.parts.toString(),
             "caption" to part.caption,
-            numbers = setOf("part", "parts"),
         )
+        part.groupId?.let { fields += "groupId" to it }
+        val header = json(*fields.toTypedArray(), numbers = setOf("part", "parts"))
         return Encoding.utf8(PART_PREFIX + header + "\n") + chunk
     }
 
@@ -92,6 +94,7 @@ object MediaNotes {
             part = json.int("part") ?: return null,
             parts = json.int("parts") ?: return null,
             caption = json.text("caption") ?: "",
+            groupId = json.text("groupId")?.takeIf { GroupNotes.isGroupId(it) },
         )
         if (part.part < 0 || part.parts <= 0 || part.part >= part.parts) return null
         if (part.kind !in KINDS) return null

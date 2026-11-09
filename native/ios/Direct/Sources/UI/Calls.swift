@@ -11,7 +11,9 @@ struct CallScreen: View {
 
     var body: some View {
         let contact = model.state.contacts.first { $0.directId == call.peerId }
-        let name = contact?.name ?? call.peerId
+        let group = model.state.groups.first { $0.id == call.peerId }
+        let conversation = model.state.conversations.first { $0.peerId == call.peerId }
+        let name = group?.name ?? conversation?.name ?? contact?.name ?? call.peerId
         ZStack {
             Color.black.ignoresSafeArea()
             if call.video, call.phase != .incoming, call.phase != .ended {
@@ -33,6 +35,12 @@ struct CallScreen: View {
                 }
                 Text(name).font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
                 Text(status).font(.system(size: 15)).foregroundStyle(.white.opacity(0.72))
+                if call.group, !call.members.isEmpty {
+                    let memberNames = call.members.map { id in
+                        model.state.contacts.first { $0.directId == id }?.name ?? String(id.prefix(12))
+                    }.joined(separator: ", ")
+                    Text(memberNames).font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
+                }
                 controls
                     .padding(.bottom, 28)
             }

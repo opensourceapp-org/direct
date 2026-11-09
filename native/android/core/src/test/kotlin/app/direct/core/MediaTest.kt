@@ -11,6 +11,7 @@ import app.direct.core.delivery.ReceiveOutcome
 import app.direct.core.protocol.MediaNotes
 import app.direct.core.protocol.ProfileCards
 import app.direct.core.store.ContactRecord
+import app.direct.core.store.GroupRecord
 import app.direct.core.store.LocalStore
 import java.nio.file.Files
 import kotlin.test.Test
@@ -70,6 +71,12 @@ class MediaTest {
         assertEquals("", ProfileCards.parse(ProfileCards.encode(bundle, "In the garden", null)).bootstrap)
         assertEquals(bundle, ProfileCards.parse(bundle).bundle)
         assertEquals("", ProfileCards.parse(bundle).bootstrap)
+
+        val groupId = "grp_" + "ab".repeat(16)
+        val grouped = MediaNotes.Part("med_1", "image", "image/jpeg", "a.jpg", 0, 2, "see you", groupId)
+        val opened = assertNotNull(MediaNotes.decodePart(MediaNotes.encodePart(grouped, bytes)))
+        assertEquals(grouped, opened.first)
+        assertEquals(groupId, opened.first.groupId)
     }
 
     @Test
@@ -107,5 +114,38 @@ class MediaTest {
         assertEquals(ReceiveOutcome.RECEIPT, ada.engine.receive(bo.keys.directId, boLinks.sent.last()))
         assertEquals(ACCEPTED, ada.store.message(message.id)?.state)
         assertFalse(bo.store.queue().any { it.id == message.id && MediaNotes.isJob(it.payload) })
+    }
+
+    @Test
+    fun `a group photo is sealed to each member and stored on the group thread`() = runTest {
+        var now = 1_000L
+        val adaLinks = Links()
+        val boLinks = Links()
+        val ada = Device("Ada", { now }, adaLinks, chunk = 8)
+        val bo = Device("Bo", { now }, boLinks, chunk = 8)
+        ada.know(bo)
+        bo.know(ada)
+        val members = listOf(ada.keys.directId, bo.keys.directId)
+        val group = GroupRecord("grp_" + "cd".repeat(16), "Weekend", members, ada.keys.directId, now)
+        ada.store.putGroup(group)
+        bo.store.putGroup(group)
+        val payload = byteArrayOf(1, 2, 3, 4, 5)
+        val message = ada.engine.queueGroupMedia(group, ada.keys.directId, "image", "image/jpeg", "pic.jpg", payload, "pool")
+        assertEquals(1, ada.store.queue().count { it.messageId == message.id })
+        ada.engine.flush()
+        assertEquals(SENT, ada.store.message(message.id)?.state)
+        assertTrue(adaLinks.sent.isNotEmpty())
+        for (bytes in adaLinks.sent) {
+            bo.engine.receive(ada.keys.directId, bytes)
+        }
+        val received = bo.store.messagesWith(group.id).single { it.id == message.id }
+        assertEquals(ada.keys.directId, received.senderId)
+        assertEquals("pool", received.body)
+        assertEquals("image", received.mediaKind)
+        assertTrue(payload.contentEquals(bo.media.resolve("${message.id}.bin").readBytes()))
+        bo.engine.flush()
+        assertEquals(ReceiveOutcome.RECEIPT, ada.engine.receive(bo.keys.directId, boLinks.sent.last()))
+        assertEquals(ACCEPTED, ada.store.message(message.id)?.state)
+        assertTrue(ada.store.queue().none { it.logicalId() == message.id })
     }
 }

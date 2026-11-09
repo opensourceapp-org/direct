@@ -85,6 +85,13 @@ final class AppModel: ObservableObject {
 
     func send(_ peerId: String, _ body: String) { run { try $0.send(peerId, body) } }
 
+    func createGroup(name: String, memberIds: [String], done: @escaping @MainActor (String) -> Void) {
+        run { node in
+            let group = try node.createGroup(name: name, memberIds: memberIds)
+            await MainActor.run { done(group.id) }
+        }
+    }
+
     func placeCall(_ peerId: String, video: Bool) {
         AVCaptureDevice.requestAccess(for: .audio) { mic in
             guard mic else {

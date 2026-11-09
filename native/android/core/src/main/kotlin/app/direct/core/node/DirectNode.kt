@@ -9,6 +9,7 @@ import app.direct.core.delivery.DeliveryEngine
 import app.direct.core.delivery.DeliveryRejected
 import app.direct.core.protocol.CallNotes
 import app.direct.core.protocol.Envelopes
+import app.direct.core.protocol.GroupNotes
 import app.direct.core.protocol.MediaNotes
 import app.direct.core.protocol.ProfileCards
 import app.direct.core.signaling.BootstrapClient
@@ -17,6 +18,7 @@ import app.direct.core.signaling.BootstrapUrl
 import app.direct.core.signaling.WebSocketFactory
 import app.direct.core.store.ContactRecord
 import app.direct.core.store.Direction
+import app.direct.core.store.GroupRecord
 import app.direct.core.store.IdentityVault
 import app.direct.core.store.LocalStore
 import app.direct.core.store.MessageRecord
@@ -53,6 +55,8 @@ data class Conversation(
     /** An unknown sender's message waiting for Accept or Decline. */
     val request: Boolean,
     val blocked: Boolean,
+    val group: Boolean = false,
+    val memberCount: Int = 0,
 )
 
 data class NodeState(
@@ -62,6 +66,7 @@ data class NodeState(
     val bootstrapUrl: String? = null,
     val bootstrap: BootstrapStatus = BootstrapStatus(BootstrapStatus.Phase.NOT_CONFIGURED, null),
     val contacts: List<ContactRecord> = emptyList(),
+    val groups: List<GroupRecord> = emptyList(),
     val conversations: List<Conversation> = emptyList(),
     val messages: Map<String, List<MessageRecord>> = emptyMap(),
     val online: Set<String> = emptySet(),
@@ -230,11 +235,17 @@ class DirectNode(
     }
 
     suspend fun send(peerId: String, body: String): MessageRecord = onNode {
-        val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
-        if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
-        if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before replying.")
         val message = try {
-            requireEngine().queueText(peerId, body)
+            if (GroupNotes.isGroupId(peerId)) {
+                val group = store.group(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That group is not on this phone.")
+                val self = keys ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+                requireEngine().queueGroupText(group, self.directId, body)
+            } else {
+                val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+                if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+                if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before replying.")
+                requireEngine().queueText(peerId, body)
+            }
         } catch (error: DeliveryRejected) {
             throw DirectException(DirectException.Reason.REJECTED, error.message ?: "Message was not queued.")
         }
@@ -243,13 +254,52 @@ class DirectNode(
         message
     }
 
+    /** Creates a group of accepted contacts and seals an invite to each member. */
+    suspend fun createGroup(name: String, memberIds: List<String>): GroupRecord = onNode {
+        val self = keys ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) throw DirectException(DirectException.Reason.REJECTED, "Enter a group name.")
+        if (trimmed.length > Bundles.MAX_NAME_UTF16) throw DirectException(DirectException.Reason.REJECTED, "Use 32 characters or fewer.")
+        val unique = LinkedHashSet<String>()
+        unique.add(self.directId)
+        for (raw in memberIds) {
+            val id = DirectIds.normalize(raw) ?: throw DirectException(DirectException.Reason.INVALID_ID, "That DIRECT ID is not valid.")
+            if (id == self.directId) continue
+            val contact = store.contact(id) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "Add each member as a contact first.")
+            if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "Unblock ${contact.name} before adding them.")
+            if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept ${contact.name} before adding them.")
+            unique.add(id)
+        }
+        if (unique.size < 2) throw DirectException(DirectException.Reason.REJECTED, "Add at least one contact.")
+        if (unique.size > GroupNotes.MAX_MEMBERS) throw DirectException(DirectException.Reason.REJECTED, "A group can have ${GroupNotes.MAX_MEMBERS} people.")
+        val group = GroupRecord(
+            id = Encoding.newId("grp"),
+            name = trimmed,
+            members = unique.toList(),
+            createdBy = self.directId,
+            createdAt = clock(),
+        )
+        store.putGroup(group)
+        store.save()
+        requireEngine().queueGroupInvite(group, self.directId)
+        publish()
+        wake.trySend(Unit)
+        group
+    }
+
     /** Photo, video, GIF, sticker, or voice note. The bytes are sealed and queued on this phone. */
     suspend fun sendMedia(peerId: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String): MessageRecord = onNode {
-        val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
-        if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
-        if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before replying.")
         val message = try {
-            requireEngine().queueMedia(peerId, kind, mime, name, bytes, caption)
+            if (GroupNotes.isGroupId(peerId)) {
+                val group = store.group(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That group is not on this phone.")
+                val self = keys ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+                requireEngine().queueGroupMedia(group, self.directId, kind, mime, name, bytes, caption)
+            } else {
+                val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+                if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+                if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before replying.")
+                requireEngine().queueMedia(peerId, kind, mime, name, bytes, caption)
+            }
         } catch (error: DeliveryRejected) {
             throw DirectException(DirectException.Reason.REJECTED, error.message ?: "Attachment was not queued.")
         }
@@ -258,14 +308,24 @@ class DirectNode(
         message
     }
 
-    /** Rings an accepted contact. The invite is sealed and written now; it is not queued. */
+    /** Rings an accepted contact, or every member of a group. The invite is sealed and written now; it is not queued. */
     suspend fun placeCall(peerId: String, video: Boolean) = onNode {
-        val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
-        if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
-        if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before calling.")
         if (keys == null) throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
         try {
-            board.place(peerId, video, Encoding.newId("call"))
+            if (GroupNotes.isGroupId(peerId)) {
+                val group = store.group(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That group is not on this phone.")
+                val self = keys!!.directId
+                val members = group.members.filter { id ->
+                    id != self && store.contact(id)?.let { it.accepted && !it.blocked } == true
+                }
+                if (members.isEmpty()) throw DirectException(DirectException.Reason.REJECTED, "No reachable members in this group.")
+                board.place(peerId, video, Encoding.newId("call"), members)
+            } else {
+                val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+                if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+                if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before calling.")
+                board.place(peerId, video, Encoding.newId("call"))
+            }
         } catch (error: CallRejected) {
             throw DirectException(DirectException.Reason.REJECTED, error.message ?: "The call could not start.")
         }
@@ -277,11 +337,11 @@ class DirectNode(
 
     suspend fun dismissCall() = onNode { board.dismiss() }
 
-    suspend fun relayOffer(sdp: String) = onNode { board.relayOffer(sdp) }
+    suspend fun relayOffer(sdp: String, peerId: String? = null) = onNode { board.relayOffer(sdp, peerId) }
 
-    suspend fun relayAnswer(sdp: String) = onNode { board.relayAnswer(sdp) }
+    suspend fun relayAnswer(sdp: String, peerId: String? = null) = onNode { board.relayAnswer(sdp, peerId) }
 
-    suspend fun relayIce(candidate: String, mid: String, line: Int) = onNode { board.relayIce(candidate, mid, line) }
+    suspend fun relayIce(candidate: String, mid: String, line: Int, peerId: String? = null) = onNode { board.relayIce(candidate, mid, line, peerId) }
 
     suspend fun markCallLive() = onNode { board.markLive() }
 
@@ -589,7 +649,7 @@ class DirectNode(
         val identity = keys
         val contacts = store.contacts()
         val byPeer = store.messages().groupBy { it.peerId }.mapValues { (_, list) -> list.sortedBy { it.createdAt } }
-        val conversations = contacts.mapNotNull { contact ->
+        val contactConversations = contacts.mapNotNull { contact ->
             val thread = byPeer[contact.directId].orEmpty()
             if (contact.blocked && !contact.accepted) return@mapNotNull null
             if (thread.isEmpty() && !contact.accepted) return@mapNotNull null
@@ -602,13 +662,30 @@ class DirectNode(
                 request = !contact.accepted && !contact.blocked,
                 blocked = contact.blocked,
             )
-        }.sortedByDescending { it.lastAt }
+        }
+        val groups = store.groups()
+        val groupConversations = groups.map { group ->
+            val thread = byPeer[group.id].orEmpty()
+            Conversation(
+                peerId = group.id,
+                name = group.name,
+                lastBody = thread.lastOrNull()?.let { message -> message.body.ifBlank { MediaNotes.label(message.mediaKind) } },
+                lastAt = thread.lastOrNull()?.createdAt ?: group.createdAt,
+                unread = thread.count { it.direction == Direction.INCOMING && !it.read },
+                request = false,
+                blocked = false,
+                group = true,
+                memberCount = group.members.size,
+            )
+        }
+        val conversations = (contactConversations + groupConversations).sortedByDescending { it.lastAt }
         _state.value = _state.value.copy(
             profile = if (identity != null) profile else null,
             bundle = if (identity != null && profile != null) Bundles.create(identity, profile.name, profile.deviceId).encode() else null,
             bootstrapUrl = store.settings.bootstrapUrl,
             bootstrap = bootstrap.status.value,
             contacts = contacts.sortedBy { it.name.lowercase() },
+            groups = groups,
             conversations = conversations,
             messages = byPeer,
             online = online.toSet(),

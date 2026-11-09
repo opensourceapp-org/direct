@@ -268,4 +268,111 @@ class DirectNodeTest {
         ada.close()
         bo.close()
     }
+
+    // Group fan-out and receipts are covered in DeliveryEngineTest. DirectNode group
+    // flows use the same engine; three live run loops on one test dispatcher do not settle.
+
+    @Test
+    fun `creating a group lists it on this phone`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-g")
+        val bo = node(MemorySecretStore(), "bo-g")
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        ada.setBootstrap("192.168.1.20")
+        bo.setBootstrap("192.168.1.20")
+        settle()
+        val boId = bo.state.value.profile!!.directId
+        ada.addContact(boId)
+        settle()
+        val group = ada.createGroup("Weekend", listOf(boId))
+        assertTrue(group.id.startsWith("grp_"))
+        assertEquals("Weekend", ada.state.value.conversations.single { it.group }.name)
+        assertEquals(2, ada.state.value.groups.single().members.size)
+        ada.close()
+        bo.close()
+    }
+
+    @Test
+    fun `a group message is sealed to each member and the bootstrap never sees it`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-gm")
+        val bo = node(MemorySecretStore(), "bo-gm")
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        ada.setBootstrap("192.168.1.20")
+        bo.setBootstrap("192.168.1.20")
+        settle()
+        val adaId = ada.state.value.profile!!.directId
+        val boId = bo.state.value.profile!!.directId
+        ada.addContact(boId)
+        settle()
+        bo.acceptRequest(adaId)
+        settle()
+
+        val group = ada.createGroup("Weekend", listOf(boId))
+        settle()
+        assertEquals("Weekend", bo.state.value.conversations.single { it.group }.name)
+
+        ada.send(group.id, "hello all")
+        settle()
+        assertEquals("hello all", bo.state.value.messages.getValue(group.id).last().body)
+        assertEquals(adaId, bo.state.value.messages.getValue(group.id).last().senderId)
+        assertEquals(MessageState.ACCEPTED, ada.state.value.messages.getValue(group.id).single { it.body == "hello all" }.state)
+        assertTrue(hub.received.none { "hello all" in it || "DIRECT-GROUP/1" in it })
+
+        bo.send(group.id, "hi from bo")
+        settle()
+        assertEquals("hi from bo", ada.state.value.messages.getValue(group.id).last().body)
+        ada.close()
+        bo.close()
+    }
+
+    @Test
+    fun `a group audio call is sealed to each member`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-gc")
+        val bo = node(MemorySecretStore(), "bo-gc")
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        ada.setBootstrap("192.168.1.20")
+        bo.setBootstrap("192.168.1.20")
+        settle()
+        val adaId = ada.state.value.profile!!.directId
+        val boId = bo.state.value.profile!!.directId
+        ada.addContact(boId)
+        settle()
+        bo.acceptRequest(adaId)
+        settle()
+        val group = ada.createGroup("Weekend", listOf(boId))
+        settle()
+
+        ada.placeCall(group.id, false)
+        settle()
+        assertEquals(CallPhase.INCOMING, bo.state.value.call?.phase)
+        assertEquals(true, bo.state.value.call?.group)
+        assertEquals(group.id, bo.state.value.call?.peerId)
+
+        bo.acceptCall()
+        settle()
+        assertEquals(CallPhase.CONNECTING, ada.state.value.call?.phase)
+        ada.relayOffer("group-offer", boId)
+        settle()
+        bo.relayAnswer("group-answer", adaId)
+        ada.markCallLive()
+        bo.markCallLive()
+        settle()
+        assertEquals(CallPhase.ACTIVE, ada.state.value.call?.phase)
+        assertTrue(hub.received.none { "group-offer" in it || "group-answer" in it || "\"op\":\"invite\"" in it })
+
+        ada.endCall()
+        settle()
+        assertEquals(CallPhase.ENDED, bo.state.value.call?.phase)
+        assertTrue(ada.state.value.messages.getValue(group.id).any { it.mediaKind == "call" && it.body.startsWith("Group audio") })
+        ada.close()
+        bo.close()
+    }
 }

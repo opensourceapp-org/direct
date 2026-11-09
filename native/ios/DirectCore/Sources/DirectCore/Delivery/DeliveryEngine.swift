@@ -84,6 +84,52 @@ public final class DeliveryEngine {
         return message
     }
 
+    /// Seals one copy of `body` to each group member. The thread shows a single local message.
+    @discardableResult
+    public func queueGroupText(_ group: GroupRecord, _ selfId: String, _ text: String) throws -> MessageRecord {
+        guard let (keys, deviceId) = identity() else { throw DeliveryRejected(message: "Create an identity before sending.") }
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { throw DeliveryRejected(message: "Message is empty.") }
+        guard body.utf16.count <= Self.maxBody else { throw DeliveryRejected(message: "Message is too long.") }
+        let members = group.members.filter { $0 != selfId }
+        guard !members.isEmpty else { throw DeliveryRejected(message: "A group needs someone else in it.") }
+        let now = clock()
+        let id = Encoding.newId("msg")
+        let plain = Encoding.utf8(GroupNotes.encodeText(groupId: group.id, mid: id, body: body))
+        let message = MessageRecord(id: id, peerId: group.id, direction: .outgoing, body: body, createdAt: now, state: .queued, senderId: selfId)
+        store.putMessage(message)
+        for peerId in members {
+            guard let contact = store.contact(peerId), !contact.blocked else { continue }
+            let envelopeId = Encoding.newId("msg")
+            let envelope = try Envelopes.seal(
+                sender: keys, deviceId: deviceId, recipientId: peerId, recipientAgreementPublic: try bundleFor(contact).agreementPublic,
+                id: envelopeId, type: .message, plaintext: plain, createdAt: now, ttlMs: ttlMs
+            )
+            store.putQueued(QueueItem(id: envelopeId, peerId: peerId, kind: .message, payload: envelope.encode(), nextAttemptAt: now, expiresAt: envelope.expiresAt, messageId: id))
+        }
+        guard store.queue().contains(where: { $0.logicalId() == id }) else {
+            throw DeliveryRejected(message: "No reachable members in this group.")
+        }
+        try store.save()
+        return message
+    }
+
+    public func queueGroupInvite(_ group: GroupRecord, _ selfId: String) throws {
+        guard let (keys, deviceId) = identity() else { return }
+        let members = group.members.filter { $0 != selfId }
+        let now = clock()
+        let plain = Encoding.utf8(GroupNotes.encode(GroupNotes.Note(op: "invite", groupId: group.id, name: group.name, members: group.members)))
+        for peerId in members {
+            guard let contact = store.contact(peerId), contact.accepted, !contact.blocked else { continue }
+            let envelope = try Envelopes.seal(
+                sender: keys, deviceId: deviceId, recipientId: peerId, recipientAgreementPublic: try bundleFor(contact).agreementPublic,
+                id: Encoding.newId("grp"), type: .group, plaintext: plain, createdAt: now, ttlMs: ttlMs
+            )
+            store.putQueued(QueueItem(id: envelope.id, peerId: peerId, kind: .receipt, payload: envelope.encode(), nextAttemptAt: now, expiresAt: envelope.expiresAt))
+        }
+        if !members.isEmpty { try store.save() }
+    }
+
     /// Seals `bytes` into chunked envelopes and queues them. The file stays on this device
     /// so the bubble can show it, and so a restart can send whatever has not been written yet.
     public func queueMedia(_ peerId: String, kind: String, mime: String, name: String, bytes: Data, caption: String) throws -> MessageRecord {
@@ -112,12 +158,99 @@ public final class DeliveryEngine {
         return message
     }
 
+    /// Seals one copy of an attachment to each group member. The file is stored once on this phone.
+    @discardableResult
+    public func queueGroupMedia(
+        _ group: GroupRecord,
+        _ selfId: String,
+        kind: String,
+        mime: String,
+        name: String,
+        bytes: Data,
+        caption: String
+    ) throws -> MessageRecord {
+        guard identity() != nil else { throw DeliveryRejected(message: "Create an identity before sending.") }
+        guard MediaNotes.kinds.contains(kind) else { throw DeliveryRejected(message: "That attachment is not supported.") }
+        guard !bytes.isEmpty else { throw DeliveryRejected(message: "That file is empty.") }
+        guard bytes.count <= MediaNotes.maxBytes else { throw DeliveryRejected(message: "That file is over 6 MB. Choose a shorter one.") }
+        guard let directory = mediaDirectory else { throw DeliveryRejected(message: "Attachments need local storage.") }
+        let members = group.members.filter { $0 != selfId }
+        guard !members.isEmpty else { throw DeliveryRejected(message: "A group needs someone else in it.") }
+        let now = clock()
+        let id = Encoding.newId("med")
+        let fileName = "\(id).bin"
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try bytes.write(to: directory.appendingPathComponent(fileName))
+        let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes).count
+        let cleanCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        let job = MediaNotes.Job(kind: kind, mime: mime, name: name, caption: cleanCaption, parts: parts, nextPart: 0, fileName: fileName)
+        let message = MessageRecord(
+            id: id, peerId: group.id, direction: .outgoing, body: cleanCaption, createdAt: now, state: .queued,
+            mediaKind: kind, mediaMime: mime, mediaName: name, mediaFile: fileName, senderId: selfId
+        )
+        store.putMessage(message)
+        guard enqueueGroupMedia(group, selfId, id, job, now) else {
+            throw DeliveryRejected(message: "No reachable members in this group.")
+        }
+        try store.save()
+        return message
+    }
+
     /// Requeues a failed message with a fresh envelope under the same id. The recipient deduplicates by id.
     @discardableResult
     public func retry(_ messageId: String) throws -> Bool {
         guard var message = store.message(messageId), let state = message.state,
-              let next = DeliveryStateMachine.next(state, .retry),
-              let (keys, deviceId) = identity(),
+              let next = DeliveryStateMachine.next(state, .retry)
+        else { return false }
+        if let group = store.group(message.peerId) {
+            guard let (keys, deviceId) = identity() else { return false }
+            let now = clock()
+            message.state = next
+            message.lastError = nil
+            message.updatedAt = now
+            store.putMessage(message)
+            let remaining = store.queue().filter { $0.logicalId() == messageId && $0.kind == .message }
+            if !remaining.isEmpty {
+                for var item in remaining {
+                    item.sentAt = nil
+                    item.nextAttemptAt = now
+                    item.lastError = nil
+                    item.payload = MediaNotes.rewind(item.payload)
+                    store.putQueued(item)
+                }
+                try store.save()
+                return true
+            }
+            if let mediaFile = message.mediaFile, let kind = message.mediaKind {
+                guard let directory = mediaDirectory else { return false }
+                let file = directory.appendingPathComponent(mediaFile)
+                guard let bytes = try? Data(contentsOf: file), !bytes.isEmpty else { return false }
+                let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes).count
+                let job = MediaNotes.Job(
+                    kind: kind, mime: message.mediaMime ?? "application/octet-stream", name: message.mediaName ?? "",
+                    caption: message.body, parts: parts, nextPart: 0, fileName: mediaFile
+                )
+                guard enqueueGroupMedia(group, keys.directId, message.id, job, now) else { return false }
+                try store.save()
+                return true
+            }
+            let plain = Encoding.utf8(GroupNotes.encodeText(groupId: group.id, mid: message.id, body: message.body))
+            var any = false
+            for peerId in group.members where peerId != keys.directId {
+                guard let contact = store.contact(peerId), !contact.blocked else { continue }
+                let envelopeId = Encoding.newId("msg")
+                let envelope = try Envelopes.seal(
+                    sender: keys, deviceId: deviceId, recipientId: peerId, recipientAgreementPublic: try bundleFor(contact).agreementPublic,
+                    id: envelopeId, type: .message, plaintext: plain, createdAt: now, ttlMs: ttlMs
+                )
+                store.putQueued(QueueItem(id: envelopeId, peerId: peerId, kind: .message, payload: envelope.encode(), nextAttemptAt: now, expiresAt: envelope.expiresAt, messageId: message.id))
+                any = true
+            }
+            guard any else { return false }
+            try store.save()
+            return true
+        }
+        guard let (keys, deviceId) = identity(),
               let contact = store.contact(message.peerId), !contact.blocked
         else { return false }
         let now = clock()
@@ -155,7 +288,7 @@ public final class DeliveryEngine {
     public func recover() throws {
         let now = clock()
         for item in store.queue() {
-            if item.kind == .message { transition(item.id, .recovered, nil) }
+            if item.kind == .message { transition(item.logicalId(), .recovered, nil) }
             if var current = store.queued(item.id) {
                 current.sentAt = nil
                 current.nextAttemptAt = min(current.nextAttemptAt, now)
@@ -201,7 +334,10 @@ public final class DeliveryEngine {
     /// Recipient blocked: fail its outgoing messages and drop pending receipts.
     public func rejectPeer(_ peerId: String) throws {
         for item in store.queue() where item.peerId == peerId {
-            if item.kind == .message { transition(item.id, .rejected, "Blocked on this device.") }
+            if item.kind == .message {
+                let others = store.queue().contains { $0.id != item.id && $0.logicalId() == item.logicalId() && $0.kind == .message && $0.peerId != peerId }
+                if !others { transition(item.logicalId(), .rejected, "Blocked on this device.") }
+            }
             store.removeQueued(item.id)
         }
         try store.save()
@@ -247,7 +383,7 @@ public final class DeliveryEngine {
                 continue
             }
             for var item in items {
-                if item.kind == .message, !MediaNotes.isJob(item.payload) { transition(item.id, .attempt, nil) }
+                if item.kind == .message, !MediaNotes.isJob(item.payload) { transition(item.logicalId(), .attempt, nil) }
                 item.attempts += 1
                 store.putQueued(item)
             }
@@ -268,7 +404,8 @@ public final class DeliveryEngine {
                     guard var latest = store.queued(item.id) else { continue }
                     if latest.kind == .receipt {
                         store.removeQueued(latest.id)
-                    } else if transition(latest.id, .written, nil) == .sent {
+                    } else {
+                        transition(latest.logicalId(), .written, nil)
                         latest.sentAt = clock()
                         latest.lastError = nil
                         store.putQueued(latest)
@@ -282,8 +419,13 @@ public final class DeliveryEngine {
     }
 
     private func unreachable(_ item: QueueItem, _ reason: String) {
+        let fanOut = item.messageId != nil && item.messageId != item.id
         if item.kind == .message {
-            if transition(item.id, .unreachable, reason) == nil, MediaNotes.isJob(item.payload), var message = store.message(item.id) {
+            if !fanOut, transition(item.logicalId(), .unreachable, reason) == nil, MediaNotes.isJob(item.payload), var message = store.message(item.logicalId()) {
+                message.lastError = reason
+                message.updatedAt = clock()
+                store.putMessage(message)
+            } else if fanOut, var message = store.message(item.logicalId()) {
                 message.lastError = reason
                 message.updatedAt = clock()
                 store.putMessage(message)
@@ -299,12 +441,16 @@ public final class DeliveryEngine {
     private func expireAndTimeout(_ now: Int64) {
         for item in store.queue() {
             if item.expiresAt <= now {
-                if item.kind == .message { transition(item.id, .expired, "Expired before the recipient confirmed it.") }
+                if item.kind == .message {
+                    let others = store.queue().contains { $0.id != item.id && $0.logicalId() == item.logicalId() && $0.kind == .message }
+                    if !others { transition(item.logicalId(), .expired, "Expired before the recipient confirmed it.") }
+                }
                 store.removeQueued(item.id)
                 continue
             }
             guard let sentAt = item.sentAt, sentAt + receiptTimeoutMs <= now else { continue }
-            if item.kind == .message { transition(item.id, .receiptTimeout, "No receipt yet") }
+            let fanOut = item.messageId != nil && item.messageId != item.id
+            if item.kind == .message, !fanOut { transition(item.logicalId(), .receiptTimeout, "No receipt yet") }
             if var current = store.queued(item.id) {
                 current.sentAt = nil
                 current.payload = MediaNotes.rewind(current.payload)
@@ -324,7 +470,7 @@ public final class DeliveryEngine {
         message.lastError = settled ? nil : (error ?? message.lastError)
         message.updatedAt = clock()
         store.putMessage(message)
-        if !next.awaitingReceipt { store.removeQueued(messageId) }
+        if !next.awaitingReceipt { store.removeQueuedForMessage(messageId) }
         return next
     }
 
@@ -349,6 +495,9 @@ public final class DeliveryEngine {
             onCall?(plaintext)
             return .receipt
         }
+        if envelope.type == .group {
+            return try ingestInvite(peerId, plaintext, envelope.createdAt)
+        }
         if envelope.type == .profile {
             guard let note = ProfileNotes.parse(plaintext) else { return .ignored }
             var updated = contact
@@ -365,11 +514,24 @@ public final class DeliveryEngine {
         if envelope.type != .message {
             let parts = plaintext.split(separator: ":", maxSplits: 1).map(String.init)
             guard parts.count == 2, parts[0] == envelope.type.rawValue,
-                  let message = store.message(parts[1]), message.direction == .outgoing, message.peerId == peerId
+                  let message = store.message(parts[1]), message.direction == .outgoing
             else { return .ignored }
-            transition(message.id, envelope.type == .ack ? .deliveryReceipt : .readReceipt, nil)
+            let inGroup = store.group(message.peerId)?.members.contains(peerId) == true
+            guard message.peerId == peerId || inGroup else { return .ignored }
+            if envelope.type == .ack {
+                if let item = store.queue().first(where: { $0.logicalId() == message.id && $0.peerId == peerId }) {
+                    store.removeQueued(item.id)
+                }
+                let remaining = store.queue().contains { $0.logicalId() == message.id && $0.kind == .message }
+                if !remaining { transition(message.id, .deliveryReceipt, nil) }
+            } else {
+                transition(message.id, .readReceipt, nil)
+            }
             try store.save()
             return .receipt
+        }
+        if let grouped = GroupNotes.parsePrefixed(plaintext) {
+            return try ingestGroupText(peerId, contact, grouped, envelope.createdAt)
         }
         if store.message(envelope.id) != nil {
             try queueReceipt(contact, .ack, envelope.id)
@@ -385,6 +547,19 @@ public final class DeliveryEngine {
     /// Queues signed `read` receipts for unread incoming messages from `peerId`.
     @discardableResult
     public func markRead(_ peerId: String) throws -> Int {
+        if store.group(peerId) != nil {
+            let unread = store.messagesWith(peerId).filter { $0.direction == .incoming && !$0.read }
+            for var message in unread {
+                message.read = true
+                message.updatedAt = clock()
+                store.putMessage(message)
+                if message.mediaKind == "call" || message.mediaKind == "group" { continue }
+                guard let targetId = message.senderId, let target = store.contact(targetId), !target.blocked else { continue }
+                try queueReceipt(target, .read, message.id)
+            }
+            if !unread.isEmpty { try store.save() }
+            return unread.count
+        }
         guard let contact = store.contact(peerId), !contact.blocked, contact.accepted else { return 0 }
         let unread = store.messagesWith(peerId).filter { $0.direction == .incoming && !$0.read }
         for var message in unread {
@@ -392,7 +567,9 @@ public final class DeliveryEngine {
             message.updatedAt = clock()
             store.putMessage(message)
             if message.mediaKind == "call" { continue }
-            try queueReceipt(contact, .read, message.id)
+            let targetId = message.senderId ?? peerId
+            guard let target = store.contact(targetId), !target.blocked else { continue }
+            try queueReceipt(target, .read, message.id)
         }
         if !unread.isEmpty { try store.save() }
         return unread.count
@@ -411,6 +588,19 @@ public final class DeliveryEngine {
         return Encoding.utf8(envelope.encode())
     }
 
+    private func enqueueGroupMedia(_ group: GroupRecord, _ selfId: String, _ messageId: String, _ job: MediaNotes.Job, _ now: Int64) -> Bool {
+        var any = false
+        for peerId in group.members where peerId != selfId {
+            guard let contact = store.contact(peerId), !contact.blocked else { continue }
+            store.putQueued(QueueItem(
+                id: Encoding.newId("med"), peerId: peerId, kind: .message, payload: MediaNotes.encodeJob(job),
+                nextAttemptAt: now, expiresAt: now + ttlMs, messageId: messageId
+            ))
+            any = true
+        }
+        return any
+    }
+
     private func queueReceipt(_ contact: ContactRecord, _ type: EnvelopeType, _ messageId: String) throws {
         guard let (keys, deviceId) = identity() else { return }
         let now = clock()
@@ -427,19 +617,25 @@ public final class DeliveryEngine {
               let (keys, deviceId) = identity(),
               let contact = store.contact(item.peerId)
         else { return }
+        let logicalId = item.logicalId()
         guard let directory = mediaDirectory else { return }
         let file = directory.appendingPathComponent(initial.fileName)
         guard let bytes = try? Data(contentsOf: file), !bytes.isEmpty else {
-            transition(item.id, .expired, "The attachment is no longer on this phone.")
             store.removeQueued(item.id)
+            let others = store.queue().contains { $0.logicalId() == logicalId && $0.kind == .message }
+            if !others { transition(logicalId, .expired, "The attachment is no longer on this phone.") }
             return
         }
+        let groupId: String? = {
+            guard let threadId = store.message(logicalId)?.peerId, GroupNotes.isGroupId(threadId) else { return nil }
+            return threadId
+        }()
         let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes)
         var part = min(max(initial.nextPart, 0), parts.count)
         var job = initial
         while part < parts.count {
             let plain = MediaNotes.encodePart(
-                MediaNotes.Part(mediaId: item.id, kind: job.kind, mime: job.mime, name: job.name, part: part, parts: parts.count, caption: job.caption),
+                MediaNotes.Part(mediaId: logicalId, kind: job.kind, mime: job.mime, name: job.name, part: part, parts: parts.count, caption: job.caption, groupId: groupId),
                 parts[part]
             )
             let envelope = try Envelopes.seal(
@@ -453,7 +649,7 @@ public final class DeliveryEngine {
                 latest.nextAttemptAt = clock() + Backoff.delayMs(attempt: latest.attempts, random: random)
                 latest.lastError = "Channel closed before the write"
                 store.putQueued(latest)
-                if var message = store.message(item.id) {
+                if var message = store.message(logicalId) {
                     message.lastError = "Channel closed before the write"
                     message.updatedAt = clock()
                     store.putMessage(message)
@@ -468,7 +664,9 @@ public final class DeliveryEngine {
                 store.putQueued(latest)
             }
         }
-        if transition(item.id, .attempt, nil) != nil, transition(item.id, .written, nil) == .sent, var latest = store.queued(item.id) {
+        transition(logicalId, .attempt, nil)
+        transition(logicalId, .written, nil)
+        if var latest = store.queued(item.id) {
             latest.sentAt = clock()
             latest.lastError = nil
             latest.payload = MediaNotes.encodeJob(job)
@@ -478,6 +676,14 @@ public final class DeliveryEngine {
 
     private func ingestMedia(_ peerId: String, _ contact: ContactRecord, _ header: MediaNotes.Part, _ chunk: Data, _ createdAt: Int64) throws -> ReceiveOutcome {
         guard let directory = mediaDirectory else { return .ignored }
+        let selfId = identity()?.0.directId
+        let groupId = header.groupId
+        if let groupId, let group = store.group(groupId) {
+            let selfOk = selfId.map { group.members.contains($0) } ?? false
+            if !group.members.contains(peerId) || !selfOk { return .ignored }
+        }
+        let threadId = groupId ?? peerId
+        let senderId = groupId == nil ? nil : peerId
         let partsDir = directory.appendingPathComponent("parts").appendingPathComponent(header.mediaId)
         try FileManager.default.createDirectory(at: partsDir, withIntermediateDirectories: true)
         try chunk.write(to: partsDir.appendingPathComponent(String(header.part)))
@@ -491,8 +697,8 @@ public final class DeliveryEngine {
                 store.putMessage(existing)
             } else {
                 store.putMessage(MessageRecord(
-                    id: header.mediaId, peerId: peerId, direction: .incoming, body: body, createdAt: createdAt,
-                    mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name
+                    id: header.mediaId, peerId: threadId, direction: .incoming, body: body, createdAt: createdAt,
+                    mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, senderId: senderId
                 ))
             }
             try store.save()
@@ -508,12 +714,57 @@ public final class DeliveryEngine {
         let already = store.message(header.mediaId)?.mediaFile != nil
         let caption = header.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? label : header.caption
         store.putMessage(MessageRecord(
-            id: header.mediaId, peerId: peerId, direction: .incoming, body: caption, createdAt: createdAt,
-            mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, mediaFile: fileName
+            id: header.mediaId, peerId: threadId, direction: .incoming, body: caption, createdAt: createdAt,
+            mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, mediaFile: fileName, senderId: senderId
         ))
         try queueReceipt(contact, .ack, header.mediaId)
         try store.save()
         return already ? .duplicate : .stored
+    }
+
+    private func ingestInvite(_ peerId: String, _ plaintext: String, _ createdAt: Int64) throws -> ReceiveOutcome {
+        guard let note = GroupNotes.parse(plaintext), note.op == "invite",
+              let selfId = identity()?.0.directId,
+              note.members.contains(selfId), note.members.contains(peerId),
+              let name = note.name
+        else { return .ignored }
+        let existing = store.group(note.groupId)
+        let group = GroupRecord(
+            id: note.groupId,
+            name: name,
+            members: note.members,
+            createdBy: existing?.createdBy ?? peerId,
+            createdAt: existing?.createdAt ?? createdAt
+        )
+        store.putGroup(group)
+        if existing == nil {
+            store.putMessage(MessageRecord(
+                id: Encoding.newId("sys"),
+                peerId: group.id,
+                direction: .incoming,
+                body: "\(store.contact(peerId)?.name ?? peerId) added you to \(group.name)",
+                createdAt: createdAt,
+                mediaKind: "group",
+                senderId: peerId
+            ))
+        }
+        try store.save()
+        return .stored
+    }
+
+    private func ingestGroupText(_ peerId: String, _ contact: ContactRecord, _ note: GroupNotes.Note, _ createdAt: Int64) throws -> ReceiveOutcome {
+        guard note.op == "text", let mid = note.mid, let body = note.body,
+              let group = store.group(note.groupId), group.members.contains(peerId)
+        else { return .ignored }
+        if store.message(mid) != nil {
+            try queueReceipt(contact, .ack, mid)
+            try store.save()
+            return .duplicate
+        }
+        store.putMessage(MessageRecord(id: mid, peerId: group.id, direction: .incoming, body: body, createdAt: createdAt, senderId: peerId))
+        try queueReceipt(contact, .ack, mid)
+        try store.save()
+        return .stored
     }
 
     private func bundleFor(_ contact: ContactRecord) throws -> PublicBundle {

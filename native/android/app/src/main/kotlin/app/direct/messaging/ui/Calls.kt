@@ -135,7 +135,9 @@ fun CallOverlay(node: DirectNode, state: NodeState, call: CallSnapshot) {
     val context = LocalContext.current
     val media = (context.applicationContext as DirectApp).calls
     val contact = state.contacts.firstOrNull { it.directId == call.peerId }
-    val name = contact?.name ?: call.peerId
+    val group = state.groups.firstOrNull { it.id == call.peerId }
+    val conversation = state.conversations.firstOrNull { it.peerId == call.peerId }
+    val name = group?.name ?: conversation?.name ?: contact?.name ?: call.peerId
     val view = LocalView.current
     DisposableEffect(Unit) {
         view.keepScreenOn = true
@@ -203,6 +205,12 @@ fun CallOverlay(node: DirectNode, state: NodeState, call: CallSnapshot) {
             }
             Text(name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
             Text(callStatus(call), color = Color.White.copy(alpha = 0.72f), fontSize = 15.sp)
+            if (call.group && call.members.isNotEmpty()) {
+                val memberNames = call.members.joinToString { id ->
+                    state.contacts.firstOrNull { it.directId == id }?.name ?: id.take(12)
+                }
+                Text(memberNames, color = Color.White.copy(alpha = 0.55f), fontSize = 13.sp)
+            }
             when (call.phase) {
                 CallPhase.INCOMING -> Row(horizontalArrangement = Arrangement.spacedBy(48.dp)) {
                     RoundCallButton(CallRed, Icons.Filled.CallEnd, "Decline") { scope.launch { node.endCall() } }

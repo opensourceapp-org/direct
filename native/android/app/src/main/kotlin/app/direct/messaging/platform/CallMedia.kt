@@ -59,7 +59,7 @@ class CallMedia(
 
     private val factory: PeerConnectionFactory
     private val audioModule: JavaAudioDeviceModule
-    private var connection: PeerConnection? = null
+    private val legs = LinkedHashMap<String, Leg>()
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
     private var videoSource: VideoSource? = null
@@ -69,11 +69,18 @@ class CallMedia(
     private var texture: SurfaceTextureHelper? = null
     private var localSink: VideoSink? = null
     private var remoteSink: VideoSink? = null
-    private var remoteReady = false
-    private val pendingIce = mutableListOf<IceCandidate>()
     private var ringing: Ringtone? = null
     private var liveVideo = false
+    private var sessionLive = false
     private var epoch = 0
+
+    private class Leg(
+        val peerId: String,
+        val token: Int,
+        var connection: PeerConnection?,
+        var remoteReady: Boolean = false,
+        val pendingIce: MutableList<IceCandidate> = mutableListOf(),
+    )
 
     init {
         PeerConnectionFactory.initialize(
@@ -101,10 +108,10 @@ class CallMedia(
     fun onEvent(event: CallEvent) {
         main.post {
             when (event) {
-                is CallEvent.Begin -> start(event.video, event.outgoing)
-                is CallEvent.Offer -> onOffer(event.sdp)
-                is CallEvent.Answer -> onAnswer(event.sdp)
-                is CallEvent.Ice -> addIce(event.candidate, event.mid, event.line)
+                is CallEvent.Begin -> start(event.video, event.outgoing, event.peerId)
+                is CallEvent.Offer -> onOffer(event.sdp, event.peerId)
+                is CallEvent.Answer -> onAnswer(event.sdp, event.peerId)
+                is CallEvent.Ice -> addIce(event.candidate, event.mid, event.line, event.peerId)
                 CallEvent.End -> stop()
             }
         }
@@ -134,53 +141,36 @@ class CallMedia(
         main.post { capturer?.switchCamera(null) }
     }
 
-    private fun start(video: Boolean, outgoing: Boolean) {
-        stop()
-        liveVideo = video
-        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        audioManager.isSpeakerphoneOn = video
-        audioManager.requestAudioFocus(focus)
-        try {
-            context.startForegroundService(Intent(context, CallService::class.java).putExtra(CallService.EXTRA_VIDEO, video))
-        } catch (_: Exception) {
-            // The call still runs while the app is open.
+    private fun start(video: Boolean, outgoing: Boolean, peerId: String) {
+        if (!sessionLive) {
+            liveVideo = video
+            if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioManager.isSpeakerphoneOn = video
+            audioManager.requestAudioFocus(focus)
+            try {
+                context.startForegroundService(Intent(context, CallService::class.java).putExtra(CallService.EXTRA_VIDEO, video))
+            } catch (_: Exception) {
+                // The call still runs while the app is open.
+            }
+            audioSource = factory.createAudioSource(MediaConstraints())
+            audioTrack = factory.createAudioTrack("audio0", audioSource).also { it.setEnabled(true) }
+            if (video && ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                openCamera()
+            }
+            sessionLive = true
         }
+        if (legs.containsKey(peerId)) return
         val config = PeerConnection.RTCConfiguration(WebRtcTransport.DEFAULT_ICE).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
         }
-        val token = epoch
-        connection = factory.createPeerConnection(config, observer(token)) ?: return
-        audioSource = factory.createAudioSource(MediaConstraints())
-        audioTrack = factory.createAudioTrack("audio0", audioSource).also {
-            it.setEnabled(true)
-            connection?.addTrack(it, listOf("direct"))
-        }
-        if (video && ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            openCamera()
-        }
-        if (outgoing) {
-            val constraints = MediaConstraints().apply {
-                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", if (video) "true" else "false"))
-            }
-            connection?.createOffer(object : SdpObserver {
-                override fun onCreateSuccess(description: SessionDescription) {
-                    connection?.setLocalDescription(object : SdpObserver {
-                        override fun onCreateSuccess(description: SessionDescription) = Unit
-                        override fun onCreateFailure(error: String?) = Unit
-                        override fun onSetSuccess() {
-                            scope.launch { node.relayOffer(description.description) }
-                        }
-                        override fun onSetFailure(error: String?) = Unit
-                    }, description)
-                }
-                override fun onCreateFailure(error: String?) = Unit
-                override fun onSetSuccess() = Unit
-                override fun onSetFailure(error: String?) = Unit
-            }, constraints)
-        }
+        val token = ++epoch
+        val connection = factory.createPeerConnection(config, observer(peerId, token)) ?: return
+        audioTrack?.let { connection.addTrack(it, listOf("direct")) }
+        localVideo?.let { connection.addTrack(it, listOf("direct")) }
+        legs[peerId] = Leg(peerId, token, connection)
+        if (outgoing) makeOffer(peerId)
     }
 
     private fun openCamera() {
@@ -194,41 +184,69 @@ class CallMedia(
         val track = factory.createVideoTrack("video0", source)
         track.setEnabled(true)
         localSink?.let { track.addSink(it) }
-        connection?.addTrack(track, listOf("direct"))
         capturer = camera
         texture = helper
         videoSource = source
         localVideo = track
+        for (leg in legs.values) {
+            leg.connection?.addTrack(track, listOf("direct"))
+        }
     }
 
-    private fun onOffer(sdp: String) {
-        val connection = connection ?: return
-        connection.setRemoteDescription(setObserver(true), SessionDescription(SessionDescription.Type.OFFER, sdp))
+    private fun makeOffer(peerId: String) {
+        val connection = legs[peerId]?.connection ?: return
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", if (liveVideo) "true" else "false"))
+        }
+        connection.createOffer(object : SdpObserver {
+            override fun onCreateSuccess(description: SessionDescription) {
+                connection.setLocalDescription(object : SdpObserver {
+                    override fun onCreateSuccess(description: SessionDescription) = Unit
+                    override fun onCreateFailure(error: String?) = Unit
+                    override fun onSetSuccess() {
+                        scope.launch { node.relayOffer(description.description, peerId) }
+                    }
+                    override fun onSetFailure(error: String?) = Unit
+                }, description)
+            }
+            override fun onCreateFailure(error: String?) = Unit
+            override fun onSetSuccess() = Unit
+            override fun onSetFailure(error: String?) = Unit
+        }, constraints)
     }
 
-    private fun onAnswer(sdp: String) {
-        connection?.setRemoteDescription(setObserver(false), SessionDescription(SessionDescription.Type.ANSWER, sdp))
+    private fun onOffer(sdp: String, peerId: String) {
+        val connection = legs[peerId]?.connection ?: return
+        connection.setRemoteDescription(setObserver(peerId, true), SessionDescription(SessionDescription.Type.OFFER, sdp))
     }
 
-    private fun setObserver(answer: Boolean) = object : SdpObserver {
+    private fun onAnswer(sdp: String, peerId: String) {
+        val connection = legs[peerId]?.connection ?: return
+        connection.setRemoteDescription(setObserver(peerId, false), SessionDescription(SessionDescription.Type.ANSWER, sdp))
+    }
+
+    private fun setObserver(peerId: String, answer: Boolean) = object : SdpObserver {
         override fun onCreateSuccess(description: SessionDescription) = Unit
         override fun onCreateFailure(error: String?) = Unit
         override fun onSetSuccess() {
-            remoteReady = true
-            pendingIce.forEach { connection?.addIceCandidate(it) }
-            pendingIce.clear()
+            val leg = legs[peerId] ?: return
+            leg.remoteReady = true
+            leg.pendingIce.forEach { leg.connection?.addIceCandidate(it) }
+            leg.pendingIce.clear()
             if (!answer) return
             val constraints = MediaConstraints().apply {
                 mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
                 mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", if (liveVideo) "true" else "false"))
             }
-            connection?.createAnswer(object : SdpObserver {
+            val connection = leg.connection ?: return
+            connection.createAnswer(object : SdpObserver {
                 override fun onCreateSuccess(description: SessionDescription) {
-                    connection?.setLocalDescription(object : SdpObserver {
+                    connection.setLocalDescription(object : SdpObserver {
                         override fun onCreateSuccess(description: SessionDescription) = Unit
                         override fun onCreateFailure(error: String?) = Unit
                         override fun onSetSuccess() {
-                            scope.launch { node.relayAnswer(description.description) }
+                            scope.launch { node.relayAnswer(description.description, peerId) }
                         }
                         override fun onSetFailure(error: String?) = Unit
                     }, description)
@@ -241,9 +259,10 @@ class CallMedia(
         override fun onSetFailure(error: String?) = Unit
     }
 
-    private fun addIce(candidate: String, mid: String, line: Int) {
+    private fun addIce(candidate: String, mid: String, line: Int, peerId: String) {
         val ice = IceCandidate(mid, line, candidate)
-        if (remoteReady) connection?.addIceCandidate(ice) else pendingIce += ice
+        val leg = legs[peerId] ?: return
+        if (leg.remoteReady) leg.connection?.addIceCandidate(ice) else leg.pendingIce += ice
     }
 
     private fun apply(muted: Boolean, speaker: Boolean, camera: Boolean) {
@@ -252,16 +271,16 @@ class CallMedia(
         audioManager.isSpeakerphoneOn = speaker
     }
 
-    private fun observer(token: Int) = object : PeerConnection.Observer {
+    private fun observer(peerId: String, token: Int) = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate) {
-            if (token != epoch) return
-            scope.launch { if (token == epoch) node.relayIce(candidate.sdp, candidate.sdpMid ?: "0", candidate.sdpMLineIndex) }
+            if (legs[peerId]?.token != token) return
+            scope.launch { if (legs[peerId]?.token == token) node.relayIce(candidate.sdp, candidate.sdpMid ?: "0", candidate.sdpMLineIndex, peerId) }
         }
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
-            if (token != epoch) return
+            if (legs[peerId]?.token != token) return
             if (state == PeerConnection.IceConnectionState.CONNECTED || state == PeerConnection.IceConnectionState.COMPLETED) {
-                scope.launch { if (token == epoch) node.markCallLive() }
+                scope.launch { if (legs[peerId]?.token == token) node.markCallLive() }
             }
         }
 
@@ -306,8 +325,14 @@ class CallMedia(
     private fun stop() {
         epoch += 1
         stopRing()
-        remoteReady = false
-        pendingIce.clear()
+        sessionLive = false
+        for (leg in legs.values) {
+            leg.pendingIce.clear()
+            leg.connection?.close()
+            leg.connection?.dispose()
+            leg.connection = null
+        }
+        legs.clear()
         capturer?.stopCapture()
         capturer?.dispose()
         capturer = null
@@ -318,9 +343,6 @@ class CallMedia(
         remoteVideo = null
         audioTrack?.dispose()
         audioTrack = null
-        connection?.close()
-        connection?.dispose()
-        connection = null
         videoSource?.dispose()
         videoSource = null
         audioSource?.dispose()
