@@ -6,7 +6,7 @@ Phones run DIRECT as a native app. Android is Kotlin in `native/android`. iOS is
 
 ## Signaling server
 
-iOS and Android save `wss://direct-signaling.apps.grok.bot` on first start and connect with that address. Open Network to see it already filled in. Save a different address only if both phones should use your own server.
+iOS and Android save `wss://direct-signaling.apps.grok.bot` on first start and connect with that address. Open Network to see it already filled in. A LAN `ws://192.168…:8787` address saved before that public server existed is replaced once on the next launch. Save a different address only if both phones should use your own server.
 
 To run your own server on a computer both phones can reach, download Direct Server for macOS, Windows, or Linux from [direct-server.apps.grok.bot](https://direct-server.apps.grok.bot). Open it, press Start server, and share the `ws://` address it shows. The window lists each phone that connects. Builds are tagged on GitHub, starting at [v0.1.0](https://github.com/opensourceapp-org/direct/releases/tag/v0.1.0).
 

@@ -104,6 +104,11 @@ class ContractTest {
         assertEquals(contract.getValue("hostedDefault").jsonPrimitive.content, BootstrapUrl.DEFAULT)
         assertEquals(BootstrapUrl.Result.Ok(BootstrapUrl.DEFAULT), BootstrapUrl.normalize(BootstrapUrl.DEFAULT))
         assertEquals(BootstrapUrl.DEFAULT, BootstrapUrl.storedOrDefault(null))
+        assertEquals(BootstrapUrl.Chosen(BootstrapUrl.DEFAULT, BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault(null, 0))
+        assertEquals(BootstrapUrl.Chosen(BootstrapUrl.DEFAULT, BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault("ws://192.168.1.121:8787", 0))
+        assertEquals(BootstrapUrl.Chosen(BootstrapUrl.DEFAULT, BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault("192.168.1.121", 0))
+        assertEquals(BootstrapUrl.Chosen("ws://192.168.1.121:8787", BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault("ws://192.168.1.121:8787", BootstrapUrl.HOSTED_DEFAULT_VERSION))
+        assertEquals(BootstrapUrl.Chosen("wss://signals.example.com", BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault("wss://signals.example.com", 0))
         val cases = contract.getValue("cases").jsonArray
         for (case in cases) {
             val row = case.jsonObject

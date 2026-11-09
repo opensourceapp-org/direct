@@ -69,7 +69,7 @@ function BootstrapField() {
   return (
     <View style={{ gap: 8 }}>
       <Text variant="label">Bootstrap address</Text>
-      <Text tone="muted">Two phones use one bootstrap. In the browser, leave this empty to use the site you already opened. iOS and Android already use the public signaling server. Paste a different address only if both phones should use your own server. The bootstrap learns who is online and forwards session descriptions. It does not receive message text.</Text>
+      <Text tone="muted">Two phones use one bootstrap. This field already has the public signaling server. Paste a different address only if both phones should use your own server. The bootstrap learns who is online and forwards session descriptions. It does not receive message text.</Text>
       <Input value={value} onChangeText={setValue} placeholder="wss://direct-signaling.apps.grok.bot" />
       <Button label="Use this bootstrap" variant="secondary" onPress={() => direct.updatePreferences({ signalingUrl: value.trim() })} />
     </View>

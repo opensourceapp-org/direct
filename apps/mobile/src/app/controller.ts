@@ -578,7 +578,7 @@ export class DirectController {
     const bootstrap = this.bootstrap;
     const url = bootstrap?.currentUrl ?? '';
     if (!bootstrap || !url) {
-      return 'This phone has no bootstrap yet. On both phones, open Network and set the same address, such as ws://192.168.1.20:8787, while pnpm signaling is running on that computer.';
+      return 'This phone has no bootstrap yet. On both phones, open Network. They already use the public signaling server unless you saved a different address.';
     }
     if (bootstrap.state !== 'open') {
       return `DIRECT is not connected to the bootstrap at ${url}. Use that same address on both phones.`;

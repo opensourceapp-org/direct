@@ -13,7 +13,7 @@ import {
   signBytes,
   toPublicIdentity,
 } from '@direct/crypto';
-import { aadFor, decodeEnvelope, encodeEnvelope, HOSTED_BOOTSTRAP_URL, nextDelayMs, normalizeBootstrapUrl, signalProofMessage } from '@direct/protocol';
+import { aadFor, applyHostedDefault, decodeEnvelope, encodeEnvelope, HOSTED_BOOTSTRAP_URL, HOSTED_DEFAULT_VERSION, nextDelayMs, normalizeBootstrapUrl, signalProofMessage } from '@direct/protocol';
 import type { Envelope } from '@direct/protocol';
 import { base64UrlToBytes, bytesToBase64Url, text, utf8 } from '@direct/shared';
 
@@ -72,6 +72,14 @@ describe('bootstrap address contract', () => {
     expect(urls.hostedDefault).toBe(HOSTED_BOOTSTRAP_URL);
     expect(normalizeBootstrapUrl(HOSTED_BOOTSTRAP_URL)).toEqual({ ok: true, url: HOSTED_BOOTSTRAP_URL });
     expect(normalizeBootstrapUrl('https://direct-signaling.apps.grok.bot/')).toEqual({ ok: true, url: HOSTED_BOOTSTRAP_URL });
+    expect(applyHostedDefault(null, 0)).toEqual({ url: HOSTED_BOOTSTRAP_URL, version: HOSTED_DEFAULT_VERSION });
+    expect(applyHostedDefault('ws://192.168.1.121:8787', 0)).toEqual({ url: HOSTED_BOOTSTRAP_URL, version: HOSTED_DEFAULT_VERSION });
+    expect(applyHostedDefault('192.168.1.121', 0)).toEqual({ url: HOSTED_BOOTSTRAP_URL, version: HOSTED_DEFAULT_VERSION });
+    expect(applyHostedDefault('ws://192.168.1.121:8787', HOSTED_DEFAULT_VERSION)).toEqual({
+      url: 'ws://192.168.1.121:8787',
+      version: HOSTED_DEFAULT_VERSION,
+    });
+    expect(applyHostedDefault('wss://signals.example.com', 0)).toEqual({ url: 'wss://signals.example.com', version: HOSTED_DEFAULT_VERSION });
   });
 
   test('both phones typing the same computer in different ways get one address', () => {

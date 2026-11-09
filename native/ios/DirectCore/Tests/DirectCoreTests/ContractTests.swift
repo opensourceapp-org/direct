@@ -95,6 +95,11 @@ final class ContractTests: XCTestCase {
         let contract = Contracts.json("bootstrap-url.json")
         XCTAssertEqual(contract["hostedDefault"]?.string, BootstrapUrl.defaultUrl)
         XCTAssertEqual(BootstrapUrl.defaultUrl, BootstrapUrl.storedOrDefault(nil))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: BootstrapUrl.defaultUrl, version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: nil, version: 0))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: BootstrapUrl.defaultUrl, version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: "ws://192.168.1.121:8787", version: 0))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: BootstrapUrl.defaultUrl, version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: "192.168.1.121", version: 0))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: "ws://192.168.1.121:8787", version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: "ws://192.168.1.121:8787", version: BootstrapUrl.hostedDefaultVersion))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: "wss://signals.example.com", version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: "wss://signals.example.com", version: 0))
         for row in contract["cases"]!.array! {
             let input = row["input"]!.string!
             switch BootstrapUrl.normalize(input) {

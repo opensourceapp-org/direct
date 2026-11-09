@@ -140,12 +140,12 @@ class DirectNode(
         val loaded = vault.load()
         val profile = store.profile
         if (loaded != null && profile != null && profile.directId == loaded.directId) activate(loaded)
-        val bootstrapUrl = BootstrapUrl.storedOrDefault(store.settings.bootstrapUrl)
-        if (store.settings.bootstrapUrl != bootstrapUrl) {
-            store.settings = store.settings.copy(bootstrapUrl = bootstrapUrl)
+        val chosen = BootstrapUrl.applyHostedDefault(store.settings.bootstrapUrl, store.settings.bootstrapDefaultVersion)
+        if (store.settings.bootstrapUrl != chosen.url || store.settings.bootstrapDefaultVersion != chosen.version) {
+            store.settings = store.settings.copy(bootstrapUrl = chosen.url, bootstrapDefaultVersion = chosen.version)
             store.save()
         }
-        bootstrap.configure(bootstrapUrl)
+        bootstrap.configure(chosen.url)
         bootstrap.start()
         watchers = listOf(
             scope.launch { bootstrap.status.collect { status -> onBootstrapStatus(status) } },

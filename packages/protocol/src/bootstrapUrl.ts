@@ -3,6 +3,9 @@ export const DEFAULT_BOOTSTRAP_PORT = 8787;
 /** Public hosted bootstrap. Native phones use this until the user saves a different address. */
 export const HOSTED_BOOTSTRAP_URL = 'wss://direct-signaling.apps.grok.bot';
 
+/** Bumped when the public hosted bootstrap became the default. */
+export const HOSTED_DEFAULT_VERSION = 1;
+
 export type BootstrapUrlError = 'empty' | 'scheme' | 'host' | 'port' | 'userinfo' | 'query' | 'loopback';
 
 export type BootstrapUrlResult = { ok: true; url: string } | { ok: false; error: BootstrapUrlError };
@@ -74,4 +77,37 @@ export function normalizeBootstrapUrl(input: string, options: { allowLoopback?: 
 
   const shownHost = bracketed ? `[${host}]` : host;
   return { ok: true, url: `${scheme}://${shownHost}${portNumber === null ? '' : `:${portNumber}`}${path}` };
+}
+
+function privateIpv4(host: string): boolean {
+  const parts = host.split('.');
+  if (parts.length !== 4) return false;
+  const octets = parts.map((part) => Number(part));
+  if (octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return false;
+  const [a, b] = octets;
+  return a === 10
+    || (a === 192 && b === 168)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 169 && b === 254);
+}
+
+/** True for a leftover LAN signaling URL from before the public hosted default existed. */
+export function isLegacyLanDefault(input: string): boolean {
+  const result = normalizeBootstrapUrl(input);
+  if (!result.ok) return false;
+  const url = result.url;
+  if (!url.startsWith('ws://') || url.includes('/', 'ws://'.length) || !url.endsWith(`:${DEFAULT_BOOTSTRAP_PORT}`)) return false;
+  const host = url.slice('ws://'.length, -(DEFAULT_BOOTSTRAP_PORT.toString().length + 1));
+  if (host.startsWith('[')) return false;
+  return privateIpv4(host);
+}
+
+export function applyHostedDefault(stored: string | null | undefined, version = 0): { url: string; version: number } {
+  if (version >= HOSTED_DEFAULT_VERSION) {
+    const value = (stored ?? '').trim();
+    return { url: value || HOSTED_BOOTSTRAP_URL, version };
+  }
+  const current = (stored ?? '').trim();
+  const url = !current || isLegacyLanDefault(current) ? HOSTED_BOOTSTRAP_URL : current;
+  return { url, version: HOSTED_DEFAULT_VERSION };
 }

@@ -1,15 +1,14 @@
+import { HOSTED_BOOTSTRAP_URL } from '@direct/protocol';
 import type { SignalingClient, SignalMessage } from '@direct/transport';
 
 const OFFER_WAIT_MS = 500;
 const LOOKUP_WAIT_MS = 4_000;
 
 export function defaultBootstrapUrl(): string {
-  if (typeof location === 'undefined' || !location.host) return '';
-  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${scheme}//${location.host}/api/direct/signal`;
+  return HOSTED_BOOTSTRAP_URL;
 }
 
-/** Empty means the DIRECT address this phone already opened. */
+/** Empty uses the public hosted signaling server. */
 export function resolveBootstrapUrl(override: string): string {
   const trimmed = override.trim();
   return trimmed || defaultBootstrapUrl();

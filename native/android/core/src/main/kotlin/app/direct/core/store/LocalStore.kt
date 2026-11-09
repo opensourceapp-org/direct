@@ -21,7 +21,7 @@ data class Profile(
 )
 
 @Serializable
-data class Settings(val bootstrapUrl: String? = null)
+data class Settings(val bootstrapUrl: String? = null, val bootstrapDefaultVersion: Int = 0)
 
 @Serializable
 data class ContactRecord(

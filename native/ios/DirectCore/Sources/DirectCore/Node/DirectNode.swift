@@ -169,12 +169,13 @@ public final class DirectNode {
             self?.publish()
         }
         bootstrap.onPresence = { [weak self] id, isOnline in self?.presence(id, isOnline) }
-        let bootstrapUrl = BootstrapUrl.storedOrDefault(store.settings.bootstrapUrl)
-        if store.settings.bootstrapUrl != bootstrapUrl {
-            store.settings.bootstrapUrl = bootstrapUrl
+        let chosen = BootstrapUrl.applyHostedDefault(stored: store.settings.bootstrapUrl, version: store.settings.bootstrapDefaultVersion)
+        if store.settings.bootstrapUrl != chosen.url || store.settings.bootstrapDefaultVersion != chosen.version {
+            store.settings.bootstrapUrl = chosen.url
+            store.settings.bootstrapDefaultVersion = chosen.version
             try? store.save()
         }
-        bootstrap.configure(bootstrapUrl)
+        bootstrap.configure(chosen.url)
         bootstrap.start()
         state.ready = true
         loop = Task { @DirectActor [weak self] in await self?.runLoop() }
