@@ -402,7 +402,6 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
 }
 
 @Composable
-@Composable
 private fun NewGroupScreen(node: DirectNode, state: NodeState, back: () -> Unit, opened: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val people = state.contacts.filter { it.accepted && !it.blocked }
