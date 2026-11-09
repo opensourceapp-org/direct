@@ -382,7 +382,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
         HorizontalDivider(color = Ink.border)
         when {
-            isGroup -> Composer(node, peerId, draft, { draft = it }, { error = it }, attachments = false)
+            isGroup -> Composer(node, peerId, draft, { draft = it }, { error = it })
             contact == null -> Unit
             request -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Muted("${contact.name} is not in your contacts. Accept to reply. Decline blocks this DIRECT ID.")

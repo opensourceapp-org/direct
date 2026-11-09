@@ -341,29 +341,25 @@ struct ChatView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
-            if !isGroup {
-                AttachmentBar(expanded: $attachments,
-                    onPhoto: { sendAttachment(kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0) },
-                    onVideo: { sendAttachment(kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0) },
-                    onGif: { sendAttachment(kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0) },
-                    onSticker: { sendAttachment(kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: "") },
-                    onVoice: { sendAttachment(kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0) },
-                    onError: { model.toast = $0 }
-                )
-            }
+            AttachmentBar(expanded: $attachments,
+                onPhoto: { sendAttachment(kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0) },
+                onVideo: { sendAttachment(kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0) },
+                onGif: { sendAttachment(kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0) },
+                onSticker: { sendAttachment(kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: "") },
+                onVoice: { sendAttachment(kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0) },
+                onError: { model.toast = $0 }
+            )
             HStack(alignment: .bottom, spacing: 8) {
-                if !isGroup {
-                    Button {
-                        withAnimation(.easeOut(duration: 0.2)) { attachments.toggle() }
-                    } label: {
-                        Image(systemName: attachments ? "xmark" : "plus")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(Ink.accent)
-                            .frame(width: 36, height: 36)
-                            .background(Ink.surface, in: Circle())
-                    }
-                    .buttonStyle(ComposerPressStyle())
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { attachments.toggle() }
+                } label: {
+                    Image(systemName: attachments ? "xmark" : "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Ink.accent)
+                        .frame(width: 36, height: 36)
+                        .background(Ink.surface, in: Circle())
                 }
+                .buttonStyle(ComposerPressStyle())
                 TextField("Message", text: $draft, axis: .vertical)
                     .font(.body)
                     .foregroundStyle(Ink.text)

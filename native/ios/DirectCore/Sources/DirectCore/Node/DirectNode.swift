@@ -330,12 +330,18 @@ public final class DirectNode {
     /// Photo, video, GIF, sticker, or voice note. The bytes are sealed and queued on this phone.
     @discardableResult
     public func sendMedia(_ peerId: String, kind: String, mime: String, name: String, bytes: Data, caption: String) throws -> MessageRecord {
-        guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
-        guard !contact.blocked else { throw DirectError(.blocked, "This contact is blocked.") }
-        guard contact.accepted else { throw DirectError(.notAccepted, "Accept the message request before replying.") }
         let message: MessageRecord
         do {
-            message = try requireEngine().queueMedia(peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption)
+            if GroupNotes.isGroupId(peerId) {
+                guard let group = store.group(peerId) else { throw DirectError(.notFound, "That group is not on this phone.") }
+                guard let selfId = keys?.directId else { throw DirectError(.noIdentity, "Create your identity first.") }
+                message = try requireEngine().queueGroupMedia(group, selfId, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption)
+            } else {
+                guard let contact = store.contact(peerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
+                guard !contact.blocked else { throw DirectError(.blocked, "This contact is blocked.") }
+                guard contact.accepted else { throw DirectError(.notAccepted, "Accept the message request before replying.") }
+                message = try requireEngine().queueMedia(peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption)
+            }
         } catch let error as DeliveryRejected {
             throw DirectError(.rejected, error.message)
         }

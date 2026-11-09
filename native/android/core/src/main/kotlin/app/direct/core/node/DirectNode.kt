@@ -289,11 +289,17 @@ class DirectNode(
 
     /** Photo, video, GIF, sticker, or voice note. The bytes are sealed and queued on this phone. */
     suspend fun sendMedia(peerId: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String): MessageRecord = onNode {
-        val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
-        if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
-        if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before replying.")
         val message = try {
-            requireEngine().queueMedia(peerId, kind, mime, name, bytes, caption)
+            if (GroupNotes.isGroupId(peerId)) {
+                val group = store.group(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That group is not on this phone.")
+                val self = keys ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+                requireEngine().queueGroupMedia(group, self.directId, kind, mime, name, bytes, caption)
+            } else {
+                val contact = store.contact(peerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+                if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+                if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before replying.")
+                requireEngine().queueMedia(peerId, kind, mime, name, bytes, caption)
+            }
         } catch (error: DeliveryRejected) {
             throw DirectException(DirectException.Reason.REJECTED, error.message ?: "Attachment was not queued.")
         }

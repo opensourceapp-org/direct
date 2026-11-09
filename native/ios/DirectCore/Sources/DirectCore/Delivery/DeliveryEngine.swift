@@ -158,6 +158,44 @@ public final class DeliveryEngine {
         return message
     }
 
+    /// Seals one copy of an attachment to each group member. The file is stored once on this phone.
+    @discardableResult
+    public func queueGroupMedia(
+        _ group: GroupRecord,
+        _ selfId: String,
+        kind: String,
+        mime: String,
+        name: String,
+        bytes: Data,
+        caption: String
+    ) throws -> MessageRecord {
+        guard identity() != nil else { throw DeliveryRejected(message: "Create an identity before sending.") }
+        guard MediaNotes.kinds.contains(kind) else { throw DeliveryRejected(message: "That attachment is not supported.") }
+        guard !bytes.isEmpty else { throw DeliveryRejected(message: "That file is empty.") }
+        guard bytes.count <= MediaNotes.maxBytes else { throw DeliveryRejected(message: "That file is over 6 MB. Choose a shorter one.") }
+        guard let directory = mediaDirectory else { throw DeliveryRejected(message: "Attachments need local storage.") }
+        let members = group.members.filter { $0 != selfId }
+        guard !members.isEmpty else { throw DeliveryRejected(message: "A group needs someone else in it.") }
+        let now = clock()
+        let id = Encoding.newId("med")
+        let fileName = "\(id).bin"
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try bytes.write(to: directory.appendingPathComponent(fileName))
+        let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes).count
+        let cleanCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        let job = MediaNotes.Job(kind: kind, mime: mime, name: name, caption: cleanCaption, parts: parts, nextPart: 0, fileName: fileName)
+        let message = MessageRecord(
+            id: id, peerId: group.id, direction: .outgoing, body: cleanCaption, createdAt: now, state: .queued,
+            mediaKind: kind, mediaMime: mime, mediaName: name, mediaFile: fileName, senderId: selfId
+        )
+        store.putMessage(message)
+        guard enqueueGroupMedia(group, selfId, id, job, now) else {
+            throw DeliveryRejected(message: "No reachable members in this group.")
+        }
+        try store.save()
+        return message
+    }
+
     /// Requeues a failed message with a fresh envelope under the same id. The recipient deduplicates by id.
     @discardableResult
     public func retry(_ messageId: String) throws -> Bool {
@@ -180,6 +218,19 @@ public final class DeliveryEngine {
                     item.payload = MediaNotes.rewind(item.payload)
                     store.putQueued(item)
                 }
+                try store.save()
+                return true
+            }
+            if let mediaFile = message.mediaFile, let kind = message.mediaKind {
+                guard let directory = mediaDirectory else { return false }
+                let file = directory.appendingPathComponent(mediaFile)
+                guard let bytes = try? Data(contentsOf: file), !bytes.isEmpty else { return false }
+                let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes).count
+                let job = MediaNotes.Job(
+                    kind: kind, mime: message.mediaMime ?? "application/octet-stream", name: message.mediaName ?? "",
+                    caption: message.body, parts: parts, nextPart: 0, fileName: mediaFile
+                )
+                guard enqueueGroupMedia(group, keys.directId, message.id, job, now) else { return false }
                 try store.save()
                 return true
             }
@@ -537,6 +588,19 @@ public final class DeliveryEngine {
         return Encoding.utf8(envelope.encode())
     }
 
+    private func enqueueGroupMedia(_ group: GroupRecord, _ selfId: String, _ messageId: String, _ job: MediaNotes.Job, _ now: Int64) -> Bool {
+        var any = false
+        for peerId in group.members where peerId != selfId {
+            guard let contact = store.contact(peerId), !contact.blocked else { continue }
+            store.putQueued(QueueItem(
+                id: Encoding.newId("med"), peerId: peerId, kind: .message, payload: MediaNotes.encodeJob(job),
+                nextAttemptAt: now, expiresAt: now + ttlMs, messageId: messageId
+            ))
+            any = true
+        }
+        return any
+    }
+
     private func queueReceipt(_ contact: ContactRecord, _ type: EnvelopeType, _ messageId: String) throws {
         guard let (keys, deviceId) = identity() else { return }
         let now = clock()
@@ -553,19 +617,22 @@ public final class DeliveryEngine {
               let (keys, deviceId) = identity(),
               let contact = store.contact(item.peerId)
         else { return }
+        let logicalId = item.logicalId()
         guard let directory = mediaDirectory else { return }
         let file = directory.appendingPathComponent(initial.fileName)
         guard let bytes = try? Data(contentsOf: file), !bytes.isEmpty else {
-            transition(item.id, .expired, "The attachment is no longer on this phone.")
             store.removeQueued(item.id)
+            let others = store.queue().contains { $0.logicalId() == logicalId && $0.kind == .message }
+            if !others { transition(logicalId, .expired, "The attachment is no longer on this phone.") }
             return
         }
+        let groupId = store.message(logicalId)?.peerId.flatMap { GroupNotes.isGroupId($0) ? $0 : nil }
         let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes)
         var part = min(max(initial.nextPart, 0), parts.count)
         var job = initial
         while part < parts.count {
             let plain = MediaNotes.encodePart(
-                MediaNotes.Part(mediaId: item.id, kind: job.kind, mime: job.mime, name: job.name, part: part, parts: parts.count, caption: job.caption),
+                MediaNotes.Part(mediaId: logicalId, kind: job.kind, mime: job.mime, name: job.name, part: part, parts: parts.count, caption: job.caption, groupId: groupId),
                 parts[part]
             )
             let envelope = try Envelopes.seal(
@@ -579,7 +646,7 @@ public final class DeliveryEngine {
                 latest.nextAttemptAt = clock() + Backoff.delayMs(attempt: latest.attempts, random: random)
                 latest.lastError = "Channel closed before the write"
                 store.putQueued(latest)
-                if var message = store.message(item.id) {
+                if var message = store.message(logicalId) {
                     message.lastError = "Channel closed before the write"
                     message.updatedAt = clock()
                     store.putMessage(message)
@@ -594,7 +661,9 @@ public final class DeliveryEngine {
                 store.putQueued(latest)
             }
         }
-        if transition(item.id, .attempt, nil) != nil, transition(item.id, .written, nil) == .sent, var latest = store.queued(item.id) {
+        transition(logicalId, .attempt, nil)
+        transition(logicalId, .written, nil)
+        if var latest = store.queued(item.id) {
             latest.sentAt = clock()
             latest.lastError = nil
             latest.payload = MediaNotes.encodeJob(job)
@@ -604,6 +673,14 @@ public final class DeliveryEngine {
 
     private func ingestMedia(_ peerId: String, _ contact: ContactRecord, _ header: MediaNotes.Part, _ chunk: Data, _ createdAt: Int64) throws -> ReceiveOutcome {
         guard let directory = mediaDirectory else { return .ignored }
+        let selfId = identity()?.0.directId
+        let groupId = header.groupId
+        let group = groupId.flatMap { store.group($0) }
+        if let groupId, let group, (!group.members.contains(peerId) || !(selfId.map(group.members.contains) ?? false)) {
+            return .ignored
+        }
+        let threadId = groupId ?? peerId
+        let senderId = groupId == nil ? nil : peerId
         let partsDir = directory.appendingPathComponent("parts").appendingPathComponent(header.mediaId)
         try FileManager.default.createDirectory(at: partsDir, withIntermediateDirectories: true)
         try chunk.write(to: partsDir.appendingPathComponent(String(header.part)))
@@ -617,8 +694,8 @@ public final class DeliveryEngine {
                 store.putMessage(existing)
             } else {
                 store.putMessage(MessageRecord(
-                    id: header.mediaId, peerId: peerId, direction: .incoming, body: body, createdAt: createdAt,
-                    mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name
+                    id: header.mediaId, peerId: threadId, direction: .incoming, body: body, createdAt: createdAt,
+                    mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, senderId: senderId
                 ))
             }
             try store.save()
@@ -634,8 +711,8 @@ public final class DeliveryEngine {
         let already = store.message(header.mediaId)?.mediaFile != nil
         let caption = header.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? label : header.caption
         store.putMessage(MessageRecord(
-            id: header.mediaId, peerId: peerId, direction: .incoming, body: caption, createdAt: createdAt,
-            mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, mediaFile: fileName
+            id: header.mediaId, peerId: threadId, direction: .incoming, body: caption, createdAt: createdAt,
+            mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, mediaFile: fileName, senderId: senderId
         ))
         try queueReceipt(contact, .ack, header.mediaId)
         try store.save()
