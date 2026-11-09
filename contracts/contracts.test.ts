@@ -10,9 +10,10 @@ import {
   open,
   parseBundle,
   seal,
+  signBytes,
   toPublicIdentity,
 } from '@direct/crypto';
-import { aadFor, decodeEnvelope, encodeEnvelope, HOSTED_BOOTSTRAP_URL, nextDelayMs, normalizeBootstrapUrl } from '@direct/protocol';
+import { aadFor, decodeEnvelope, encodeEnvelope, HOSTED_BOOTSTRAP_URL, nextDelayMs, normalizeBootstrapUrl, signalProofMessage } from '@direct/protocol';
 import type { Envelope } from '@direct/protocol';
 import { base64UrlToBytes, bytesToBase64Url, text, utf8 } from '@direct/shared';
 
@@ -84,13 +85,39 @@ describe('bootstrap address contract', () => {
 });
 
 describe('signaling contract', () => {
-  const ada = 'dir_0123456789ABCDEF';
-  const bo = 'dir_ABCDEFGHJKMNPQRS';
-  const boHello = {
-    kind: 'hello',
-    from: bo,
-    bundle: signaling.hubToClient.lookupPresent.bundle as string,
+  const identityVectors = JSON.parse(readFileSync(here('vectors.json'), 'utf8')) as {
+    ada: { seedHex: string; bundle: string; directId: string; name: string };
+    bo: { seedHex: string; bundle: string; directId: string; name: string };
   };
+  const ada = identityVectors.ada.directId;
+  const bo = identityVectors.bo.directId;
+  const missing = 'dir_0123456789ABCDEH';
+
+  function seedFromHex(value: string): Uint8Array {
+    return Uint8Array.from({ length: value.length / 2 }, (_, i) => Number.parseInt(value.slice(i * 2, i * 2 + 2), 16));
+  }
+
+  function signedHello(who: 'ada' | 'bo', nonce: string) {
+    const keys = keysFromSeed(seedFromHex(identityVectors[who].seedHex));
+    const directId = identityVectors[who].directId;
+    return {
+      kind: 'hello',
+      from: directId,
+      bundle: identityVectors[who].bundle,
+      nonce,
+      proof: bytesToBase64Url(signBytes(keys.signingSecret, signalProofMessage(nonce, directId))),
+    };
+  }
+
+  function challengeNonce(sock: { sent: Record<string, unknown>[] }): string {
+    const challenge = sock.sent.find((frame) => frame.kind === 'challenge');
+    expect(typeof challenge?.nonce).toBe('string');
+    return String(challenge?.nonce);
+  }
+
+  function announce(sock: ReturnType<typeof socket>, who: 'ada' | 'bo') {
+    sock.receive(signedHello(who, challengeNonce(sock)));
+  }
 
   test('hello, lookup, and watch produce the documented hub frames', () => {
     const hub = createSignalHub();
@@ -98,17 +125,23 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    a.receive(signaling.clientToHub.hello);
-    a.receive(signaling.clientToHub.watch);
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.presenceOffline);
-    b.receive(boHello);
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.presenceOnline);
-    a.receive(signaling.clientToHub.lookup);
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.lookupPresent);
-    a.receive({ kind: 'lookup', requestId: 'req-2', directId: 'dir_0123456789ABCDEH' });
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.lookupAbsent);
+    announce(a, 'ada');
+    a.receive({ kind: 'watch', ids: [bo] });
+    expect(a.sent.at(-1)).toEqual({ kind: 'presence', directId: bo, online: false });
+    announce(b, 'bo');
+    expect(a.sent.at(-1)).toEqual({ kind: 'presence', directId: bo, online: true });
+    a.receive({ kind: 'lookup', requestId: 'req-1', directId: bo });
+    expect(a.sent.at(-1)).toEqual({
+      kind: 'lookup',
+      requestId: 'req-1',
+      directId: bo,
+      present: true,
+      bundle: identityVectors.bo.bundle,
+    });
+    a.receive({ kind: 'lookup', requestId: 'req-2', directId: missing });
+    expect(a.sent.at(-1)).toEqual({ kind: 'lookup', requestId: 'req-2', directId: missing, present: false, bundle: null });
     b.close();
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.presenceOffline);
+    expect(a.sent.at(-1)).toEqual({ kind: 'presence', directId: bo, online: false });
   });
 
   test('offer, answer, and ice are forwarded unchanged between announced devices', () => {
@@ -117,14 +150,17 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    a.receive(signaling.clientToHub.hello);
-    b.receive(boHello);
-    a.receive(signaling.clientToHub.offer);
-    expect(b.sent.at(-1)).toEqual(signaling.clientToHub.offer);
-    b.receive(signaling.clientToHub.answer);
-    expect(a.sent.at(-1)).toEqual(signaling.clientToHub.answer);
-    a.receive(signaling.clientToHub.ice);
-    expect(b.sent.at(-1)).toEqual(signaling.clientToHub.ice);
+    announce(a, 'ada');
+    announce(b, 'bo');
+    const offer = { ...signaling.clientToHub.offer, from: ada, to: bo };
+    const answer = { ...signaling.clientToHub.answer, from: bo, to: ada };
+    const ice = { ...signaling.clientToHub.ice, from: ada, to: bo };
+    a.receive(offer);
+    expect(b.sent.at(-1)).toEqual(offer);
+    b.receive(answer);
+    expect(a.sent.at(-1)).toEqual(answer);
+    a.receive(ice);
+    expect(b.sent.at(-1)).toEqual(ice);
   });
 
   test('an offer to a missing device is unreachable and a spoofed sender is dropped', () => {
@@ -133,17 +169,38 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    a.receive(signaling.clientToHub.hello);
-    a.receive({ ...signaling.clientToHub.offer, to: 'dir_0123456789ABCDEH' });
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.unreachable);
-    b.receive(boHello);
+    announce(a, 'ada');
+    a.receive({ ...signaling.clientToHub.offer, from: ada, to: missing });
+    expect(a.sent.at(-1)).toEqual({ kind: 'unreachable', to: missing });
+    announce(b, 'bo');
     const before = a.sent.length;
-    b.receive({ ...signaling.clientToHub.answer, from: 'dir_0123456789ABCDEH' });
+    b.receive({ ...signaling.clientToHub.answer, from: missing, to: ada });
     const spoofer = socket();
     hub.attach(spoofer);
-    spoofer.receive({ ...signaling.clientToHub.offer, from: ada });
+    spoofer.receive({ ...signaling.clientToHub.offer, from: ada, to: bo });
     expect(a.sent.length).toBe(before);
     expect(b.sent.some((frame) => frame.kind === 'offer')).toBe(false);
+  });
+
+  test('a socket that floods frames is closed', () => {
+    const hub = createSignalHub({ maxMessagesPerSec: 3 });
+    const a = socket();
+    hub.attach(a);
+    announce(a, 'ada');
+    for (let i = 0; i < 8; i += 1) a.receive({ kind: 'lookup', requestId: `r${i}`, directId: bo });
+    expect(a.readyState).toBe(3);
+  });
+
+  test('a public bundle without a matching proof cannot claim a DIRECT ID', () => {
+    const hub = createSignalHub();
+    const thief = socket();
+    hub.attach(thief);
+    const nonce = challengeNonce(thief);
+    thief.receive(signaling.clientToHub.hello);
+    thief.receive({ kind: 'hello', from: ada, bundle: identityVectors.ada.bundle, nonce, proof: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' });
+    expect(hub.roster()).toEqual([]);
+    announce(thief, 'ada');
+    expect(hub.roster()).toEqual([{ directId: ada, name: identityVectors.ada.name }]);
   });
 
   test('message text and envelopes are never forwarded', () => {
@@ -152,11 +209,13 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    a.receive(signaling.clientToHub.hello);
-    b.receive(boHello);
+    announce(a, 'ada');
+    announce(b, 'bo');
+    const beforeA = a.sent.length;
+    const beforeB = b.sent.length;
     for (const frame of signaling.forbidden) a.receive(frame);
-    expect(b.sent).toEqual([]);
-    expect(a.sent).toEqual([]);
+    expect(b.sent.length).toBe(beforeB);
+    expect(a.sent.length).toBe(beforeA);
   });
 
   test('the connected list is available on this computer', async () => {
@@ -168,9 +227,8 @@ describe('signaling contract', () => {
         close(): Promise<void>;
       };
     };
-    const WebSocket = createRequire(__filename)('ws') as new (url: string) => {
-      once(event: 'open', listener: () => void): void;
-      once(event: 'error', listener: (error: Error) => void): void;
+    const WebSocket = createRequire(__filename)('ws') as new (url: string, options?: { origin?: string }) => {
+      once(event: 'open' | 'message' | 'error' | 'unexpected-response', listener: (...args: never[]) => void): void;
       send(data: string): void;
       close(): void;
     };
@@ -182,13 +240,25 @@ describe('signaling contract', () => {
     const home = await fetch(`http://127.0.0.1:${info.port}/`);
     expect(home.headers.get('content-type')).toMatch(/text\/html/);
     expect(await home.text()).toContain('Signaling is running.');
+    const blocked = new WebSocket(`ws://127.0.0.1:${info.port}`, { origin: 'https://evil.example' });
+    const blockedCode = await new Promise<number>((resolve, reject) => {
+      blocked.once('unexpected-response', (_request, response: { statusCode: number }) => resolve(response.statusCode));
+      blocked.once('open', () => reject(new Error('evil origin was accepted')));
+      blocked.once('error', () => {});
+    });
+    expect(blockedCode).toBe(403);
+    blocked.close();
     const phone = new WebSocket(`ws://127.0.0.1:${info.port}`);
     try {
-      await new Promise<void>((resolve, reject) => {
-        phone.once('open', () => resolve());
+      const nonce = await new Promise<string>((resolve, reject) => {
         phone.once('error', (openError) => reject(openError));
+        phone.once('message', (raw) => {
+          const frame = JSON.parse(String(raw)) as { kind?: string; nonce?: string };
+          if (frame.kind === 'challenge' && frame.nonce) resolve(frame.nonce);
+          else reject(new Error('expected challenge'));
+        });
       });
-      phone.send(JSON.stringify(signaling.clientToHub.hello));
+      phone.send(JSON.stringify(signedHello('ada', nonce)));
       let users: { directId: string; name: string }[] = [];
       for (let attempt = 0; attempt < 20 && users.length === 0; attempt += 1) {
         const response = await fetch(`http://127.0.0.1:${info.port}/roster`);
@@ -196,7 +266,7 @@ describe('signaling contract', () => {
         users = (await response.json()).users;
         if (users.length === 0) await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      expect(users).toEqual([{ directId: ada, name: 'Ada' }]);
+      expect(users).toEqual([{ directId: ada, name: identityVectors.ada.name }]);
     } finally {
       phone.close();
       await server.close();
@@ -207,8 +277,8 @@ describe('signaling contract', () => {
     const hub = createSignalHub();
     const phone = socket();
     hub.attach(phone);
-    phone.receive(signaling.clientToHub.hello);
-    expect(hub.roster()).toEqual([{ directId: ada, name: 'Ada' }]);
+    announce(phone, 'ada');
+    expect(hub.roster()).toEqual([{ directId: ada, name: identityVectors.ada.name }]);
     phone.close();
     expect(hub.roster()).toEqual([]);
   });
@@ -220,12 +290,12 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    b.receive(boHello);
+    announce(b, 'bo');
     b.close();
-    a.receive(signaling.clientToHub.lookup);
+    a.receive({ kind: 'lookup', requestId: 'req-1', directId: bo });
     expect(a.sent.at(-1)).toMatchObject({ present: true });
     now += signaling.limits.presenceGraceMs;
-    a.receive(signaling.clientToHub.lookup);
+    a.receive({ kind: 'lookup', requestId: 'req-1', directId: bo });
     expect(a.sent.at(-1)).toMatchObject({ present: false, bundle: null });
   });
 });

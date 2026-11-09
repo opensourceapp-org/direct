@@ -38,7 +38,7 @@ final class BootstrapClientTests: XCTestCase {
         alice.start()
         await sleepMs(50)
         XCTAssertEqual(.open, alice.status.phase)
-        XCTAssertEqual(.hello(from: ada, bundle: bundle(ada)), SignalCodec.decode(hub.frames().first!))
+        XCTAssertEqual(.hello(from: ada, bundle: bundle(ada), nonce: nil, proof: nil), SignalCodec.decode(hub.frames().first!))
         XCTAssertTrue(presence.contains { $0 == (bo, false) })
 
         bob.announce(directId: bo, bundle: bundle(bo))

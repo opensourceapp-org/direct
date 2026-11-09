@@ -13,12 +13,13 @@ import {
   replaceAgreement,
   restoreFromMnemonic,
   rotateAgreementKey,
+  signBytes,
   toPublicIdentity,
 } from '@direct/crypto';
 import type { IdentityKeys, PublicBundle } from '@direct/crypto';
-import { DeliveryEngine } from '@direct/protocol';
+import { DeliveryEngine, signalProofMessage } from '@direct/protocol';
 import type { ContactPublic, LocalIdentity } from '@direct/protocol';
-import { createLogger, text, utf8 } from '@direct/shared';
+import { bytesToBase64Url, createLogger, text, utf8 } from '@direct/shared';
 import { KademliaTable, LocalTransport, TransportRouter, WebRTCTransport } from '@direct/transport';
 import { openEncryptedDatabase } from '../infrastructure/persistence/database';
 import { DirectRepository, publicKeyBytes, publicKeyMaterial } from '../infrastructure/persistence/repositories';
@@ -441,7 +442,10 @@ export class DirectController {
     const identity = toPublicIdentity(this.keys, record.displayName, record.deviceId);
     const bundle = encodeBundle(createBundle(identity));
     this.mesh.publishBundle(bundle);
-    this.bootstrap?.announce(bundle);
+    const keys = this.keys;
+    this.bootstrap?.announce(bundle, (nonce) =>
+      bytesToBase64Url(signBytes(keys.signingSecret, signalProofMessage(nonce, record.directId))),
+    );
   }
 
   private start(): void {

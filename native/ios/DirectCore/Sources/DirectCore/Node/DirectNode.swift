@@ -504,7 +504,12 @@ public final class DirectNode {
         let next = transportFactory(bootstrap, identity.directId)
         next.setListener(listener)
         transport = next
-        if let bundle = currentBundle() { bootstrap.announce(directId: identity.directId, bundle: bundle) }
+        if let bundle = currentBundle() {
+            bootstrap.announce(directId: identity.directId, bundle: bundle) { [weak self] nonce in
+                guard let keys = self?.keys else { return "" }
+                return Encoding.base64Url(keys.sign(SignalProof.message(nonce: nonce, directId: keys.directId)))
+            }
+        }
         refreshWatch()
         wake.fire()
     }

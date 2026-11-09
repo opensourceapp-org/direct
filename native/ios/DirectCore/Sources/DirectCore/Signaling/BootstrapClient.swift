@@ -70,6 +70,8 @@ public final class BootstrapClient {
     private var running = false
     private var selfId: String?
     private var bundle: String?
+    private var nonce: String?
+    private var signProof: ((String) -> String)?
     private var watchIds: [String] = []
     private var connection: WebSocketConnection?
     private var generation = 0
@@ -115,9 +117,10 @@ public final class BootstrapClient {
         if running { connect() }
     }
 
-    public func announce(directId: String, bundle publicBundle: String) {
+    public func announce(directId: String, bundle publicBundle: String, signProof: ((String) -> String)? = nil) {
         selfId = directId
         bundle = publicBundle
+        self.signProof = signProof
         sendHello()
     }
 
@@ -236,6 +239,7 @@ public final class BootstrapClient {
         generation += 1
         connection?.close()
         connection = nil
+        nonce = nil
         failPending()
     }
 
@@ -249,6 +253,9 @@ public final class BootstrapClient {
     private func incoming(_ text: String) {
         guard let frame = SignalCodec.decode(text) else { return }
         switch frame {
+        case let .challenge(nonce):
+            self.nonce = nonce
+            sendHello()
         case let .lookupResult(requestId, _, present, bundle):
             lookups.removeValue(forKey: requestId)?.complete(present ? bundle : nil)
         case let .unreachable(to):
@@ -264,7 +271,11 @@ public final class BootstrapClient {
 
     private func sendHello() {
         guard let selfId, let bundle, status.isOpen else { return }
-        send(.hello(from: selfId, bundle: bundle))
+        if let nonce, let signProof {
+            send(.hello(from: selfId, bundle: bundle, nonce: nonce, proof: signProof(nonce)))
+        } else {
+            send(.hello(from: selfId, bundle: bundle, nonce: nil, proof: nil))
+        }
     }
 
     @discardableResult

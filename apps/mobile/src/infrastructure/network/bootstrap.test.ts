@@ -2,6 +2,9 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { WebSocketServer } from 'ws';
+import { createBundle, directIdFromSigningPublic, encodeBundle, keysFromSeed, signBytes, toPublicIdentity } from '@direct/crypto';
+import { signalProofMessage } from '@direct/protocol';
+import { bytesToBase64Url } from '@direct/shared';
 import { DirectBootstrap } from './bootstrap';
 
 type HubSocket = {
@@ -21,36 +24,63 @@ const { createSignalHub } = createRequire(__filename)(
   };
 };
 
-const ALICE = 'dir_0123456789ABCDEF';
-const BOB = 'dir_ABCDEFGHJKMNPQRS';
+const ADA_SEED = Uint8Array.from({ length: 32 }, (_, i) => i);
+const BO_SEED = Uint8Array.from({ length: 32 }, (_, i) => 0x20 + i);
+const aliceKeys = keysFromSeed(ADA_SEED);
+const bobKeys = keysFromSeed(BO_SEED);
+const ALICE = directIdFromSigningPublic(aliceKeys.signingPublic);
+const BOB = directIdFromSigningPublic(bobKeys.signingPublic);
 
-function bundle(id: string): string {
-  return JSON.stringify({ directId: id, name: 'Phone', note: 'public-only' });
+function bundleFor(keys: ReturnType<typeof keysFromSeed>, name: string): string {
+  return encodeBundle(createBundle(toPublicIdentity(keys, name, 'dev_test')));
+}
+
+function signFor(keys: ReturnType<typeof keysFromSeed>): (nonce: string) => string {
+  const directId = directIdFromSigningPublic(keys.signingPublic);
+  return (nonce) => bytesToBase64Url(signBytes(keys.signingSecret, signalProofMessage(nonce, directId)));
+}
+
+function signedHello(keys: ReturnType<typeof keysFromSeed>, name: string, nonce: string) {
+  const directId = directIdFromSigningPublic(keys.signingPublic);
+  return {
+    kind: 'hello',
+    from: directId,
+    bundle: bundleFor(keys, name),
+    nonce,
+    proof: signFor(keys)(nonce),
+  };
 }
 
 function localSocket(): HubSocket & {
-  sent: { kind?: string; present?: boolean; bundle?: string | null; to?: string }[];
-  receive(raw: string): void;
+  sent: { kind?: string; present?: boolean; bundle?: string | null; to?: string; nonce?: string }[];
+  receive(raw: string | object): void;
   close(): void;
 } {
   const listeners: { message: ((raw: unknown) => void)[]; close: (() => void)[] } = { message: [], close: [] };
   return {
     readyState: 1,
     sent: [],
-    send(data: string) {
-      this.sent.push(JSON.parse(data) as { kind?: string; present?: boolean; bundle?: string | null; to?: string });
+    send(data) {
+      this.sent.push(JSON.parse(data) as { kind?: string; present?: boolean; bundle?: string | null; to?: string; nonce?: string });
     },
     on(event, listener) {
       listeners[event].push(listener as never);
     },
     receive(raw) {
-      for (const listener of listeners.message) listener(raw);
+      const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+      for (const listener of listeners.message) listener(text);
     },
     close() {
       this.readyState = 3;
       for (const listener of listeners.close) listener();
     },
   };
+}
+
+function announce(sock: ReturnType<typeof localSocket>, keys: ReturnType<typeof keysFromSeed>, name: string) {
+  const nonce = sock.sent.find((frame) => frame.kind === 'challenge')?.nonce;
+  if (!nonce) throw new Error('missing challenge');
+  sock.receive(signedHello(keys, name, nonce));
 }
 
 function waitFor(ready: () => boolean): Promise<void> {
@@ -83,8 +113,8 @@ test('two phones on one bootstrap find each other by DIRECT ID', async () => {
   bob.start(BOB);
   try {
     await waitFor(() => alice.state === 'open' && bob.state === 'open');
-    alice.announce(bundle(ALICE));
-    bob.announce(bundle(BOB));
+    alice.announce(bundleFor(aliceKeys, 'Ada'), signFor(aliceKeys));
+    bob.announce(bundleFor(bobKeys, 'Bo'), signFor(bobKeys));
     let found: string | null = null;
     const started = Date.now();
     while (!found && Date.now() - started < 3_000) {
@@ -124,15 +154,15 @@ test('a bundle stays findable for two minutes after the phone drops, then expire
   const alice = localSocket();
   hub.attach(bob);
   hub.attach(alice);
-  bob.receive(JSON.stringify({ kind: 'hello', from: BOB, bundle: bundle(BOB) }));
+  announce(bob, bobKeys, 'Bo');
   bob.close();
-  alice.receive(JSON.stringify({ kind: 'lookup', requestId: 'r1', directId: BOB }));
-  expect(alice.sent.at(-1)).toMatchObject({ present: true, bundle: bundle(BOB) });
-  alice.receive(JSON.stringify({ kind: 'hello', from: ALICE, bundle: bundle(ALICE) }));
-  alice.receive(JSON.stringify({ kind: 'offer', to: BOB, from: ALICE }));
+  alice.receive({ kind: 'lookup', requestId: 'r1', directId: BOB });
+  expect(alice.sent.at(-1)).toMatchObject({ present: true, bundle: bundleFor(bobKeys, 'Bo') });
+  announce(alice, aliceKeys, 'Ada');
+  alice.receive({ kind: 'offer', to: BOB, from: ALICE });
   expect(alice.sent.at(-1)).toMatchObject({ kind: 'unreachable', to: BOB });
   now += 120_001;
-  alice.receive(JSON.stringify({ kind: 'lookup', requestId: 'r2', directId: BOB }));
+  alice.receive({ kind: 'lookup', requestId: 'r2', directId: BOB });
   expect(alice.sent.at(-1)).toMatchObject({ present: false, bundle: null });
   alice.close();
 });
@@ -140,20 +170,21 @@ test('a bundle stays findable for two minutes after the phone drops, then expire
 test('an http presence hello is visible to a websocket lookup', () => {
   const seen: string[] = [];
   const hub = createSignalHub({ onHello: (id) => seen.push(id) });
-  expect(hub.remember(BOB, bundle(BOB))).toBe(true);
-  expect(hub.remember('dir_NOPE', bundle(BOB))).toBe(false);
+  const bobBundle = JSON.stringify({ directId: BOB, name: 'Bo', note: 'public-only' });
+  expect(hub.remember(BOB, bobBundle)).toBe(true);
+  expect(hub.remember('dir_NOPE', bobBundle)).toBe(false);
   const alice = localSocket();
   hub.attach(alice);
-  alice.receive(JSON.stringify({ kind: 'hello', from: ALICE, bundle: bundle(ALICE) }));
+  announce(alice, aliceKeys, 'Ada');
   expect(seen).toEqual([ALICE]);
-  alice.receive(JSON.stringify({ kind: 'lookup', requestId: 'r1', directId: BOB }));
+  alice.receive({ kind: 'lookup', requestId: 'r1', directId: BOB });
   expect(alice.sent.at(-1)?.present).toBe(true);
   expect(alice.sent.at(-1)?.bundle).toContain(BOB);
-  expect(hub.remember(ALICE, bundle(ALICE))).toBe(true);
+  expect(hub.remember(ALICE, bundleFor(aliceKeys, 'Ada'))).toBe(true);
   const bob = localSocket();
   hub.attach(bob);
-  bob.receive(JSON.stringify({ kind: 'hello', from: BOB, bundle: bundle(BOB) }));
-  bob.receive(JSON.stringify({ kind: 'offer', to: ALICE, from: BOB }));
+  announce(bob, bobKeys, 'Bo');
+  bob.receive({ kind: 'offer', to: ALICE, from: BOB });
   expect(alice.sent.some((message) => message.kind === 'offer')).toBe(true);
   bob.close();
   alice.close();

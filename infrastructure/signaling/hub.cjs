@@ -1,9 +1,11 @@
-const DIRECT_ID = /^dir_[0-9A-HJKMNP-TV-Z]{16}$/;
-const MAX_BUNDLE = 8192;
+const { DIRECT_ID, MAX_BUNDLE, verifyHello, newNonce } = require('./verify.cjs');
+
 const MAX_SIGNAL = 64 * 1024;
 const MAX_FRAME = MAX_SIGNAL + MAX_BUNDLE;
 const MAX_WATCH = 256;
 const GRACE_MS = 120_000;
+const MAX_MESSAGES_PER_SEC = 40;
+const MAX_HELLOS = 8;
 
 /**
  * In-memory rendezvous for devices that are not on the same network.
@@ -12,12 +14,17 @@ const GRACE_MS = 120_000;
  * A bundle stays findable for two minutes after the socket drops so a lookup
  * still succeeds while the phone reconnects. Message text and envelopes are never
  * accepted or forwarded here; see contracts/signaling.json.
+ *
+ * hello is accepted only with a signature over this socket's challenge nonce,
+ * using the signing key inside a verified public bundle.
  */
 function createSignalHub(options = {}) {
   const peers = new Map();
   const watchers = new Map();
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const onHello = typeof options.onHello === 'function' ? options.onHello : null;
+  const maxMessagesPerSec = Number.isFinite(options.maxMessagesPerSec) ? options.maxMessagesPerSec : MAX_MESSAGES_PER_SEC;
+  const maxHellos = Number.isFinite(options.maxHellos) ? options.maxHellos : MAX_HELLOS;
 
   function valid(id, bundle) {
     return typeof id === 'string'
@@ -65,9 +72,34 @@ function createSignalHub(options = {}) {
     let selfId = '';
     let token = 0;
     let watching = new Set();
+    let nonce = newNonce();
+    let helloCount = 0;
+    let windowStart = now();
+    let windowCount = 0;
+    let closed = false;
 
     const send = (text) => {
       if (socket.readyState === 1) socket.send(text);
+    };
+
+    const drop = () => {
+      if (closed) return;
+      closed = true;
+      if (typeof socket.close === 'function') socket.close();
+    };
+
+    const limited = () => {
+      const at = now();
+      if (at - windowStart >= 1000) {
+        windowStart = at;
+        windowCount = 0;
+      }
+      windowCount += 1;
+      if (windowCount > maxMessagesPerSec) {
+        drop();
+        return true;
+      }
+      return false;
     };
 
     const unwatch = () => {
@@ -81,8 +113,10 @@ function createSignalHub(options = {}) {
     };
 
     const onMessage = (raw) => {
+      if (closed) return;
       const textFrame = String(raw);
       if (textFrame.length > MAX_FRAME) return;
+      if (limited()) return;
       let message;
       try {
         message = JSON.parse(textFrame);
@@ -92,9 +126,15 @@ function createSignalHub(options = {}) {
       if (!message || typeof message !== 'object') return;
 
       if (message.kind === 'hello') {
-        const id = message.from;
+        helloCount += 1;
+        if (helloCount > maxHellos) {
+          drop();
+          return;
+        }
+        const verified = verifyHello(message, nonce);
+        if (!verified) return;
+        const id = verified.directId;
         const bundle = message.bundle;
-        if (!valid(id, bundle)) return;
         if (selfId && selfId !== id) return;
         const wasOnline = Boolean(peers.get(id)?.send);
         selfId = id;
@@ -152,6 +192,7 @@ function createSignalHub(options = {}) {
 
     const onClose = () => {
       unwatch();
+      nonce = '';
       if (!selfId) return;
       const current = peers.get(selfId);
       if (current && current.send === send && current.token === token) {
@@ -167,6 +208,7 @@ function createSignalHub(options = {}) {
     }, 25_000);
     if (typeof beat.unref === 'function') beat.unref();
     socket.on('close', () => clearInterval(beat));
+    send(JSON.stringify({ kind: 'challenge', nonce }));
   }
 
   function displayName(bundle) {
@@ -198,4 +240,4 @@ function createSignalHub(options = {}) {
   return { attach, remember, roster };
 }
 
-module.exports = { createSignalHub, DIRECT_ID, GRACE_MS, MAX_SIGNAL, MAX_BUNDLE, MAX_WATCH };
+module.exports = { createSignalHub, DIRECT_ID, GRACE_MS, MAX_SIGNAL, MAX_BUNDLE, MAX_WATCH, MAX_MESSAGES_PER_SEC, MAX_HELLOS };

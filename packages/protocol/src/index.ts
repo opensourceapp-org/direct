@@ -1,5 +1,6 @@
 export { nextDelayMs } from './backoff';
 export { BOOTSTRAP_URL_MESSAGES, DEFAULT_BOOTSTRAP_PORT, HOSTED_BOOTSTRAP_URL, normalizeBootstrapUrl } from './bootstrapUrl';
+export { SIGNAL_PROOF_PREFIX, signalProofMessage } from './signalProof';
 export type { BootstrapUrlError, BootstrapUrlResult } from './bootstrapUrl';
 export { DeliveryEngine, DeliveryRejected } from './delivery';
 export { EnvelopeError, aadFor, canonical, decodeEnvelope, encodeEnvelope } from './envelope';

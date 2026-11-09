@@ -112,7 +112,7 @@ final class FakeHub: WebSocketFactory {
         lock.unlock()
         guard let frame = SignalCodec.decode(text) else { return }
         switch frame {
-        case let .hello(from, bundle):
+        case let .hello(from, bundle, _, _):
             guard DirectIds.isValid(from), bundle.contains("\"directId\":\"\(from)\"") else { return }
             let wasOnline = isOnline(from)
             lock.lock()

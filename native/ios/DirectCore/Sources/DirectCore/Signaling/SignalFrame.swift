@@ -2,7 +2,8 @@ import Foundation
 
 /// Frames from contracts/signaling.json. Nothing here can carry message text.
 public enum SignalFrame: Equatable {
-    case hello(from: String, bundle: String)
+    case hello(from: String, bundle: String, nonce: String?, proof: String?)
+    case challenge(nonce: String)
     case lookup(requestId: String, directId: String)
     case watch(ids: [String])
     case offer(to: String, from: String, sdp: String)
@@ -35,8 +36,15 @@ public enum SignalCodec {
     public static func encode(_ frame: SignalFrame) -> String {
         let json: JSON
         switch frame {
-        case let .hello(from, bundle):
-            json = .object([("kind", .string("hello")), ("from", .string(from)), ("bundle", .string(bundle))])
+        case let .hello(from, bundle, nonce, proof):
+            var fields: [(String, JSON)] = [("kind", .string("hello")), ("from", .string(from)), ("bundle", .string(bundle))]
+            if let nonce, let proof {
+                fields.append(("nonce", .string(nonce)))
+                fields.append(("proof", .string(proof)))
+            }
+            json = .object(fields)
+        case let .challenge(nonce):
+            json = .object([("kind", .string("challenge")), ("nonce", .string(nonce))])
         case let .lookup(requestId, directId):
             json = .object([("kind", .string("lookup")), ("requestId", .string(requestId)), ("directId", .string(directId))])
         case let .watch(ids):
@@ -81,7 +89,10 @@ public enum SignalCodec {
         switch json["kind"]?.string {
         case "hello":
             guard let from, let bundle = json["bundle"]?.string else { return nil }
-            return .hello(from: from, bundle: bundle)
+            return .hello(from: from, bundle: bundle, nonce: json["nonce"]?.string, proof: json["proof"]?.string)
+        case "challenge":
+            guard let nonce = json["nonce"]?.string else { return nil }
+            return .challenge(nonce: nonce)
         case "lookup":
             guard let requestId = json["requestId"]?.string, let directId = json["directId"]?.string else { return nil }
             if let present = json["present"]?.bool {

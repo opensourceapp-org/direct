@@ -14,6 +14,7 @@ import app.direct.core.protocol.ProfileCards
 import app.direct.core.signaling.BootstrapClient
 import app.direct.core.signaling.BootstrapStatus
 import app.direct.core.signaling.BootstrapUrl
+import app.direct.core.signaling.SignalProof
 import app.direct.core.signaling.WebSocketFactory
 import app.direct.core.store.ContactRecord
 import app.direct.core.store.Direction
@@ -462,7 +463,9 @@ class DirectNode(
             it.onCall = { text -> callPlain = text }
         }
         transport = transportFactory(bootstrap, identity.directId, scope).also { it.setListener(listener) }
-        bootstrap.announce(identity.directId, Bundles.create(identity, profile.name, profile.deviceId).encode())
+        bootstrap.announce(identity.directId, Bundles.create(identity, profile.name, profile.deviceId).encode()) { nonce ->
+            Encoding.base64Url(identity.sign(SignalProof.message(nonce, identity.directId)))
+        }
         refreshWatch()
         wake.trySend(Unit)
     }

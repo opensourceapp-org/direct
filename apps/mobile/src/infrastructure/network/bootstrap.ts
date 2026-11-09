@@ -28,6 +28,8 @@ export class DirectBootstrap implements SignalingClient {
   private readonly offers = new Map<string, (missing: boolean) => void>();
   private selfId = '';
   private bundle = '';
+  private nonce = '';
+  private signProof: ((nonce: string) => string) | null = null;
   private stopped = true;
   state: 'idle' | 'connecting' | 'open' = 'idle';
   currentUrl = '';
@@ -47,6 +49,7 @@ export class DirectBootstrap implements SignalingClient {
     this.timer = null;
     this.socket?.close();
     this.socket = null;
+    this.nonce = '';
     for (const resolve of this.lookups.values()) resolve(null);
     this.lookups.clear();
     for (const done of this.offers.values()) done(true);
@@ -57,8 +60,9 @@ export class DirectBootstrap implements SignalingClient {
     this.socket?.close();
   }
 
-  announce(bundle: string): void {
+  announce(bundle: string, signProof?: (nonce: string) => string): void {
     this.bundle = bundle;
+    if (signProof) this.signProof = signProof;
     this.hello();
   }
 
@@ -133,6 +137,7 @@ export class DirectBootstrap implements SignalingClient {
     socket.addEventListener('close', () => {
       if (this.socket !== socket) return;
       this.socket = null;
+      this.nonce = '';
       this.state = this.stopped ? 'idle' : 'connecting';
       for (const resolve of this.lookups.values()) resolve(null);
       this.lookups.clear();
@@ -152,6 +157,16 @@ export class DirectBootstrap implements SignalingClient {
 
   private hello(): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN || !this.selfId || !this.bundle) return;
+    if (this.nonce && this.signProof) {
+      this.socket.send(JSON.stringify({
+        kind: 'hello',
+        from: this.selfId,
+        bundle: this.bundle,
+        nonce: this.nonce,
+        proof: this.signProof(this.nonce),
+      }));
+      return;
+    }
     this.socket.send(JSON.stringify({ kind: 'hello', from: this.selfId, bundle: this.bundle }));
   }
 
@@ -163,7 +178,12 @@ export class DirectBootstrap implements SignalingClient {
       return;
     }
     if (!message || typeof message !== 'object') return;
-    const record = message as { kind?: string; requestId?: string; present?: boolean; bundle?: string | null; to?: string };
+    const record = message as { kind?: string; requestId?: string; present?: boolean; bundle?: string | null; to?: string; nonce?: string };
+    if (record.kind === 'challenge' && typeof record.nonce === 'string') {
+      this.nonce = record.nonce;
+      this.hello();
+      return;
+    }
     if (record.kind === 'lookup' && record.requestId) {
       const done = this.lookups.get(record.requestId);
       this.lookups.delete(record.requestId);

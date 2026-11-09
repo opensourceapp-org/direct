@@ -25,7 +25,7 @@ pnpm server
 pnpm signaling
 ```
 
-The process listens on `0.0.0.0:8787` (`HOST` and `PORT` override those). It prints one `ws://<LAN address>:8787` line per network interface. `GET /health` returns `{ "ok": true, "service": "direct-signaling" }`.
+The process listens on `0.0.0.0:8787` (`HOST` and `PORT` override those). It prints one `ws://<LAN address>:8787` line per network interface. `GET /health` returns `{ "ok": true, "service": "direct-signaling" }`. A connecting phone must sign a one-time challenge with its identity key; a copied public bundle is not enough to take over that DIRECT ID.
 
 Open TCP 8787 on that computer's firewall. If the phones are not on the same LAN, use an address both can route to (a public host, or a tunnel that forwards 8787) and put that address on both phones. `localhost`, `127.0.0.1`, and `0.0.0.0` are rejected: on a phone, localhost is the phone.
 
