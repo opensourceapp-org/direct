@@ -358,23 +358,30 @@ struct ProfilePosts: View {
     @EnvironmentObject private var model: AppModel
     let ownerId: String
     var canAdd: Bool
+    var showsHeading: Bool = true
     @State private var item: PhotosPickerItem?
     @State private var viewing: FeedItem?
 
     var body: some View {
         let posts = profilePosts(model.state, ownerId: ownerId)
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Photos and videos").font(.headline)
-                Spacer()
-                if canAdd {
-                    PhotosPicker(selection: $item, matching: .any(of: [.images, .videos])) {
-                        Image(systemName: "camera.fill").foregroundStyle(Ink.accent)
+            if showsHeading || canAdd {
+                HStack {
+                    if showsHeading {
+                        Text("Photos and videos").font(.headline)
+                    }
+                    Spacer()
+                    if canAdd {
+                        PhotosPicker(selection: $item, matching: .any(of: [.images, .videos])) {
+                            Image(systemName: "plus.app").foregroundStyle(Ink.accent)
+                        }
                     }
                 }
+                .padding(.horizontal, showsHeading ? 0 : 16)
             }
             if posts.isEmpty {
                 Muted(canAdd ? "Add photos and videos to your profile. Accepted contacts see them." : "No photos or videos on this profile yet.")
+                    .padding(.horizontal, showsHeading ? 0 : 16)
             } else {
                 let columns = [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)]
                 LazyVGrid(columns: columns, spacing: 2) {

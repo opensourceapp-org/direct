@@ -801,48 +801,86 @@ private struct ServerHelp: View {
 
 struct IdentityView: View {
     @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        let profile = model.state.profile
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let profile {
+                    HStack(spacing: 20) {
+                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 88)
+                        HStack {
+                            Spacer()
+                            ProfileStat(value: profilePosts(model.state, ownerId: profile.directId).count, label: "Posts")
+                            Spacer()
+                            ProfileStat(value: model.state.contacts.filter { $0.accepted && !$0.blocked }.count, label: "Contacts")
+                            Spacer()
+                            ProfileStat(value: liveStories(model.state, ownerId: profile.directId).count, label: "Stories")
+                            Spacer()
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(profile.name).font(.headline)
+                        if !profile.status.isEmpty {
+                            Text(profile.status).font(.subheadline)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    NavigationLink {
+                        EditProfileView()
+                    } label: {
+                        Text("Edit profile")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Ink.text)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Ink.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Ink.line))
+                    }
+                    .padding(.horizontal, 20)
+                    ProfilePosts(ownerId: profile.directId, canAdd: true, showsHeading: false)
+                }
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+        }
+        .background(Ink.background)
+        .navigationTitle("Profile")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    SettingsView()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Settings")
+            }
+        }
+    }
+}
+
+struct EditProfileView: View {
+    @EnvironmentObject private var model: AppModel
     @State private var status = ""
-    /// The draft last written by Save status. The button shows Saved while the field still matches it.
     @State private var acknowledged: String?
     @State private var photoItem: PhotosPickerItem?
-    @State private var showQr = false
-    @State private var qrImage: UIImage?
-    @State private var share = false
 
     var body: some View {
         List {
             if let profile = model.state.profile {
                 Section {
                     HStack(spacing: 16) {
-                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 88)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(profile.name).font(.title2.bold())
-                            if !profile.status.isEmpty {
-                                Text(profile.status).font(.subheadline).foregroundStyle(Ink.muted)
+                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 72)
+                        VStack(alignment: .leading, spacing: 8) {
+                            PhotosPicker(selection: $photoItem, matching: .images) {
+                                Text("Change photo").foregroundStyle(Ink.accent)
                             }
-                            HStack(spacing: 18) {
-                                ProfileStat(value: profilePosts(model.state, ownerId: profile.directId).count, label: "Posts")
-                                ProfileStat(value: model.state.contacts.filter { $0.accepted && !$0.blocked }.count, label: "Contacts")
-                                ProfileStat(value: liveStories(model.state, ownerId: profile.directId).count, label: "Stories")
+                            if profile.avatarJpegBase64 != nil {
+                                Button("Remove photo", role: .destructive) { model.clearAvatar() }
                             }
                         }
-                    }
-                    ProfilePosts(ownerId: profile.directId, canAdd: true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("DIRECT ID").font(.caption).foregroundStyle(Ink.muted)
-                        Text(profile.directId)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
-                    PhotosPicker(selection: $photoItem, matching: .images) {
-                        actionLabel("Change photo", icon: "camera", tint: Ink.accent)
-                    }
-                    .buttonStyle(.plain)
-                    if profile.avatarJpegBase64 != nil {
-                        Button { model.clearAvatar() } label: {
-                            actionLabel("Remove photo", icon: "trash", tint: Ink.danger)
-                        }
-                        .buttonStyle(.plain)
                     }
                 }
                 .listRowBackground(Ink.surface)
@@ -883,6 +921,34 @@ struct IdentityView: View {
                     Text("Choose one, or write your own and tap Save status.")
                 }
                 .listRowBackground(Ink.surface)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .navigationTitle("Edit profile")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { status = model.state.profile?.status ?? "" }
+        .onChange(of: model.state.profile?.status) { status = $0 ?? "" }
+        .onChange(of: photoItem) { item in
+            Task {
+                guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
+                do { model.setAvatar(try MediaPrep.avatar(data)) } catch { model.toast = (error as? PrepError)?.message ?? "That photo could not be used." }
+            }
+        }
+    }
+
+    private var statusDraft: String { status.trimmingCharacters(in: .whitespacesAndNewlines) }
+}
+
+struct SettingsView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var showQr = false
+    @State private var qrImage: UIImage?
+    @State private var share = false
+
+    var body: some View {
+        List {
+            if let profile = model.state.profile {
                 if let bundle = model.state.bundle {
                     let server = model.state.bootstrapUrl ?? ""
                     let card = MediaPrep.shareCard(bundle: bundle, status: profile.status, avatarJpeg: profile.avatarJpegBase64.flatMap { Encoding.fromBase64Url($0) }, bootstrap: server)
@@ -891,7 +957,7 @@ struct IdentityView: View {
                             showQr.toggle()
                             qrImage = showQr ? MediaPrep.qrImage(card) : nil
                         } label: {
-                            actionLabel(showQr ? "Hide QR code" : "Show QR code", icon: "qrcode", tint: Ink.accent)
+                            settingsRow(showQr ? "Hide QR code" : "Show QR code", icon: "qrcode", tint: Ink.accent)
                         }
                         .buttonStyle(.plain)
                         if showQr {
@@ -907,28 +973,24 @@ struct IdentityView: View {
                                 } else {
                                     Muted("This profile is too large to draw as a QR code. Share it instead, or remove the photo and try again.")
                                 }
-                                Muted(server.isEmpty
-                                    ? "Set the server under Network before sharing. Without that address, the other phone can save your identity but cannot connect."
-                                    : "The QR code is your signed identity and your server address, plus the status and a small photo. Scanning it saves that server so the two phones can connect. The status and photo are for display. They are not part of the signature.")
                             }
                         }
                         Button { share = true } label: {
-                            actionLabel("Share profile", icon: "square.and.arrow.up", tint: Ink.accent)
+                            settingsRow("Share profile", icon: "square.and.arrow.up", tint: Ink.accent)
                         }
                         .buttonStyle(.plain)
                         Button { model.copy(profile.directId, label: "DIRECT ID") } label: {
-                            actionLabel("Copy DIRECT ID", icon: "doc.on.doc", tint: Ink.accent)
+                            settingsRow("Copy DIRECT ID", icon: "doc.on.doc", tint: Ink.accent)
                         }
                         .buttonStyle(.plain)
                         Button { model.copy(bundle, label: "Identity bundle") } label: {
-                            actionLabel("Copy identity bundle", icon: "doc.on.doc", tint: Ink.accent)
+                            settingsRow("Copy identity bundle", icon: "doc.on.doc", tint: Ink.accent)
                         }
                         .buttonStyle(.plain)
-                        Muted(server.isEmpty
-                            ? "Share includes your name and DIRECT ID. Set the server under Network first, or the other phone will not know where to connect."
-                            : "Share sends a picture of your QR code, with your name, DIRECT ID, and server address. Scanning it saves that server on the other phone.")
                     } header: {
                         Text("Share")
+                    } footer: {
+                        Text(profile.directId)
                     }
                     .listRowBackground(Ink.surface)
                 }
@@ -936,24 +998,24 @@ struct IdentityView: View {
                     NavigationLink {
                         NetworkView()
                     } label: {
-                        actionLabel("Network", icon: "antenna.radiowaves.left.and.right", tint: Ink.accent)
+                        settingsRow("Network", icon: "antenna.radiowaves.left.and.right", tint: Ink.accent)
                     }
                     Button { model.showIntro = true } label: {
-                        actionLabel("How DIRECT works", icon: "info.circle", tint: Ink.accent)
+                        settingsRow("How DIRECT works", icon: "info.circle", tint: Ink.accent)
                     }
                     .buttonStyle(.plain)
                 } header: {
-                    Text("Settings")
+                    Text("Connection")
                 } footer: {
-                    Text("Bootstrap address, connection status, and how to run your own server.")
+                    Text("Device \(profile.deviceId)")
                 }
                 .listRowBackground(Ink.surface)
                 Section {
                     Button { model.showPhrase() } label: {
-                        actionLabel("Show recovery phrase", icon: "key", tint: Ink.warning)
+                        settingsRow("Show recovery phrase", icon: "key", tint: Ink.warning)
                     }
                     .buttonStyle(.plain)
-                    Muted("The private key never leaves this phone's Keychain. The phrase is the only backup.")
+                    Muted("Anyone with these 24 words can become you. Write them down and keep them off this phone.")
                 } header: {
                     Text("Recovery")
                 }
@@ -962,15 +1024,8 @@ struct IdentityView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .navigationTitle("Profile")
-        .onAppear { status = model.state.profile?.status ?? "" }
-        .onChange(of: model.state.profile?.status) { status = $0 ?? "" }
-        .onChange(of: photoItem) { item in
-            Task {
-                guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }
-                do { model.setAvatar(try MediaPrep.avatar(data)) } catch { model.toast = (error as? PrepError)?.message ?? "That photo could not be used." }
-            }
-        }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $share) {
             if let profile = model.state.profile, let bundle = model.state.bundle {
                 let server = model.state.bootstrapUrl ?? ""
@@ -984,37 +1039,35 @@ struct IdentityView: View {
             }
         }
     }
+}
 
-    private var statusDraft: String { status.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-    private struct ProfileStat: View {
-        let value: Int
-        let label: String
-        var body: some View {
-            VStack(spacing: 2) {
-                Text("\(value)").font(.headline)
-                Text(label).font(.caption2).foregroundStyle(Ink.muted)
-            }
+private struct ProfileStat: View {
+    let value: Int
+    let label: String
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("\(value)").font(.headline)
+            Text(label).font(.caption2).foregroundStyle(Ink.muted)
         }
     }
+}
 
-    private func actionLabel(_ title: String, icon: String, tint: Color) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 32, height: 32)
-                .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            Text(title)
-                .font(.body.weight(.medium))
-                .foregroundStyle(Ink.text)
-            Spacer(minLength: 8)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Ink.muted)
-        }
-        .contentShape(Rectangle())
+private func settingsRow(_ title: String, icon: String, tint: Color) -> some View {
+    HStack(spacing: 12) {
+        Image(systemName: icon)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 32, height: 32)
+            .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        Text(title)
+            .font(.body.weight(.medium))
+            .foregroundStyle(Ink.text)
+        Spacer(minLength: 8)
+        Image(systemName: "chevron.right")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Ink.muted)
     }
+    .contentShape(Rectangle())
 }
 
 private struct TapIfEnabled: ViewModifier {

@@ -363,6 +363,7 @@ internal fun ProfilePosts(
     state: NodeState,
     ownerId: String,
     canAdd: Boolean,
+    showHeading: Boolean = true,
     onError: (String?) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -390,14 +391,14 @@ internal fun ProfilePosts(
         }
     }
     Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Label("Photos and videos")
-            if (canAdd) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (showHeading || canAdd) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (showHeading) Label("Photos and videos") else Spacer(Modifier.weight(1f))
+                if (canAdd) {
                     IconButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }) {
                         Icon(Icons.Outlined.PhotoCamera, "Add to profile", tint = Ink.accent)
                     }
