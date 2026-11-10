@@ -27,19 +27,22 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Videocam
@@ -65,11 +68,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -111,8 +121,20 @@ internal fun feedOwnerJpeg(state: NodeState, ownerId: String): String? {
     return state.contacts.firstOrNull { it.directId == ownerId }?.avatarJpegBase64
 }
 
+private val HeartPink = Color(0xFFE0245E)
+
 private fun likedByMe(item: FeedItem, selfId: String?): Boolean =
     selfId != null && item.likes.any { it.fromId == selfId }
+
+private fun likeSummary(state: NodeState, item: FeedItem): String? {
+    if (item.likes.isEmpty()) return null
+    val names = item.likes.map { feedOwnerName(state, it.fromId) }
+    return when (names.size) {
+        1 -> "Liked by ${names[0]}"
+        2 -> "Liked by ${names[0]} and ${names[1]}"
+        else -> "Liked by ${names[0]} and ${names.size - 1} others"
+    }
+}
 
 private fun formatFeedTime(ms: Long): String {
     val seconds = ((System.currentTimeMillis() - ms).coerceAtLeast(0)) / 1000
@@ -135,25 +157,38 @@ internal fun FeedScreen(
     val posts = othersPosts(state)
     var error by remember { mutableStateOf<String?>(null) }
     var viewingId by remember { mutableStateOf<String?>(null) }
-    Column(Modifier.fillMaxSize()) {
-        Header("Posts from people you know", "Feed")
-        if (selfId != null) {
-            StoriesTray(node, state, selfId, onOpenStory) { error = it }
+    Column(Modifier.fillMaxSize().background(Ink.background)) {
+        Header("From people you know", "Feed")
+        Column(Modifier.fillMaxWidth().background(Ink.surface)) {
+            if (selfId != null) {
+                StoriesTray(node, state, selfId, onOpenStory) { error = it }
+            }
         }
-        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp)) }
+        HorizontalDivider(color = Ink.border)
+        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
         if (posts.isEmpty()) {
             Column(
                 Modifier.weight(1f).fillMaxWidth().padding(32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Muted("Posts your contacts add to their profile show up here. Like them or leave a comment — it stays between your phones.")
+                Box(Modifier.size(64.dp).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.DynamicFeed, null, tint = Ink.accent, modifier = Modifier.size(28.dp))
+                }
+                Text("No posts yet", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.padding(top = 16.dp))
+                Text(
+                    "When a contact adds photos or videos to their profile, they show up here.",
+                    color = Ink.muted,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
         } else {
             LazyColumn(Modifier.weight(1f)) {
                 items(posts, key = { it.id }) { item ->
                     FeedPostCard(node, state, item, onOpenProfile) { viewingId = item.id }
-                    HorizontalDivider(color = Ink.border)
+                    Spacer(Modifier.height(10.dp))
                 }
             }
         }
@@ -170,25 +205,32 @@ private fun FeedPostCard(
     onOpen: () -> Unit,
 ) {
     val name = feedOwnerName(state, item.ownerId)
-    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+    Column(Modifier.fillMaxWidth().background(Ink.surface)) {
         Row(
-            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 16.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 36.dp)
+            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 38.dp)
             Column(Modifier.weight(1f)) {
-                Text(name, fontWeight = FontWeight.SemiBold)
+                Text(name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
             }
         }
         FeedThumb(node, item, Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onOpen))
         FeedActions(node, state, item, onOpen)
+        likeSummary(state, item)?.let { summary ->
+            Text(summary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+        }
         if (item.caption.isNotBlank()) {
             Text(
-                item.caption,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                fontSize = 15.sp,
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
+                    append("  ")
+                    append(item.caption)
+                },
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                fontSize = 14.sp,
             )
         }
         if (item.comments.isNotEmpty()) {
@@ -196,9 +238,12 @@ private fun FeedPostCard(
                 if (item.comments.size == 1) "View 1 comment" else "View all ${item.comments.size} comments",
                 color = Ink.muted,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).clickable(onClick = onOpen),
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp).clickable(onClick = onOpen),
             )
+            val latest = item.comments.last()
+            CommentRow(state, latest.fromId, latest.body, latest.createdAt, compact = true, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp).clickable(onClick = onOpen))
         }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -482,7 +527,9 @@ private fun FeedThumb(node: DirectNode, item: FeedItem, modifier: Modifier) {
             Box(Modifier.fillMaxSize().background(Ink.accentSoft))
         }
         if (item.kind == "video") {
-            Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
+            Box(Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp))
+            }
         }
     }
 }
@@ -527,35 +574,102 @@ private fun FeedActions(
     state: NodeState,
     item: FeedItem,
     onOpenComments: () -> Unit,
-    light: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
-    val selfId = state.profile?.directId
-    val liked = likedByMe(item, selfId)
-    val tint = if (light) Color.White else Ink.foreground
-    val heart = if (liked) Color(0xFFE0245E) else tint
+    val liked = likedByMe(item, state.profile?.directId)
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, top = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = { scope.launch { runCatching { node.likeFeed(item.id) } } }) {
-            Icon(if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, "Like", tint = heart)
-        }
-        Text("${item.likes.size}", color = tint, fontWeight = FontWeight.Medium)
-        IconButton(onClick = onOpenComments) {
-            Icon(Icons.Outlined.ChatBubbleOutline, "Comments", tint = tint)
-        }
-        Text("${item.comments.size}", color = tint, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.weight(1f))
-        if (item.likes.isNotEmpty()) {
-            Text(
-                if (item.likes.size == 1) "1 like" else "${item.likes.size} likes",
-                color = tint,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(end = 12.dp),
+            Icon(
+                if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                "Like",
+                tint = if (liked) HeartPink else Ink.foreground,
+                modifier = Modifier.size(26.dp),
             )
         }
+        IconButton(onClick = onOpenComments) {
+            Icon(Icons.Outlined.ChatBubbleOutline, "Comments", tint = Ink.foreground, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.weight(1f))
+        if (item.comments.isNotEmpty()) {
+            Text("${item.comments.size}", color = Ink.muted, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun CommentRow(
+    state: NodeState,
+    fromId: String,
+    body: String,
+    createdAt: Long,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val name = feedOwnerName(state, fromId)
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+        Avatar(name, jpegBytes(feedOwnerJpeg(state, fromId)), if (compact) 24.dp else 32.dp)
+        Column(Modifier.weight(1f)) {
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
+                    append("  ")
+                    append(body)
+                },
+                fontSize = if (compact) 13.sp else 14.sp,
+                lineHeight = if (compact) 18.sp else 20.sp,
+            )
+            Text(formatFeedTime(createdAt), color = Ink.muted, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+    }
+}
+
+@Composable
+private fun CommentComposer(
+    state: NodeState,
+    draft: String,
+    onDraft: (String) -> Unit,
+    onSend: () -> Unit,
+) {
+    val focus = LocalFocusManager.current
+    val self = state.profile
+    val ready = draft.isNotBlank()
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Avatar(self?.name ?: "You", jpegBytes(self?.avatarJpegBase64), 32.dp)
+        BasicTextField(
+            value = draft,
+            onValueChange = { onDraft(it.take(FeedNotes.MAX_COMMENT)) },
+            singleLine = true,
+            textStyle = TextStyle(fontSize = 15.sp, color = Ink.foreground),
+            cursorBrush = SolidColor(Ink.accent),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { if (ready) { onSend(); focus.clearFocus() } }),
+            modifier = Modifier.weight(1f),
+            decorationBox = { inner ->
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(Ink.background)
+                        .border(1.dp, Ink.border, RoundedCornerShape(22.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                ) {
+                    if (draft.isEmpty()) Text("Add a comment…", color = Ink.muted, fontSize = 15.sp)
+                    inner()
+                }
+            },
+        )
+        Text(
+            "Post",
+            color = if (ready) Ink.accent else Ink.muted,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clickable(enabled = ready, onClick = { if (ready) { onSend(); focus.clearFocus() } }),
+        )
     }
 }
 
@@ -571,8 +685,9 @@ private fun FeedLightbox(
 ) {
     val scope = rememberCoroutineScope()
     var draft by rememberSaveable(item.id) { mutableStateOf("") }
+    val name = feedOwnerName(state, item.ownerId)
     BackHandler(onBack = onClose)
-    Column(Modifier.fillMaxSize().background(Ink.background).imePadding()) {
+    Column(Modifier.fillMaxSize().background(Color.Black).imePadding()) {
         Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
             FeedMedia(node, item, Modifier.fillMaxSize())
             Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -582,61 +697,65 @@ private fun FeedLightbox(
                 }
             }
         }
-        Column(Modifier.fillMaxWidth().background(Ink.surface)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(Ink.surface),
+        ) {
+            Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Ink.border))
+            }
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                val name = feedOwnerName(state, item.ownerId)
-                Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 32.dp)
+                Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 36.dp)
                 Column(Modifier.weight(1f)) {
-                    Text(name, fontWeight = FontWeight.SemiBold)
+                    Text(name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                     Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
                 }
             }
             FeedActions(node, state, item, onOpenComments = {})
-            if (item.caption.isNotBlank()) {
-                Text(item.caption, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), fontSize = 15.sp)
+            likeSummary(state, item)?.let { summary ->
+                Text(summary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp))
             }
+            if (item.caption.isNotBlank()) {
+                Text(
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
+                        append("  ")
+                        append(item.caption)
+                    },
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                    fontSize = 14.sp,
+                )
+            }
+            HorizontalDivider(color = Ink.border, modifier = Modifier.padding(top = 8.dp))
             if (item.comments.isEmpty()) {
-                Muted("Be the first to comment.", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                Text("No comments yet. Say something.", color = Ink.muted, fontSize = 14.sp, modifier = Modifier.padding(14.dp))
             } else {
-                Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     item.comments.forEach { comment ->
-                        val who = feedOwnerName(state, comment.fromId)
-                        Column(Modifier.padding(vertical = 6.dp)) {
-                            Text(who, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text(comment.body, fontSize = 14.sp)
-                            Text(formatFeedTime(comment.createdAt), color = Ink.muted, fontSize = 11.sp)
-                        }
+                        CommentRow(state, comment.fromId, comment.body, comment.createdAt)
                     }
                 }
             }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Box(Modifier.weight(1f)) {
-                    Field(draft, { draft = it.take(FeedNotes.MAX_COMMENT) }, "Add a comment…")
-                }
-                IconButton(
-                    onClick = {
-                        val body = draft
-                        scope.launch {
-                            try {
-                                node.commentFeed(item.id, body)
-                                draft = ""
-                                onError(null)
-                            } catch (error: Exception) {
-                                onError(error.message ?: "That comment was not saved.")
-                            }
-                        }
-                    },
-                    enabled = draft.isNotBlank(),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, "Post comment", tint = if (draft.isNotBlank()) Ink.accent else Ink.muted)
+            HorizontalDivider(color = Ink.border)
+            CommentComposer(state, draft, { draft = it }) {
+                val body = draft
+                scope.launch {
+                    try {
+                        node.commentFeed(item.id, body)
+                        draft = ""
+                        onError(null)
+                    } catch (error: Exception) {
+                        onError(error.message ?: "That comment was not saved.")
+                    }
                 }
             }
         }
