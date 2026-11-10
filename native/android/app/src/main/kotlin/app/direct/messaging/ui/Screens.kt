@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -115,6 +116,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1166,11 +1168,12 @@ private fun MessageBubble(
     val sticker = kind == "sticker"
     val actionable = kind != "call" && kind != "group"
     val ink = if (outgoing) Color.White else Ink.foreground
+    val hasReactions = message.reactions.isNotEmpty() && !message.deleted
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start) {
         if (group && !outgoing && sender != null) {
             Text(sender, fontSize = 12.sp, color = Ink.muted, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
         }
-        Box {
+        Box(Modifier.padding(bottom = if (hasReactions) 16.dp else 0.dp)) {
             Column(
                 Modifier
                     .widthIn(min = if (kind == "audio") 220.dp else 0.dp, max = 280.dp)
@@ -1180,6 +1183,7 @@ private fun MessageBubble(
                             .border(androidx.compose.foundation.BorderStroke(1.dp, if (outgoing) Ink.accent else Ink.border), RoundedCornerShape(20.dp))
                             .padding(8.dp),
                     )
+                    .padding(bottom = if (hasReactions) 14.dp else 0.dp)
                     .combinedClickable(
                         onClick = { if (outgoing && message.state == MessageState.FAILED) onRetry() },
                         onLongClick = { if (actionable) menu = true },
@@ -1226,18 +1230,40 @@ private fun MessageBubble(
                     }
                 }
             }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            if (hasReactions) {
+                val selfId = state.profile?.directId
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .align(if (outgoing) Alignment.BottomEnd else Alignment.BottomStart)
+                        .padding(horizontal = 8.dp)
+                        .wrapContentWidth(if (outgoing) Alignment.End else Alignment.Start)
+                        .widthIn(max = 264.dp),
+                ) {
+                    message.reactions.groupBy { it.emoji }.forEach { (emoji, people) ->
+                        val mine = people.any { it.fromId == selfId }
+                        ReactionChip(emoji, people.size, mine) { onReact(emoji) }
+                    }
+                }
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.width(248.dp)) {
                 if (!message.deleted) {
-                    Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        ChatNotes.EMOJIS.forEach { emoji ->
-                            Text(
-                                emoji,
-                                fontSize = 20.sp,
-                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
-                                    menu = false
-                                    onReact(emoji)
-                                }.padding(6.dp),
-                            )
+                    Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        ChatNotes.EMOJIS.chunked(4).forEach { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                row.forEach { emoji ->
+                                    Box(
+                                        Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).clickable {
+                                            menu = false
+                                            onReact(emoji)
+                                        },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(emoji, fontSize = 24.sp, textAlign = TextAlign.Center)
+                                    }
+                                }
+                            }
                         }
                     }
                     HorizontalDivider(color = Ink.border)
@@ -1251,24 +1277,6 @@ private fun MessageBubble(
                 DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
             }
         }
-        if (message.reactions.isNotEmpty() && !message.deleted) {
-            val selfId = state.profile?.directId
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
-                message.reactions.groupBy { it.emoji }.forEach { (emoji, people) ->
-                    val mine = people.any { it.fromId == selfId }
-                    Text(
-                        if (people.size > 1) "$emoji ${people.size}" else emoji,
-                        fontSize = 14.sp,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (mine) Ink.accentSoft else Ink.surface)
-                            .border(androidx.compose.foundation.BorderStroke(1.dp, if (mine) Ink.accent else Ink.border), RoundedCornerShape(12.dp))
-                            .clickable { onReact(emoji) }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
-                }
-            }
-        }
         val state0 = message.state
         if (outgoing && state0 != null && !message.deleted) {
             Text(
@@ -1278,6 +1286,24 @@ private fun MessageBubble(
                 modifier = Modifier.padding(top = 2.dp).clickable(enabled = state0 == MessageState.FAILED, onClick = onRetry),
             )
         }
+    }
+}
+
+@Composable
+private fun ReactionChip(emoji: String, count: Int, mine: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .height(28.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (mine) Ink.accentSoft else Ink.surface)
+            .border(androidx.compose.foundation.BorderStroke(1.dp, if (mine) Ink.accent else Ink.border), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(emoji, fontSize = 14.sp, lineHeight = 16.sp)
+        if (count > 1) Text(count.toString(), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Ink.foreground, lineHeight = 16.sp)
     }
 }
 

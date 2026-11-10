@@ -821,14 +821,20 @@ struct MediaBubble: View {
                         .padding(.horizontal, 4)
                 }
                 content(outgoing: outgoing)
+                    .padding(.bottom, hasReactions ? 12 : 0)
+                    .overlay(alignment: outgoing ? .bottomTrailing : .bottomLeading) {
+                        if hasReactions {
+                            reactionChips
+                                .offset(y: 12)
+                                .padding(.horizontal, 8)
+                        }
+                    }
+                    .padding(.bottom, hasReactions ? 16 : 0)
                 if message.edited, !message.deleted {
                     Text("Edited")
                         .font(.caption2)
                         .foregroundStyle(Ink.muted)
                         .padding(.horizontal, 4)
-                }
-                if !message.reactions.isEmpty, !message.deleted {
-                    reactionChips
                 }
                 if showReceipt, !receipt.isEmpty, !message.deleted {
                     Button {
@@ -866,7 +872,12 @@ struct MediaBubble: View {
             if message.mediaKind != "call", message.mediaKind != "group" {
                 if !message.deleted {
                     ControlGroup {
-                        ForEach(ChatNotes.emojis, id: \.self) { emoji in
+                        ForEach(Array(ChatNotes.emojis.prefix(4)), id: \.self) { emoji in
+                            Button(emoji) { model.react(message.id, emoji) }
+                        }
+                    }
+                    ControlGroup {
+                        ForEach(Array(ChatNotes.emojis.suffix(4)), id: \.self) { emoji in
                             Button(emoji) { model.react(message.id, emoji) }
                         }
                     }
@@ -882,6 +893,8 @@ struct MediaBubble: View {
         }
     }
 
+    private var hasReactions: Bool { !message.reactions.isEmpty && !message.deleted }
+
     private var reactionChips: some View {
         let selfId = model.state.profile?.directId
         let groups = Dictionary(grouping: message.reactions, by: \.emoji)
@@ -895,16 +908,23 @@ struct MediaBubble: View {
                 Button {
                     model.react(message.id, emoji)
                 } label: {
-                    Text(people.count > 1 ? "\(emoji) \(people.count)" : emoji)
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(mine ? Ink.accent.opacity(0.16) : Ink.surface, in: Capsule())
-                        .overlay(Capsule().stroke(mine ? Ink.accent : Ink.line, lineWidth: 1))
+                    HStack(spacing: 4) {
+                        Text(emoji).font(.system(size: 14))
+                        if people.count > 1 {
+                            Text("\(people.count)")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Ink.text)
+                        }
+                    }
+                    .frame(height: 28)
+                    .padding(.horizontal, 8)
+                    .background(mine ? Ink.accent.opacity(0.16) : Ink.surface, in: Capsule())
+                    .overlay(Capsule().stroke(mine ? Ink.accent : Ink.line, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
             }
         }
+        .fixedSize()
     }
 
     private var receipt: String {
