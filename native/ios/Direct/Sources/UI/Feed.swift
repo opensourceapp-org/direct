@@ -594,21 +594,21 @@ struct FeedThumb: View {
             .frame(maxWidth: .infinity)
             .overlay {
                 GeometryReader { geo in
-                    ZStack {
-                        if let bytes, let image = UIImage(data: bytes) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .clipped()
-                        }
-                        if item.kind == "video" {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 36))
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(.white)
-                        }
+                    if let bytes, let image = UIImage(data: bytes) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
                     }
+                }
+            }
+            .overlay {
+                if item.kind == "video" {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 36))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.white)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
