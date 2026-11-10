@@ -168,7 +168,7 @@ struct FeedPostCard: View {
                         Text(item.comments.count == 1 ? "View 1 comment" : "View all \(item.comments.count) comments")
                             .font(.footnote)
                             .foregroundStyle(Ink.muted)
-                        CommentRow(fromId: latest.fromId, body: latest.body, createdAt: latest.createdAt, compact: true)
+                        CommentRow(fromId: latest.fromId, text: latest.body, createdAt: latest.createdAt, compact: true)
                     }
                     .padding(.horizontal, 14)
                     .padding(.top, 6)
@@ -212,7 +212,7 @@ struct FeedActions: View {
 struct CommentRow: View {
     @EnvironmentObject private var model: AppModel
     let fromId: String
-    let body: String
+    let text: String
     let createdAt: Int64
     var compact = false
 
@@ -221,7 +221,7 @@ struct CommentRow: View {
         HStack(alignment: .top, spacing: 10) {
             Avatar(name: name, jpeg: feedOwnerJpeg(model.state, fromId), size: compact ? 24 : 32)
             VStack(alignment: .leading, spacing: 2) {
-                (Text(name).fontWeight(.semibold) + Text("  ") + Text(body))
+                (Text(name).fontWeight(.semibold) + Text("  ") + Text(text))
                     .font(compact ? .footnote : .subheadline)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(formatFeedTime(createdAt)).font(.caption2).foregroundStyle(Ink.muted)
@@ -620,7 +620,7 @@ struct FeedLightbox: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 12) {
                                 ForEach(item.comments) { comment in
-                                    CommentRow(fromId: comment.fromId, body: comment.body, createdAt: comment.createdAt)
+                                    CommentRow(fromId: comment.fromId, text: comment.body, createdAt: comment.createdAt)
                                 }
                             }
                             .padding(.horizontal, 14)
