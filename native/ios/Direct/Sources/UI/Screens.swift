@@ -125,12 +125,12 @@ struct HomeView: View {
             NavigationStack { ContactsView() }
                 .tabItem { Label("Contacts", systemImage: "person.2") }
                 .tag(HomeTab.contacts)
-            NavigationStack { NetworkView() }
-                .tabItem { Label("Network", systemImage: "antenna.radiowaves.left.and.right") }
-                .tag(HomeTab.network)
+            NavigationStack { FeedView() }
+                .tabItem { Label("Feed", systemImage: "rectangle.stack") }
+                .tag(HomeTab.feed)
             NavigationStack { IdentityView() }
-                .tabItem { Label("Settings", systemImage: "gearshape") }
-                .tag(HomeTab.settings)
+                .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                .tag(HomeTab.profile)
         }
         .tint(Ink.accent)
         .onChange(of: model.chatPath) { path in
@@ -141,17 +141,11 @@ struct HomeView: View {
 
 struct ChatsView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var storyOwner: String?
 
     var body: some View {
         List {
             if model.state.bootstrap.phase != .open {
                 StatusRow()
-            }
-            Section {
-                StoriesTray { storyOwner = $0 }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
             }
             if model.state.conversations.isEmpty {
                 Muted("No conversations yet. Add a contact by DIRECT ID on the Contacts tab.")
@@ -189,15 +183,6 @@ struct ChatsView: View {
             }
         }
         .navigationDestination(for: String.self) { ChatView(peerId: $0) }
-        .fullScreenCover(isPresented: Binding(
-            get: { storyOwner != nil },
-            set: { if !$0 { storyOwner = nil } }
-        )) {
-            if let storyOwner {
-                StoryViewer(ownerId: storyOwner) { self.storyOwner = nil }
-                    .environmentObject(model)
-            }
-        }
     }
 }
 
@@ -829,12 +814,16 @@ struct IdentityView: View {
             if let profile = model.state.profile {
                 Section {
                     HStack(spacing: 16) {
-                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 64)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(profile.name).font(.title3.bold())
-                            Text("Your name").font(.caption).foregroundStyle(Ink.muted)
+                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 88)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(profile.name).font(.title2.bold())
                             if !profile.status.isEmpty {
-                                Text(profile.status).font(.subheadline)
+                                Text(profile.status).font(.subheadline).foregroundStyle(Ink.muted)
+                            }
+                            HStack(spacing: 18) {
+                                ProfileStat(value: profilePosts(model.state, ownerId: profile.directId).count, label: "Posts")
+                                ProfileStat(value: model.state.contacts.filter { $0.accepted && !$0.blocked }.count, label: "Contacts")
+                                ProfileStat(value: liveStories(model.state, ownerId: profile.directId).count, label: "Stories")
                             }
                         }
                     }
@@ -944,10 +933,19 @@ struct IdentityView: View {
                     .listRowBackground(Ink.surface)
                 }
                 Section {
+                    NavigationLink {
+                        NetworkView()
+                    } label: {
+                        actionLabel("Network", icon: "antenna.radiowaves.left.and.right", tint: Ink.accent)
+                    }
                     Button { model.showIntro = true } label: {
                         actionLabel("How DIRECT works", icon: "info.circle", tint: Ink.accent)
                     }
                     .buttonStyle(.plain)
+                } header: {
+                    Text("Settings")
+                } footer: {
+                    Text("Bootstrap address, connection status, and how to run your own server.")
                 }
                 .listRowBackground(Ink.surface)
                 Section {
@@ -964,7 +962,7 @@ struct IdentityView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .navigationTitle("Settings")
+        .navigationTitle("Profile")
         .onAppear { status = model.state.profile?.status ?? "" }
         .onChange(of: model.state.profile?.status) { status = $0 ?? "" }
         .onChange(of: photoItem) { item in
@@ -988,6 +986,17 @@ struct IdentityView: View {
     }
 
     private var statusDraft: String { status.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private struct ProfileStat: View {
+        let value: Int
+        let label: String
+        var body: some View {
+            VStack(spacing: 2) {
+                Text("\(value)").font(.headline)
+                Text(label).font(.caption2).foregroundStyle(Ink.muted)
+            }
+        }
+    }
 
     private func actionLabel(_ title: String, icon: String, tint: Color) -> some View {
         HStack(spacing: 12) {

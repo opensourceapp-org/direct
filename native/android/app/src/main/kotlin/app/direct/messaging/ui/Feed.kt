@@ -22,19 +22,28 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -47,6 +56,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,6 +93,113 @@ internal fun storyOwners(state: NodeState, selfId: String): List<String> {
     val contacts = state.contacts.filter { it.accepted && !it.blocked && owners.containsKey(it.directId) }
         .sortedBy { contact -> owners[contact.directId]?.all { it.seen } == true }
     return listOf(selfId) + contacts.map { it.directId }
+}
+
+internal fun othersPosts(state: NodeState): List<FeedItem> {
+    val selfId = state.profile?.directId ?: return emptyList()
+    return state.feed.filter { it.channel == FeedNotes.POST && it.ownerId != selfId }
+        .sortedByDescending { it.createdAt }
+}
+
+internal fun feedOwnerName(state: NodeState, ownerId: String): String {
+    if (ownerId == state.profile?.directId) return state.profile?.name ?: "You"
+    return state.contacts.firstOrNull { it.directId == ownerId }?.name ?: ownerId
+}
+
+internal fun feedOwnerJpeg(state: NodeState, ownerId: String): String? {
+    if (ownerId == state.profile?.directId) return state.profile?.avatarJpegBase64
+    return state.contacts.firstOrNull { it.directId == ownerId }?.avatarJpegBase64
+}
+
+private fun likedByMe(item: FeedItem, selfId: String?): Boolean =
+    selfId != null && item.likes.any { it.fromId == selfId }
+
+private fun formatFeedTime(ms: Long): String {
+    val seconds = ((System.currentTimeMillis() - ms).coerceAtLeast(0)) / 1000
+    return when {
+        seconds < 60 -> "just now"
+        seconds < 3600 -> "${seconds / 60}m"
+        seconds < 86_400 -> "${seconds / 3600}h"
+        else -> "${seconds / 86_400}d"
+    }
+}
+
+@Composable
+internal fun FeedScreen(
+    node: DirectNode,
+    state: NodeState,
+    onOpenStory: (String) -> Unit,
+    onOpenProfile: (String) -> Unit,
+) {
+    val selfId = state.profile?.directId
+    val posts = othersPosts(state)
+    var error by remember { mutableStateOf<String?>(null) }
+    var viewingId by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.fillMaxSize()) {
+        Header("Posts from people you know", "Feed")
+        if (selfId != null) {
+            StoriesTray(node, state, selfId, onOpenStory) { error = it }
+        }
+        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp)) }
+        if (posts.isEmpty()) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Muted("Posts your contacts add to their profile show up here. Like them or leave a comment — it stays between your phones.")
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f)) {
+                items(posts, key = { it.id }) { item ->
+                    FeedPostCard(node, state, item, onOpenProfile) { viewingId = item.id }
+                    HorizontalDivider(color = Ink.border)
+                }
+            }
+        }
+    }
+    FeedViewerDialog(node, state, viewingId, canDelete = false, onClose = { viewingId = null }, onError = { error = it })
+}
+
+@Composable
+private fun FeedPostCard(
+    node: DirectNode,
+    state: NodeState,
+    item: FeedItem,
+    onOpenProfile: (String) -> Unit,
+    onOpen: () -> Unit,
+) {
+    val name = feedOwnerName(state, item.ownerId)
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 36.dp)
+            Column(Modifier.weight(1f)) {
+                Text(name, fontWeight = FontWeight.SemiBold)
+                Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
+            }
+        }
+        FeedThumb(node, item, Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onOpen))
+        FeedActions(node, state, item, onOpen)
+        if (item.caption.isNotBlank()) {
+            Text(
+                item.caption,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                fontSize = 15.sp,
+            )
+        }
+        if (item.comments.isNotEmpty()) {
+            Text(
+                if (item.comments.size == 1) "View 1 comment" else "View all ${item.comments.size} comments",
+                color = Ink.muted,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).clickable(onClick = onOpen),
+            )
+        }
+    }
 }
 
 @Composable
@@ -251,7 +368,7 @@ internal fun ProfilePosts(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val posts = profilePosts(state, ownerId)
-    var viewing by remember { mutableStateOf<FeedItem?>(null) }
+    var viewingId by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -301,7 +418,7 @@ internal fun ProfilePosts(
                             FeedThumb(
                                 node,
                                 item,
-                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable { viewing = item },
+                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable { viewingId = item.id },
                             )
                         }
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
@@ -310,20 +427,7 @@ internal fun ProfilePosts(
             }
         }
     }
-    viewing?.let { item ->
-        Dialog(onDismissRequest = { viewing = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            FeedLightbox(node, item, canDelete = canAdd, onDelete = {
-                scope.launch {
-                    try {
-                        node.deleteFeed(item.id)
-                        viewing = null
-                    } catch (error: Exception) {
-                        onError(error.message)
-                    }
-                }
-            }, onClose = { viewing = null })
-        }
-    }
+    FeedViewerDialog(node, state, viewingId, canDelete = canAdd, onClose = { viewingId = null }, onError = onError)
 }
 
 @Composable
@@ -383,14 +487,156 @@ private fun FeedThumb(node: DirectNode, item: FeedItem, modifier: Modifier) {
 }
 
 @Composable
-private fun FeedLightbox(node: DirectNode, item: FeedItem, canDelete: Boolean, onDelete: () -> Unit, onClose: () -> Unit) {
+private fun FeedViewerDialog(
+    node: DirectNode,
+    state: NodeState,
+    viewingId: String?,
+    canDelete: Boolean,
+    onClose: () -> Unit,
+    onError: (String?) -> Unit,
+) {
+    val item = viewingId?.let { id -> state.feed.firstOrNull { it.id == id } }
+    LaunchedEffect(viewingId, item == null) {
+        if (viewingId != null && item == null) onClose()
+    }
+    if (item == null) return
+    val scope = rememberCoroutineScope()
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        FeedLightbox(
+            node, state, item, canDelete = canDelete,
+            onDelete = {
+                scope.launch {
+                    try {
+                        node.deleteFeed(item.id)
+                        onClose()
+                    } catch (error: Exception) {
+                        onError(error.message)
+                    }
+                }
+            },
+            onClose = onClose,
+            onError = onError,
+        )
+    }
+}
+
+@Composable
+private fun FeedActions(
+    node: DirectNode,
+    state: NodeState,
+    item: FeedItem,
+    onOpenComments: () -> Unit,
+    light: Boolean = false,
+) {
+    val scope = rememberCoroutineScope()
+    val selfId = state.profile?.directId
+    val liked = likedByMe(item, selfId)
+    val tint = if (light) Color.White else Ink.foreground
+    val heart = if (liked) Color(0xFFE0245E) else tint
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = { scope.launch { runCatching { node.likeFeed(item.id) } } }) {
+            Icon(if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, "Like", tint = heart)
+        }
+        Text("${item.likes.size}", color = tint, fontWeight = FontWeight.Medium)
+        IconButton(onClick = onOpenComments) {
+            Icon(Icons.Outlined.ChatBubbleOutline, "Comments", tint = tint)
+        }
+        Text("${item.comments.size}", color = tint, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.weight(1f))
+        if (item.likes.isNotEmpty()) {
+            Text(
+                if (item.likes.size == 1) "1 like" else "${item.likes.size} likes",
+                color = tint,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(end = 12.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FeedLightbox(
+    node: DirectNode,
+    state: NodeState,
+    item: FeedItem,
+    canDelete: Boolean,
+    onDelete: () -> Unit,
+    onClose: () -> Unit,
+    onError: (String?) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var draft by rememberSaveable(item.id) { mutableStateOf("") }
     BackHandler(onBack = onClose)
-    Box(Modifier.fillMaxSize().background(Color.Black).clickable(onClick = onClose)) {
-        FeedMedia(node, item, Modifier.fillMaxSize())
-        Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
-            if (canDelete) {
-                IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, "Delete", tint = Color.White) }
+    Column(Modifier.fillMaxSize().background(Ink.background).imePadding()) {
+        Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
+            FeedMedia(node, item, Modifier.fillMaxSize())
+            Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
+                if (canDelete) {
+                    IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, "Delete", tint = Color.White) }
+                }
+            }
+        }
+        Column(Modifier.fillMaxWidth().background(Ink.surface)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                val name = feedOwnerName(state, item.ownerId)
+                Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 32.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(name, fontWeight = FontWeight.SemiBold)
+                    Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
+                }
+            }
+            FeedActions(node, state, item, onOpenComments = {})
+            if (item.caption.isNotBlank()) {
+                Text(item.caption, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), fontSize = 15.sp)
+            }
+            if (item.comments.isEmpty()) {
+                Muted("Be the first to comment.", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            } else {
+                Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    item.comments.forEach { comment ->
+                        val who = feedOwnerName(state, comment.fromId)
+                        Column(Modifier.padding(vertical = 6.dp)) {
+                            Text(who, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text(comment.body, fontSize = 14.sp)
+                            Text(formatFeedTime(comment.createdAt), color = Ink.muted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(Modifier.weight(1f)) {
+                    Field(draft, { draft = it.take(FeedNotes.MAX_COMMENT) }, "Add a comment…")
+                }
+                IconButton(
+                    onClick = {
+                        val body = draft
+                        scope.launch {
+                            try {
+                                node.commentFeed(item.id, body)
+                                draft = ""
+                                onError(null)
+                            } catch (error: Exception) {
+                                onError(error.message ?: "That comment was not saved.")
+                            }
+                        }
+                    },
+                    enabled = draft.isNotBlank(),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, "Post comment", tint = if (draft.isNotBlank()) Ink.accent else Ink.muted)
+                }
             }
         }
     }

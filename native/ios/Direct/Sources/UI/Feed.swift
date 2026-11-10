@@ -25,6 +25,159 @@ func storyOwners(_ state: NodeState, selfId: String) -> [String] {
     return [selfId] + contacts.map(\.directId)
 }
 
+func othersPosts(_ state: NodeState) -> [FeedItem] {
+    guard let selfId = state.profile?.directId else { return [] }
+    return state.feed.filter { $0.channel == FeedNotes.post && $0.ownerId != selfId }
+        .sorted { $0.createdAt > $1.createdAt }
+}
+
+func feedOwnerName(_ state: NodeState, _ ownerId: String) -> String {
+    if ownerId == state.profile?.directId { return state.profile?.name ?? "You" }
+    return state.contacts.first { $0.directId == ownerId }?.name ?? ownerId
+}
+
+func feedOwnerJpeg(_ state: NodeState, _ ownerId: String) -> String? {
+    if ownerId == state.profile?.directId { return state.profile?.avatarJpegBase64 }
+    return state.contacts.first { $0.directId == ownerId }?.avatarJpegBase64
+}
+
+func formatFeedTime(_ ms: Int64) -> String {
+    let seconds = max(0, Int64(Date().timeIntervalSince1970 * 1000) - ms) / 1000
+    if seconds < 60 { return "just now" }
+    if seconds < 3600 { return "\(seconds / 60)m" }
+    if seconds < 86_400 { return "\(seconds / 3600)h" }
+    return "\(seconds / 86_400)d"
+}
+
+struct FeedView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var storyOwner: String?
+    @State private var viewing: FeedItem?
+    @State private var profilePeer: String?
+
+    var body: some View {
+        let posts = othersPosts(model.state)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                StoriesTray { storyOwner = $0 }
+                if posts.isEmpty {
+                    Muted("Posts your contacts add to their profile show up here. Like them or leave a comment — it stays between your phones.")
+                        .padding(24)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    ForEach(posts) { item in
+                        FeedPostCard(item: item, onOpen: { viewing = item }, onProfile: { profilePeer = item.ownerId })
+                        Divider()
+                    }
+                }
+            }
+        }
+        .background(Ink.background)
+        .navigationTitle("Feed")
+        .fullScreenCover(isPresented: Binding(
+            get: { storyOwner != nil },
+            set: { if !$0 { storyOwner = nil } }
+        )) {
+            if let storyOwner {
+                StoryViewer(ownerId: storyOwner) { self.storyOwner = nil }
+                    .environmentObject(model)
+            }
+        }
+        .fullScreenCover(item: $viewing) { post in
+            FeedLightbox(id: post.id, canDelete: false)
+                .environmentObject(model)
+        }
+        .sheet(isPresented: Binding(
+            get: { profilePeer != nil },
+            set: { if !$0 { profilePeer = nil } }
+        )) {
+            if let profilePeer {
+                NavigationStack {
+                    ContactProfileView(peerId: profilePeer)
+                        .environmentObject(model)
+                }
+            }
+        }
+    }
+}
+
+struct FeedPostCard: View {
+    @EnvironmentObject private var model: AppModel
+    let item: FeedItem
+    var onOpen: () -> Void
+    var onProfile: () -> Void
+
+    var body: some View {
+        let name = feedOwnerName(model.state, item.ownerId)
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: onProfile) {
+                HStack(spacing: 10) {
+                    Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 36)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name).font(.subheadline.weight(.semibold)).foregroundStyle(Ink.text)
+                        Text(formatFeedTime(item.createdAt)).font(.caption).foregroundStyle(Ink.muted)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+            .buttonStyle(.plain)
+            Button(action: onOpen) {
+                FeedThumb(item: item)
+                    .aspectRatio(1, contentMode: .fit)
+            }
+            .buttonStyle(.plain)
+            FeedActions(item: item, onComments: onOpen)
+                .padding(.horizontal, 16)
+            if !item.caption.isEmpty {
+                Text(item.caption).font(.subheadline).padding(.horizontal, 16)
+            }
+            if !item.comments.isEmpty {
+                Button(action: onOpen) {
+                    Text(item.comments.count == 1 ? "View 1 comment" : "View all \(item.comments.count) comments")
+                        .font(.footnote)
+                        .foregroundStyle(Ink.muted)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
+        }
+        .padding(.bottom, 8)
+    }
+}
+
+struct FeedActions: View {
+    @EnvironmentObject private var model: AppModel
+    let item: FeedItem
+    var onComments: () -> Void = {}
+
+    var body: some View {
+        let liked = item.likes.contains { $0.fromId == model.state.profile?.directId }
+        HStack(spacing: 14) {
+            Button { model.likeFeed(item.id) } label: {
+                Image(systemName: liked ? "heart.fill" : "heart")
+                    .font(.system(size: 20))
+                    .foregroundStyle(liked ? Color.pink : Ink.text)
+            }
+            Text("\(item.likes.count)").font(.subheadline.weight(.medium))
+            Button(action: onComments) {
+                Image(systemName: "bubble.right")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Ink.text)
+            }
+            Text("\(item.comments.count)").font(.subheadline.weight(.medium))
+            Spacer()
+            if !item.likes.isEmpty {
+                Text(item.likes.count == 1 ? "1 like" : "\(item.likes.count) likes")
+                    .font(.footnote.weight(.semibold))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct StoriesTray: View {
     @EnvironmentObject private var model: AppModel
     var onOpen: (String) -> Void
@@ -247,7 +400,7 @@ struct ProfilePosts: View {
             }
         }
         .fullScreenCover(item: $viewing) { post in
-            FeedLightbox(item: post, canDelete: canAdd)
+            FeedLightbox(id: post.id, canDelete: canAdd)
         }
     }
 }
@@ -324,38 +477,91 @@ struct FeedThumb: View {
 
 struct FeedLightbox: View {
     @EnvironmentObject private var model: AppModel
-    let item: FeedItem
+    let id: String
     var canDelete: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var bytes: Data?
+    @State private var draft = ""
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if let bytes, item.kind != "video", let image = UIImage(data: bytes) {
-                Image(uiImage: image).resizable().scaledToFit()
-            } else if let bytes, item.kind == "video" {
-                StoryVideo(data: bytes, name: item.name)
-            }
-            VStack {
+        let item = model.state.feed.first { $0.id == id }
+        VStack(spacing: 0) {
+            ZStack(alignment: .top) {
+                Color.black
+                if let item, let bytes, item.kind != "video", let image = UIImage(data: bytes) {
+                    Image(uiImage: image).resizable().scaledToFit()
+                } else if let item, let bytes, item.kind == "video" {
+                    StoryVideo(data: bytes, name: item.name)
+                } else {
+                    ProgressView().tint(.white)
+                }
                 HStack {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark").foregroundStyle(.white).padding()
                     }
                     Spacer()
-                    if canDelete {
+                    if canDelete, item != nil {
                         Button {
-                            model.deleteFeed(item.id)
+                            model.deleteFeed(id)
                             dismiss()
                         } label: {
                             Image(systemName: "trash").foregroundStyle(.white).padding()
                         }
                     }
                 }
-                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let item {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        let name = feedOwnerName(model.state, item.ownerId)
+                        Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(name).font(.subheadline.weight(.semibold))
+                            Text(formatFeedTime(item.createdAt)).font(.caption).foregroundStyle(Ink.muted)
+                        }
+                        Spacer()
+                    }
+                    FeedActions(item: item)
+                    if !item.caption.isEmpty {
+                        Text(item.caption).font(.subheadline)
+                    }
+                    if item.comments.isEmpty {
+                        Muted("Be the first to comment.")
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(item.comments) { comment in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(feedOwnerName(model.state, comment.fromId)).font(.caption.weight(.semibold))
+                                        Text(comment.body).font(.subheadline)
+                                        Text(formatFeedTime(comment.createdAt)).font(.caption2).foregroundStyle(Ink.muted)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 160)
+                    }
+                    HStack {
+                        Field(placeholder: "Add a comment…", text: $draft)
+                        Button("Post") {
+                            let body = draft
+                            draft = ""
+                            model.commentFeed(item.id, body)
+                        }
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .tint(Ink.accent)
+                    }
+                }
+                .padding(16)
+                .background(Ink.surface)
             }
         }
-        .onAppear { model.loadFeed(item.id) { bytes = $0 } }
+        .background(Ink.background.ignoresSafeArea())
+        .onAppear { model.loadFeed(id) { bytes = $0 } }
+        .onChange(of: model.state.feed.contains(where: { $0.id == id })) { present in
+            if !present { dismiss() }
+        }
     }
 }
 

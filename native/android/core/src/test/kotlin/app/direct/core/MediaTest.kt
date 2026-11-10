@@ -206,4 +206,59 @@ class MediaTest {
         for (bytes in adaLinks.sent) bo.engine.receive(ada.keys.directId, bytes)
         assertNull(bo.store.feed(post.id))
     }
+
+    @Test
+    fun `a like and a comment on a post reach the other phone`() = runTest {
+        val like = FeedNotes.decodeSocial(FeedNotes.encodeLike("fed_abc"))
+        assertEquals("like", like?.op)
+        assertEquals("fed_abc", like?.id)
+        val encoded = FeedNotes.encodeComment("fed_abc", "cmt_1", "nice shot", 42)
+        val comment = assertNotNull(FeedNotes.decodeSocial(encoded))
+        assertEquals("comment", comment.op)
+        assertEquals("nice shot", comment.body)
+        assertEquals("cmt_1", comment.commentId)
+        assertEquals(42L, comment.createdAt)
+        assertNull(FeedNotes.decodeSocial(FeedNotes.encodeDelete(FeedNotes.POST, "fed_abc")))
+        assertNull(FeedNotes.decodeDelete(encoded))
+
+        var now = 1_000L
+        val adaLinks = Links()
+        val boLinks = Links()
+        val ada = Device("Ada", { now }, adaLinks, chunk = 8)
+        val bo = Device("Bo", { now }, boLinks, chunk = 8)
+        ada.know(bo)
+        bo.know(ada)
+        val post = ada.engine.queueFeed(FeedNotes.POST, "image", "image/jpeg", "pic.jpg", byteArrayOf(1, 2, 3, 4, 5), "lake")
+        ada.engine.flush()
+        for (bytes in adaLinks.sent) bo.engine.receive(ada.keys.directId, bytes)
+        assertEquals("lake", bo.store.feed(post.id)?.caption)
+
+        adaLinks.sent.clear()
+        boLinks.sent.clear()
+        bo.engine.likeFeed(post.id)
+        assertEquals(listOf(bo.keys.directId), bo.store.feed(post.id)?.likes?.map { it.fromId })
+        bo.engine.flush()
+        assertTrue(boLinks.sent.isNotEmpty())
+        for (bytes in boLinks.sent) ada.engine.receive(bo.keys.directId, bytes)
+        assertEquals(listOf(bo.keys.directId), ada.store.feed(post.id)?.likes?.map { it.fromId })
+
+        boLinks.sent.clear()
+        bo.engine.likeFeed(post.id)
+        assertTrue(bo.store.feed(post.id)?.likes.isNullOrEmpty())
+        bo.engine.flush()
+        for (bytes in boLinks.sent) ada.engine.receive(bo.keys.directId, bytes)
+        assertTrue(ada.store.feed(post.id)?.likes.isNullOrEmpty())
+
+        boLinks.sent.clear()
+        bo.engine.commentFeed(post.id, "  looks great  ")
+        val local = assertNotNull(bo.store.feed(post.id)?.comments?.single())
+        assertEquals(bo.keys.directId, local.fromId)
+        assertEquals("looks great", local.body)
+        bo.engine.flush()
+        for (bytes in boLinks.sent) ada.engine.receive(bo.keys.directId, bytes)
+        val remote = assertNotNull(ada.store.feed(post.id)?.comments?.single())
+        assertEquals(local.id, remote.id)
+        assertEquals("looks great", remote.body)
+        assertEquals(bo.keys.directId, remote.fromId)
+    }
 }

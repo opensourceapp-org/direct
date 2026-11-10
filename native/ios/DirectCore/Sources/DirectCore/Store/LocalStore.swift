@@ -263,6 +263,28 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct FeedLike: Codable, Equatable, Sendable {
+    public var fromId: String
+
+    public init(fromId: String) {
+        self.fromId = fromId
+    }
+}
+
+public struct FeedComment: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var fromId: String
+    public var body: String
+    public var createdAt: Int64
+
+    public init(id: String, fromId: String, body: String, createdAt: Int64) {
+        self.id = id
+        self.fromId = fromId
+        self.body = body
+        self.createdAt = createdAt
+    }
+}
+
 public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var ownerId: String
@@ -275,8 +297,14 @@ public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
     public var expiresAt: Int64?
     public var mediaFile: String
     public var seen: Bool
+    public var likes: [FeedLike]
+    public var comments: [FeedComment]
 
-    public init(id: String, ownerId: String, channel: String, kind: String, mime: String, name: String, caption: String = "", createdAt: Int64, expiresAt: Int64? = nil, mediaFile: String, seen: Bool = false) {
+    private enum CodingKeys: String, CodingKey {
+        case id, ownerId, channel, kind, mime, name, caption, createdAt, expiresAt, mediaFile, seen, likes, comments
+    }
+
+    public init(id: String, ownerId: String, channel: String, kind: String, mime: String, name: String, caption: String = "", createdAt: Int64, expiresAt: Int64? = nil, mediaFile: String, seen: Bool = false, likes: [FeedLike] = [], comments: [FeedComment] = []) {
         self.id = id
         self.ownerId = ownerId
         self.channel = channel
@@ -288,6 +316,52 @@ public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
         self.expiresAt = expiresAt
         self.mediaFile = mediaFile
         self.seen = seen
+        self.likes = likes
+        self.comments = comments
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        ownerId = try container.decode(String.self, forKey: .ownerId)
+        channel = try container.decode(String.self, forKey: .channel)
+        kind = try container.decode(String.self, forKey: .kind)
+        mime = try container.decode(String.self, forKey: .mime)
+        name = try container.decode(String.self, forKey: .name)
+        caption = try container.decodeIfPresent(String.self, forKey: .caption) ?? ""
+        createdAt = try container.decode(Int64.self, forKey: .createdAt)
+        expiresAt = try container.decodeIfPresent(Int64.self, forKey: .expiresAt)
+        mediaFile = try container.decode(String.self, forKey: .mediaFile)
+        seen = try container.decodeIfPresent(Bool.self, forKey: .seen) ?? false
+        likes = try container.decodeIfPresent([FeedLike].self, forKey: .likes) ?? []
+        comments = try container.decodeIfPresent([FeedComment].self, forKey: .comments) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(ownerId, forKey: .ownerId)
+        try container.encode(channel, forKey: .channel)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(mime, forKey: .mime)
+        try container.encode(name, forKey: .name)
+        try container.encode(caption, forKey: .caption)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(expiresAt, forKey: .expiresAt)
+        try container.encode(mediaFile, forKey: .mediaFile)
+        try container.encode(seen, forKey: .seen)
+        try container.encode(likes, forKey: .likes)
+        try container.encode(comments, forKey: .comments)
+    }
+
+    public func togglingLike(_ fromId: String) -> FeedItem {
+        var copy = self
+        if copy.likes.contains(where: { $0.fromId == fromId }) {
+            copy.likes.removeAll { $0.fromId == fromId }
+        } else {
+            copy.likes.append(FeedLike(fromId: fromId))
+        }
+        return copy
     }
 }
 

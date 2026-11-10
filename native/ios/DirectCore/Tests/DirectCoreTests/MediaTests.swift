@@ -211,4 +211,59 @@ final class MediaTests: XCTestCase {
         for bytes in adaLinks.sent { _ = try bo.engine.receive(ada.keys.directId, bytes) }
         XCTAssertNil(bo.store.feed(post.id))
     }
+
+    @DirectActor
+    func testALikeAndACommentOnAPostReachTheOtherPhone() async throws {
+        let like = try XCTUnwrap(FeedNotes.decodeSocial(FeedNotes.encodeLike(id: "fed_abc")))
+        XCTAssertEqual("like", like.op)
+        XCTAssertEqual("fed_abc", like.id)
+        let encoded = FeedNotes.encodeComment(id: "fed_abc", commentId: "cmt_1", body: "nice shot", createdAt: 42)
+        let note = try XCTUnwrap(FeedNotes.decodeSocial(encoded))
+        XCTAssertEqual("comment", note.op)
+        XCTAssertEqual("nice shot", note.body)
+        XCTAssertEqual("cmt_1", note.commentId)
+        XCTAssertEqual(42, note.createdAt)
+        XCTAssertNil(FeedNotes.decodeSocial(FeedNotes.encodeDelete(channel: FeedNotes.post, id: "fed_abc")))
+        XCTAssertNil(FeedNotes.decodeDelete(encoded))
+
+        let clock = Clock()
+        let adaLinks = Links()
+        let boLinks = Links()
+        let ada = Device("Ada", clock, adaLinks, chunk: 8)
+        let bo = Device("Bo", clock, boLinks, chunk: 8)
+        ada.know(bo)
+        bo.know(ada)
+        let post = try ada.engine.queueFeed(channel: FeedNotes.post, kind: "image", mime: "image/jpeg", name: "pic.jpg", bytes: Data([1, 2, 3, 4, 5]), caption: "lake")
+        try await ada.engine.flush()
+        for bytes in adaLinks.sent { _ = try bo.engine.receive(ada.keys.directId, bytes) }
+        XCTAssertEqual("lake", bo.store.feed(post.id)?.caption)
+
+        adaLinks.sent.removeAll()
+        boLinks.sent.removeAll()
+        try bo.engine.likeFeed(post.id)
+        XCTAssertEqual([bo.keys.directId], bo.store.feed(post.id)?.likes.map(\.fromId))
+        try await bo.engine.flush()
+        XCTAssertFalse(boLinks.sent.isEmpty)
+        for bytes in boLinks.sent { _ = try ada.engine.receive(bo.keys.directId, bytes) }
+        XCTAssertEqual([bo.keys.directId], ada.store.feed(post.id)?.likes.map(\.fromId))
+
+        boLinks.sent.removeAll()
+        try bo.engine.likeFeed(post.id)
+        XCTAssertTrue(bo.store.feed(post.id)?.likes.isEmpty == true)
+        try await bo.engine.flush()
+        for bytes in boLinks.sent { _ = try ada.engine.receive(bo.keys.directId, bytes) }
+        XCTAssertTrue(ada.store.feed(post.id)?.likes.isEmpty == true)
+
+        boLinks.sent.removeAll()
+        try bo.engine.commentFeed(post.id, "  looks great  ")
+        let local = try XCTUnwrap(bo.store.feed(post.id)?.comments.first)
+        XCTAssertEqual(bo.keys.directId, local.fromId)
+        XCTAssertEqual("looks great", local.body)
+        try await bo.engine.flush()
+        for bytes in boLinks.sent { _ = try ada.engine.receive(bo.keys.directId, bytes) }
+        let remote = try XCTUnwrap(ada.store.feed(post.id)?.comments.first)
+        XCTAssertEqual(local.id, remote.id)
+        XCTAssertEqual("looks great", remote.body)
+        XCTAssertEqual(bo.keys.directId, remote.fromId)
+    }
 }
