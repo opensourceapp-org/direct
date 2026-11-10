@@ -4,6 +4,7 @@ import app.direct.core.Encoding
 import app.direct.core.crypto.Bundles
 import app.direct.core.crypto.IdentityKeys
 import app.direct.core.crypto.PublicBundle
+import app.direct.core.protocol.ChatNotes
 import app.direct.core.protocol.EnvelopeType
 import app.direct.core.protocol.Envelopes
 import app.direct.core.protocol.GroupNotes
@@ -181,6 +182,90 @@ class DeliveryEngine(
         if (!enqueueGroupMedia(group, selfId, id, job, now)) throw DeliveryRejected("No reachable members in this group.")
         store.save()
         return message
+    }
+
+    /** Changes the body of an outgoing text bubble. Unsent copies are resealed; sent copies get an edit note. */
+    fun editText(messageId: String, body: String): MessageRecord {
+        val message = store.message(messageId) ?: throw DeliveryRejected("That message is gone.")
+        if (message.direction != Direction.OUTGOING) throw DeliveryRejected("You can only edit your own messages.")
+        if (message.deleted) throw DeliveryRejected("That message was deleted.")
+        if (message.mediaKind != null) throw DeliveryRejected("Only text messages can be edited.")
+        val text = body.trim()
+        if (text.isEmpty()) throw DeliveryRejected("Message is empty.")
+        if (text.length > MAX_BODY) throw DeliveryRejected("Message is too long.")
+        val updated = message.copy(body = text, edited = true, updatedAt = clock())
+        store.putMessage(updated)
+        val unsent = store.queue().any { it.logicalId() == message.id && it.kind == QueueKind.MESSAGE && it.sentAt == null }
+        when {
+            unsent -> resealQueuedText(updated)
+            message.state == MessageState.FAILED -> retry(message.id)
+            else -> queueChatNote(updated, ChatNotes.encode(ChatNotes.Note("edit", updated.id, text, store.group(updated.peerId)?.id)))
+        }
+        store.save()
+        return updated
+    }
+
+    /**
+     * [forEveryone] tombstones an outgoing message and tells the other phones.
+     * Otherwise the bubble is removed only on this phone.
+     */
+    fun deleteMessage(messageId: String, forEveryone: Boolean): MessageRecord? {
+        val message = store.message(messageId) ?: throw DeliveryRejected("That message is gone.")
+        if (message.mediaKind == "call" || message.mediaKind == "group") {
+            if (forEveryone) throw DeliveryRejected("That item cannot be deleted for everyone.")
+        }
+        val unsent = store.queue().any { it.logicalId() == message.id && it.kind == QueueKind.MESSAGE && it.sentAt == null }
+        if (forEveryone) {
+            if (message.direction != Direction.OUTGOING) throw DeliveryRejected("You can only delete that for everyone if you sent it.")
+            store.removeQueuedForMessage(messageId)
+            if (unsent || message.deleted) {
+                store.removeMessage(messageId)
+                store.save()
+                return null
+            }
+            val tombstone = message.copy(
+                deleted = true, body = "", mediaKind = null, mediaMime = null, mediaName = null, mediaFile = null, updatedAt = clock(),
+            )
+            store.putMessage(tombstone)
+            queueChatNote(message, ChatNotes.encode(ChatNotes.Note("delete", message.id, groupId = store.group(message.peerId)?.id)))
+            store.save()
+            return tombstone
+        }
+        store.removeQueuedForMessage(messageId)
+        store.removeMessage(messageId)
+        store.save()
+        return null
+    }
+
+    /** Queues a new copy of [messageId] in another thread and marks it as forwarded. */
+    fun forward(messageId: String, toPeerId: String, selfId: String): MessageRecord {
+        val message = store.message(messageId) ?: throw DeliveryRejected("That message is gone.")
+        if (message.deleted) throw DeliveryRejected("That message was deleted.")
+        if (message.mediaKind == "call" || message.mediaKind == "group") throw DeliveryRejected("That item cannot be forwarded.")
+        val created = if (message.mediaKind != null) {
+            val directory = mediaDirectory ?: throw DeliveryRejected("Attachments need local storage.")
+            val file = message.mediaFile ?: throw DeliveryRejected("That attachment is gone.")
+            val bytes = File(directory, file).readBytes()
+            if (bytes.isEmpty()) throw DeliveryRejected("That attachment is gone.")
+            val kind = message.mediaKind
+            val mime = message.mediaMime ?: "application/octet-stream"
+            val name = message.mediaName ?: "attachment"
+            if (GroupNotes.isGroupId(toPeerId)) {
+                val group = store.group(toPeerId) ?: throw DeliveryRejected("That group is not on this device.")
+                queueGroupMedia(group, selfId, kind, mime, name, bytes, message.body)
+            } else {
+                queueMedia(toPeerId, kind, mime, name, bytes, message.body)
+            }
+        } else if (GroupNotes.isGroupId(toPeerId)) {
+            val group = store.group(toPeerId) ?: throw DeliveryRejected("That group is not on this device.")
+            queueGroupText(group, selfId, message.body)
+        } else {
+            queueText(toPeerId, message.body)
+        }
+        val marked = created.copy(forwarded = true)
+        store.putMessage(marked)
+        store.save()
+        return marked
     }
 
     /** Requeues a FAILED message with a fresh envelope under the same id. The recipient deduplicates by id. */
@@ -491,6 +576,10 @@ class DeliveryEngine(
         if (grouped != null) {
             return ingestGroupText(peerId, contact, grouped, envelope.createdAt)
         }
+        val chat = ChatNotes.parsePrefixed(plaintext)
+        if (chat != null) {
+            return ingestChatNote(peerId, contact, chat, envelope.id)
+        }
         if (store.message(envelope.id) != null) {
             queueReceipt(contact, EnvelopeType.ACK, envelope.id)
             store.save()
@@ -551,6 +640,74 @@ class DeliveryEngine(
             Encoding.newId("call"), EnvelopeType.CALL, Encoding.utf8(plain), now, ttlMs,
         )
         return Encoding.utf8(envelope.encode())
+    }
+
+    private fun ingestChatNote(peerId: String, contact: ContactRecord, note: ChatNotes.Note, envelopeId: String): ReceiveOutcome {
+        val message = store.message(note.messageId)
+        queueReceipt(contact, EnvelopeType.ACK, envelopeId)
+        if (message == null || message.direction != Direction.INCOMING) {
+            store.save()
+            return ReceiveOutcome.IGNORED
+        }
+        val expected = message.senderId ?: message.peerId
+        if (expected != peerId) {
+            store.save()
+            return ReceiveOutcome.IGNORED
+        }
+        if (note.groupId != null && message.peerId != note.groupId) {
+            store.save()
+            return ReceiveOutcome.IGNORED
+        }
+        val now = clock()
+        when (note.op) {
+            "edit" -> {
+                val body = note.body?.trim().orEmpty()
+                if (body.isEmpty() || message.deleted || message.mediaKind != null) {
+                    store.save()
+                    return ReceiveOutcome.IGNORED
+                }
+                store.putMessage(message.copy(body = body, edited = true, updatedAt = now))
+            }
+            "delete" -> store.putMessage(
+                message.copy(deleted = true, body = "", mediaKind = null, mediaMime = null, mediaName = null, mediaFile = null, updatedAt = now),
+            )
+            else -> {
+                store.save()
+                return ReceiveOutcome.IGNORED
+            }
+        }
+        store.save()
+        return ReceiveOutcome.STORED
+    }
+
+    private fun queueChatNote(message: MessageRecord, plaintext: String) {
+        val (keys, deviceId) = identity() ?: return
+        val now = clock()
+        val targets = store.group(message.peerId)?.members?.filter { it != keys.directId } ?: listOf(message.peerId)
+        for (peerId in targets) {
+            val contact = store.contact(peerId) ?: continue
+            if (contact.blocked) continue
+            val envelope = Envelopes.seal(
+                keys, deviceId, peerId, bundleFor(contact).agreementPublic,
+                Encoding.newId("msg"), EnvelopeType.MESSAGE, Encoding.utf8(plaintext), now, ttlMs,
+            )
+            store.putQueued(QueueItem(envelope.id, peerId, QueueKind.RECEIPT, envelope.encode(), 0, now, envelope.expiresAt, messageId = message.id))
+        }
+    }
+
+    private fun resealQueuedText(message: MessageRecord) {
+        val (keys, deviceId) = identity() ?: return
+        val now = clock()
+        val group = store.group(message.peerId)
+        val plain = if (group != null) Encoding.utf8(GroupNotes.encodeText(group.id, message.id, message.body)) else Encoding.utf8(message.body)
+        for (item in store.queue().filter { it.logicalId() == message.id && it.kind == QueueKind.MESSAGE && it.sentAt == null }) {
+            val contact = store.contact(item.peerId) ?: continue
+            val envelope = Envelopes.seal(
+                keys, deviceId, item.peerId, bundleFor(contact).agreementPublic,
+                item.id, EnvelopeType.MESSAGE, plain, now, ttlMs,
+            )
+            store.putQueued(item.copy(payload = envelope.encode(), attempts = 0, nextAttemptAt = now, lastError = null, expiresAt = envelope.expiresAt))
+        }
     }
 
     private fun queueReceipt(contact: ContactRecord, type: EnvelopeType, messageId: String) {

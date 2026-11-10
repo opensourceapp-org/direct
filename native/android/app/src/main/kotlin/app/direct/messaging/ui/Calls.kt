@@ -2,6 +2,7 @@ package app.direct.messaging.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.view.MotionEvent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,11 +10,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,16 +39,20 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -55,6 +65,7 @@ import app.direct.core.node.NodeState
 import app.direct.messaging.DirectApp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 
@@ -158,7 +169,27 @@ fun CallOverlay(node: DirectNode, state: NodeState, call: CallSnapshot) {
             if (mic && camera) node.acceptCall() else node.endCall()
         }
     }
-    Box(Modifier.fillMaxSize().background(CallInk)) {
+    val density = LocalDensity.current
+    val pipOffset = remember(call.peerId) { mutableStateOf(Offset.Zero) }
+    val pipDrag = remember {
+        object {
+            var lastX = 0f
+            var lastY = 0f
+            var maxW = 0f
+            var maxH = 0f
+            var pipW = 0f
+            var pipH = 0f
+            var padTop = 0f
+            var padEnd = 0f
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().background(CallInk)) {
+        pipDrag.maxW = constraints.maxWidth.toFloat()
+        pipDrag.maxH = constraints.maxHeight.toFloat()
+        pipDrag.pipW = with(density) { 104.dp.toPx() }
+        pipDrag.pipH = with(density) { 150.dp.toPx() }
+        pipDrag.padTop = with(density) { 24.dp.toPx() }
+        pipDrag.padEnd = with(density) { 16.dp.toPx() }
         val egl = media.egl?.eglBaseContext
         if (egl != null && call.video && call.phase != CallPhase.INCOMING && call.phase != CallPhase.ENDED) {
             AndroidView(
@@ -183,11 +214,41 @@ fun CallOverlay(node: DirectNode, state: NodeState, call: CallSnapshot) {
                             init(egl, null)
                             setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                             setMirror(true)
+                            setZOrderMediaOverlay(true)
                             setEnableHardwareScaler(true)
                             media.setLocalSink(this)
+                            setOnTouchListener { view, event ->
+                                when (event.actionMasked) {
+                                    MotionEvent.ACTION_DOWN -> {
+                                        pipDrag.lastX = event.rawX
+                                        pipDrag.lastY = event.rawY
+                                        view.parent?.requestDisallowInterceptTouchEvent(true)
+                                        true
+                                    }
+                                    MotionEvent.ACTION_MOVE -> {
+                                        val next = Offset(
+                                            pipOffset.value.x + (event.rawX - pipDrag.lastX),
+                                            pipOffset.value.y + (event.rawY - pipDrag.lastY),
+                                        )
+                                        pipOffset.value = clampPip(
+                                            next, pipDrag.maxW, pipDrag.maxH, pipDrag.pipW, pipDrag.pipH, pipDrag.padTop, pipDrag.padEnd,
+                                        )
+                                        pipDrag.lastX = event.rawX
+                                        pipDrag.lastY = event.rawY
+                                        true
+                                    }
+                                    else -> true
+                                }
+                            }
                         }
                     },
-                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 16.dp).size(width = 104.dp, height = 150.dp).clip(RoundedCornerShape(16.dp)),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 24.dp, end = 16.dp)
+                        .offset { IntOffset(pipOffset.value.x.roundToInt(), pipOffset.value.y.roundToInt()) }
+                        .size(width = 104.dp, height = 150.dp)
+                        .clip(RoundedCornerShape(16.dp)),
                     onRelease = {
                         media.setLocalSink(null)
                         it.release()
@@ -196,9 +257,13 @@ fun CallOverlay(node: DirectNode, state: NodeState, call: CallSnapshot) {
             }
         }
         Column(
-            Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp, start = 24.dp, end = 24.dp),
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp, start = 16.dp, end = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             if (!(call.video && call.phase == CallPhase.ACTIVE)) {
                 Avatar(name, jpegBytes(contact?.avatarJpegBase64), 96.dp)
@@ -224,24 +289,40 @@ fun CallOverlay(node: DirectNode, state: NodeState, call: CallSnapshot) {
                     }
                 }
                 CallPhase.ENDED -> Unit
-                else -> Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    RoundCallButton(Color.White.copy(alpha = 0.16f), if (call.muted) Icons.Filled.MicOff else Icons.Filled.Mic, if (call.muted) "Unmute" else "Mute") {
-                        scope.launch { node.setCallMuted(!call.muted) }
-                    }
-                    RoundCallButton(Color.White.copy(alpha = 0.16f), if (call.speaker) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, if (call.speaker) "Speaker off" else "Speaker") {
-                        scope.launch { node.setCallSpeaker(!call.speaker) }
-                    }
-                    if (call.video) {
-                        RoundCallButton(Color.White.copy(alpha = 0.16f), if (call.cameraOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff, if (call.cameraOn) "Camera off" else "Camera on") {
-                            scope.launch { node.setCallCamera(!call.cameraOn) }
+                else -> Column(
+                    Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                        RoundCallButton(Color.White.copy(alpha = 0.16f), if (call.muted) Icons.Filled.MicOff else Icons.Filled.Mic, if (call.muted) "Unmute" else "Mute") {
+                            scope.launch { node.setCallMuted(!call.muted) }
                         }
-                        RoundCallButton(Color.White.copy(alpha = 0.16f), Icons.Filled.Cameraswitch, "Flip camera") { media.flipCamera() }
+                        RoundCallButton(Color.White.copy(alpha = 0.16f), if (call.speaker) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff, if (call.speaker) "Speaker off" else "Speaker") {
+                            scope.launch { node.setCallSpeaker(!call.speaker) }
+                        }
+                        if (call.video) {
+                            RoundCallButton(Color.White.copy(alpha = 0.16f), if (call.cameraOn) Icons.Filled.Videocam else Icons.Filled.VideocamOff, if (call.cameraOn) "Camera off" else "Camera on") {
+                                scope.launch { node.setCallCamera(!call.cameraOn) }
+                            }
+                            RoundCallButton(Color.White.copy(alpha = 0.16f), Icons.Filled.Cameraswitch, "Flip camera") { media.flipCamera() }
+                        }
                     }
                     RoundCallButton(CallRed, Icons.Filled.CallEnd, "End") { scope.launch { node.endCall() } }
                 }
             }
         }
     }
+}
+
+private fun clampPip(offset: Offset, maxW: Float, maxH: Float, pipW: Float, pipH: Float, padTop: Float, padEnd: Float): Offset {
+    val left = maxW - pipW - padEnd + offset.x
+    val top = padTop + offset.y
+    val minLeft = 8f
+    val minTop = 8f
+    val maxLeft = (maxW - pipW - 8f).coerceAtLeast(minLeft)
+    val maxTop = (maxH - pipH - 8f).coerceAtLeast(minTop)
+    return Offset(left.coerceIn(minLeft, maxLeft) - (maxW - pipW - padEnd), top.coerceIn(minTop, maxTop) - padTop)
 }
 
 @Composable

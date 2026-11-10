@@ -199,6 +199,104 @@ public final class DeliveryEngine {
         return message
     }
 
+    /// Changes the body of an outgoing text bubble. Unsent copies are resealed; sent copies get an edit note.
+    @discardableResult
+    public func editText(_ messageId: String, _ body: String) throws -> MessageRecord {
+        guard var message = store.message(messageId) else { throw DeliveryRejected(message: "That message is gone.") }
+        guard message.direction == .outgoing else { throw DeliveryRejected(message: "You can only edit your own messages.") }
+        guard !message.deleted else { throw DeliveryRejected(message: "That message was deleted.") }
+        guard message.mediaKind == nil else { throw DeliveryRejected(message: "Only text messages can be edited.") }
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw DeliveryRejected(message: "Message is empty.") }
+        guard text.utf16.count <= Self.maxBody else { throw DeliveryRejected(message: "Message is too long.") }
+        let failed = message.state == .failed
+        message.body = text
+        message.edited = true
+        message.updatedAt = clock()
+        store.putMessage(message)
+        let unsent = store.queue().contains { $0.logicalId() == message.id && $0.kind == .message && $0.sentAt == nil }
+        if unsent {
+            try resealQueuedText(message)
+        } else if failed {
+            _ = try retry(message.id)
+        } else {
+            try queueChatNote(message, ChatNotes.encode(ChatNotes.Note(op: "edit", messageId: message.id, body: text, groupId: store.group(message.peerId)?.id)))
+        }
+        try store.save()
+        return message
+    }
+
+    /// `forEveryone` tombstones an outgoing message and tells the other phones.
+    /// Otherwise the bubble is removed only on this phone.
+    @discardableResult
+    public func deleteMessage(_ messageId: String, forEveryone: Bool) throws -> MessageRecord? {
+        guard let message = store.message(messageId) else { throw DeliveryRejected(message: "That message is gone.") }
+        if message.mediaKind == "call" || message.mediaKind == "group", forEveryone {
+            throw DeliveryRejected(message: "That item cannot be deleted for everyone.")
+        }
+        let unsent = store.queue().contains { $0.logicalId() == message.id && $0.kind == .message && $0.sentAt == nil }
+        if forEveryone {
+            guard message.direction == .outgoing else { throw DeliveryRejected(message: "You can only delete that for everyone if you sent it.") }
+            store.removeQueuedForMessage(messageId)
+            if unsent || message.deleted {
+                store.removeMessage(messageId)
+                try store.save()
+                return nil
+            }
+            var tombstone = message
+            tombstone.deleted = true
+            tombstone.body = ""
+            tombstone.mediaKind = nil
+            tombstone.mediaMime = nil
+            tombstone.mediaName = nil
+            tombstone.mediaFile = nil
+            tombstone.updatedAt = clock()
+            store.putMessage(tombstone)
+            try queueChatNote(message, ChatNotes.encode(ChatNotes.Note(op: "delete", messageId: message.id, groupId: store.group(message.peerId)?.id)))
+            try store.save()
+            return tombstone
+        }
+        store.removeQueuedForMessage(messageId)
+        store.removeMessage(messageId)
+        try store.save()
+        return nil
+    }
+
+    /// Queues a new copy of `messageId` in another thread and marks it as forwarded.
+    @discardableResult
+    public func forward(_ messageId: String, to toPeerId: String, selfId: String) throws -> MessageRecord {
+        guard let message = store.message(messageId) else { throw DeliveryRejected(message: "That message is gone.") }
+        guard !message.deleted else { throw DeliveryRejected(message: "That message was deleted.") }
+        guard message.mediaKind != "call", message.mediaKind != "group" else {
+            throw DeliveryRejected(message: "That item cannot be forwarded.")
+        }
+        let created: MessageRecord
+        if let kind = message.mediaKind {
+            guard let directory = mediaDirectory else { throw DeliveryRejected(message: "Attachments need local storage.") }
+            guard let file = message.mediaFile else { throw DeliveryRejected(message: "That attachment is gone.") }
+            let bytes = (try? Data(contentsOf: directory.appendingPathComponent(file))) ?? Data()
+            guard !bytes.isEmpty else { throw DeliveryRejected(message: "That attachment is gone.") }
+            let mime = message.mediaMime ?? "application/octet-stream"
+            let name = message.mediaName ?? "attachment"
+            if GroupNotes.isGroupId(toPeerId) {
+                guard let group = store.group(toPeerId) else { throw DeliveryRejected(message: "That group is not on this device.") }
+                created = try queueGroupMedia(group, selfId, kind: kind, mime: mime, name: name, bytes: bytes, caption: message.body)
+            } else {
+                created = try queueMedia(toPeerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: message.body)
+            }
+        } else if GroupNotes.isGroupId(toPeerId) {
+            guard let group = store.group(toPeerId) else { throw DeliveryRejected(message: "That group is not on this device.") }
+            created = try queueGroupText(group, selfId, message.body)
+        } else {
+            created = try queueText(toPeerId, message.body)
+        }
+        var marked = created
+        marked.forwarded = true
+        store.putMessage(marked)
+        try store.save()
+        return marked
+    }
+
     /// Requeues a failed message with a fresh envelope under the same id. The recipient deduplicates by id.
     @discardableResult
     public func retry(_ messageId: String) throws -> Bool {
@@ -536,6 +634,9 @@ public final class DeliveryEngine {
         if let grouped = GroupNotes.parsePrefixed(plaintext) {
             return try ingestGroupText(peerId, contact, grouped, envelope.createdAt)
         }
+        if let chat = ChatNotes.parsePrefixed(plaintext) {
+            return try ingestChatNote(peerId, contact, chat, envelope.id)
+        }
         if store.message(envelope.id) != nil {
             try queueReceipt(contact, .ack, envelope.id)
             try store.save()
@@ -604,6 +705,90 @@ public final class DeliveryEngine {
             any = true
         }
         return any
+    }
+
+    private func ingestChatNote(_ peerId: String, _ contact: ContactRecord, _ note: ChatNotes.Note, _ envelopeId: String) throws -> ReceiveOutcome {
+        let message = store.message(note.messageId)
+        try queueReceipt(contact, .ack, envelopeId)
+        guard var message, message.direction == .incoming else {
+            try store.save()
+            return .ignored
+        }
+        let expected = message.senderId ?? message.peerId
+        guard expected == peerId else {
+            try store.save()
+            return .ignored
+        }
+        if let groupId = note.groupId, message.peerId != groupId {
+            try store.save()
+            return .ignored
+        }
+        let now = clock()
+        switch note.op {
+        case "edit":
+            let body = note.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !body.isEmpty, !message.deleted, message.mediaKind == nil else {
+                try store.save()
+                return .ignored
+            }
+            message.body = body
+            message.edited = true
+            message.updatedAt = now
+            store.putMessage(message)
+        case "delete":
+            message.deleted = true
+            message.body = ""
+            message.mediaKind = nil
+            message.mediaMime = nil
+            message.mediaName = nil
+            message.mediaFile = nil
+            message.updatedAt = now
+            store.putMessage(message)
+        default:
+            try store.save()
+            return .ignored
+        }
+        try store.save()
+        return .stored
+    }
+
+    private func queueChatNote(_ message: MessageRecord, _ plaintext: String) throws {
+        guard let (keys, deviceId) = identity() else { return }
+        let now = clock()
+        let targets = store.group(message.peerId)?.members.filter { $0 != keys.directId } ?? [message.peerId]
+        for peerId in targets {
+            guard let contact = store.contact(peerId), !contact.blocked else { continue }
+            let envelope = try Envelopes.seal(
+                sender: keys, deviceId: deviceId, recipientId: peerId, recipientAgreementPublic: try bundleFor(contact).agreementPublic,
+                id: Encoding.newId("msg"), type: .message, plaintext: Encoding.utf8(plaintext), createdAt: now, ttlMs: ttlMs
+            )
+            store.putQueued(QueueItem(id: envelope.id, peerId: peerId, kind: .receipt, payload: envelope.encode(), nextAttemptAt: now, expiresAt: envelope.expiresAt, messageId: message.id))
+        }
+    }
+
+    private func resealQueuedText(_ message: MessageRecord) throws {
+        guard let (keys, deviceId) = identity() else { return }
+        let now = clock()
+        let plain: Data
+        if let group = store.group(message.peerId) {
+            plain = Encoding.utf8(GroupNotes.encodeText(groupId: group.id, mid: message.id, body: message.body))
+        } else {
+            plain = Encoding.utf8(message.body)
+        }
+        for item in store.queue() where item.logicalId() == message.id && item.kind == .message && item.sentAt == nil {
+            guard let contact = store.contact(item.peerId) else { continue }
+            let envelope = try Envelopes.seal(
+                sender: keys, deviceId: deviceId, recipientId: item.peerId, recipientAgreementPublic: try bundleFor(contact).agreementPublic,
+                id: item.id, type: .message, plaintext: plain, createdAt: now, ttlMs: ttlMs
+            )
+            var updated = item
+            updated.payload = envelope.encode()
+            updated.attempts = 0
+            updated.nextAttemptAt = now
+            updated.lastError = nil
+            updated.expiresAt = envelope.expiresAt
+            store.putQueued(updated)
+        }
     }
 
     private func queueReceipt(_ contact: ContactRecord, _ type: EnvelopeType, _ messageId: String) throws {

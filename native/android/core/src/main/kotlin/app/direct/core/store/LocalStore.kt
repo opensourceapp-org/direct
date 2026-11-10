@@ -72,6 +72,9 @@ data class MessageRecord(
     val mediaFile: String? = null,
     /** Incoming group messages: the member who wrote it. */
     val senderId: String? = null,
+    val edited: Boolean = false,
+    val deleted: Boolean = false,
+    val forwarded: Boolean = false,
 )
 
 @Serializable
@@ -136,6 +139,9 @@ class LocalStore private constructor(private val file: File?, private val key: B
     fun messagesWith(peerId: String): List<MessageRecord> = messages.values.filter { it.peerId == peerId }.sortedBy { it.createdAt }
     fun putMessage(message: MessageRecord) {
         messages[message.id] = message
+    }
+    fun removeMessage(id: String) {
+        messages.remove(id)
     }
 
     fun queued(id: String): QueueItem? = queue[id]

@@ -7,6 +7,8 @@ struct CallScreen: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject private var session = CallSession.shared
     @State private var now = Date()
+    @State private var pip = CGSize.zero
+    @State private var dragging = CGSize.zero
     let call: CallSnapshot
 
     var body: some View {
@@ -14,37 +16,55 @@ struct CallScreen: View {
         let group = model.state.groups.first { $0.id == call.peerId }
         let conversation = model.state.conversations.first { $0.peerId == call.peerId }
         let name = group?.name ?? conversation?.name ?? contact?.name ?? call.peerId
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if call.video, call.phase != .incoming, call.phase != .ended {
-                CallVideo(track: session.remoteTrack, mirror: false)
-                    .ignoresSafeArea()
-                if call.cameraOn {
-                    CallVideo(track: session.localTrack, mirror: true)
-                        .frame(width: 104, height: 150)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                        .padding(.top, 24)
-                        .padding(.trailing, 16)
+        GeometryReader { geo in
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if call.video, call.phase != .incoming, call.phase != .ended {
+                    CallVideo(track: session.remoteTrack, mirror: false)
+                        .ignoresSafeArea()
+                    if call.cameraOn {
+                        CallVideo(track: session.localTrack, mirror: true)
+                            .frame(width: 104, height: 150)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .overlay(alignment: .top) {
+                                Capsule().fill(.white.opacity(0.7)).frame(width: 36, height: 4).padding(.top, 8)
+                            }
+                            .offset(x: pip.width + dragging.width, y: pip.height + dragging.height)
+                            .highPriorityGesture(
+                                DragGesture()
+                                    .onChanged { dragging = $0.translation }
+                                    .onEnded { value in
+                                        pip = clampPip(
+                                            CGSize(width: pip.width + value.translation.width, height: pip.height + value.translation.height),
+                                            in: geo.size
+                                        )
+                                        dragging = .zero
+                                    }
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding(.top, 24)
+                            .padding(.trailing, 16)
+                    }
                 }
+                VStack(spacing: 22) {
+                    Spacer()
+                    if !(call.video && call.phase == .active) {
+                        Avatar(name: name, jpeg: contact?.avatarJpegBase64, size: 96)
+                    }
+                    Text(name).font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
+                    Text(status).font(.system(size: 15)).foregroundStyle(.white.opacity(0.72))
+                    if call.group, !call.members.isEmpty {
+                        let memberNames = call.members.map { id in
+                            model.state.contacts.first { $0.directId == id }?.name ?? String(id.prefix(12))
+                        }.joined(separator: ", ")
+                        Text(memberNames).font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
+                    }
+                    controls
+                        .padding(.bottom, 12)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, max(24, geo.safeAreaInsets.bottom + 8))
             }
-            VStack(spacing: 22) {
-                Spacer()
-                if !(call.video && call.phase == .active) {
-                    Avatar(name: name, jpeg: contact?.avatarJpegBase64, size: 96)
-                }
-                Text(name).font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
-                Text(status).font(.system(size: 15)).foregroundStyle(.white.opacity(0.72))
-                if call.group, !call.members.isEmpty {
-                    let memberNames = call.members.map { id in
-                        model.state.contacts.first { $0.directId == id }?.name ?? String(id.prefix(12))
-                    }.joined(separator: ", ")
-                    Text(memberNames).font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
-                }
-                controls
-                    .padding(.bottom, 28)
-            }
-            .padding(.horizontal, 24)
         }
         .onAppear { apply() }
         .onChange(of: call.muted) { _ in apply() }
@@ -89,22 +109,41 @@ struct CallScreen: View {
         case .ended:
             EmptyView()
         default:
-            HStack(spacing: 18) {
-                roundButton(call.muted ? "mic.slash.fill" : "mic.fill", color: Color.white.opacity(0.16), label: call.muted ? "Unmute" : "Mute") {
-                    model.setCallMuted(!call.muted)
-                }
-                roundButton(call.speaker ? "speaker.wave.2.fill" : "speaker.slash.fill", color: Color.white.opacity(0.16), label: "Speaker") {
-                    model.setCallSpeaker(!call.speaker)
-                }
-                if call.video {
-                    roundButton(call.cameraOn ? "video.fill" : "video.slash.fill", color: Color.white.opacity(0.16), label: "Camera") {
-                        model.setCallCamera(!call.cameraOn)
+            VStack(spacing: 16) {
+                HStack {
+                    Spacer(minLength: 0)
+                    roundButton(call.muted ? "mic.slash.fill" : "mic.fill", color: Color.white.opacity(0.16), label: call.muted ? "Unmute" : "Mute") {
+                        model.setCallMuted(!call.muted)
                     }
-                    roundButton("camera.rotate", color: Color.white.opacity(0.16), label: "Flip") { session.flipCamera() }
+                    Spacer(minLength: 0)
+                    roundButton(call.speaker ? "speaker.wave.2.fill" : "speaker.slash.fill", color: Color.white.opacity(0.16), label: "Speaker") {
+                        model.setCallSpeaker(!call.speaker)
+                    }
+                    if call.video {
+                        Spacer(minLength: 0)
+                        roundButton(call.cameraOn ? "video.fill" : "video.slash.fill", color: Color.white.opacity(0.16), label: "Camera") {
+                            model.setCallCamera(!call.cameraOn)
+                        }
+                        Spacer(minLength: 0)
+                        roundButton("camera.rotate", color: Color.white.opacity(0.16), label: "Flip") { session.flipCamera() }
+                    }
+                    Spacer(minLength: 0)
                 }
                 roundButton("phone.down.fill", color: Ink.danger, label: "End") { model.endCall() }
             }
         }
+    }
+
+    private func clampPip(_ next: CGSize, in size: CGSize) -> CGSize {
+        let pipW: CGFloat = 104
+        let pipH: CGFloat = 150
+        let padTop: CGFloat = 24
+        let padEnd: CGFloat = 16
+        let left = size.width - pipW - padEnd + next.width
+        let top = padTop + next.height
+        let clampedLeft = min(max(8, left), max(8, size.width - pipW - 8))
+        let clampedTop = min(max(8, top), max(8, size.height - pipH - 8))
+        return CGSize(width: clampedLeft - (size.width - pipW - padEnd), height: clampedTop - padTop)
     }
 
     private func roundButton(_ symbol: String, color: Color, label: String, action: @escaping () -> Void) -> some View {

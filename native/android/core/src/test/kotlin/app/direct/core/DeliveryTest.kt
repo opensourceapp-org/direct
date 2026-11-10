@@ -24,6 +24,7 @@ import app.direct.core.delivery.MessageState.SENDING
 import app.direct.core.delivery.MessageState.SENT
 import app.direct.core.delivery.PeerLinks
 import app.direct.core.delivery.ReceiveOutcome
+import app.direct.core.protocol.ChatNotes
 import app.direct.core.protocol.Envelopes
 import app.direct.core.protocol.GroupNotes
 import app.direct.core.store.ContactRecord
@@ -288,5 +289,92 @@ class DeliveryEngineTest {
         assertEquals(ReceiveOutcome.RECEIPT, ada.engine.receive(cy.keys.directId, cyLinks.sent.last()))
         assertEquals(ACCEPTED, ada.store.message(message.id)?.state)
         assertTrue(ada.store.queue().none { it.logicalId() == message.id })
+    }
+
+    @Test
+    fun `edit and delete notes rewrite the original bubble`() = runTest {
+        var now = 1_000L
+        val adaLinks = Links().apply { reachable = true }
+        val boLinks = Links().apply { reachable = true }
+        val ada = Device("Ada", { now }, adaLinks)
+        val bo = Device("Bo", { now }, boLinks)
+        ada.know(bo)
+        bo.know(ada)
+        val encoded = ChatNotes.encode(ChatNotes.Note("edit", "msg_abcd", "hi"))
+        assertEquals("edit", ChatNotes.parsePrefixed(encoded)?.op)
+        assertEquals("hi", ChatNotes.parsePrefixed(encoded)?.body)
+        assertNull(ChatNotes.parsePrefixed("DIRECT-CHAT/1\n{}"))
+
+        val message = ada.engine.queueText(bo.keys.directId, "hello")
+        ada.engine.flush()
+        assertEquals(ReceiveOutcome.STORED, bo.engine.receive(ada.keys.directId, adaLinks.sent.last()))
+        bo.engine.flush()
+        assertEquals(ReceiveOutcome.RECEIPT, ada.engine.receive(bo.keys.directId, boLinks.sent.last()))
+        assertEquals(ACCEPTED, ada.store.message(message.id)?.state)
+
+        adaLinks.sent.clear()
+        ada.engine.editText(message.id, "hello there")
+        assertEquals("hello there", ada.store.message(message.id)?.body)
+        assertEquals(true, ada.store.message(message.id)?.edited)
+        ada.engine.flush()
+        assertEquals(ReceiveOutcome.STORED, bo.engine.receive(ada.keys.directId, adaLinks.sent.last()))
+        assertEquals("hello there", bo.store.message(message.id)?.body)
+        assertEquals(true, bo.store.message(message.id)?.edited)
+
+        adaLinks.sent.clear()
+        ada.engine.deleteMessage(message.id, true)
+        assertEquals(true, ada.store.message(message.id)?.deleted)
+        ada.engine.flush()
+        assertEquals(ReceiveOutcome.STORED, bo.engine.receive(ada.keys.directId, adaLinks.sent.last()))
+        assertEquals(true, bo.store.message(message.id)?.deleted)
+        assertEquals("", bo.store.message(message.id)?.body)
+    }
+
+    @Test
+    fun `delete for me drops a bubble only on this phone`() = runTest {
+        var now = 1_000L
+        val adaLinks = Links().apply { reachable = true }
+        val ada = Device("Ada", { now }, adaLinks)
+        val bo = Device("Bo", { now }, Links())
+        ada.know(bo)
+        bo.know(ada)
+        val message = ada.engine.queueText(bo.keys.directId, "hello")
+        ada.engine.flush()
+        assertEquals(ReceiveOutcome.STORED, bo.engine.receive(ada.keys.directId, adaLinks.sent.last()))
+        ada.engine.deleteMessage(message.id, false)
+        assertNull(ada.store.message(message.id))
+        assertEquals("hello", bo.store.message(message.id)?.body)
+    }
+
+    @Test
+    fun `an unsent edit reseals the original envelope`() = runTest {
+        var now = 1_000L
+        val adaLinks = Links()
+        val ada = Device("Ada", { now }, adaLinks)
+        val bo = Device("Bo", { now }, Links())
+        ada.know(bo)
+        val message = ada.engine.queueText(bo.keys.directId, "hello")
+        ada.engine.editText(message.id, "changed")
+        adaLinks.reachable = true
+        ada.engine.flush()
+        val opened = Encoding.text(Envelopes.open(bo.keys, Envelopes.decode(adaLinks.sent.last(), ada.keys.signingPublic, now)))
+        assertEquals("changed", opened)
+        assertNull(ChatNotes.parsePrefixed(opened))
+    }
+
+    @Test
+    fun `forward copies a text bubble into another thread`() = runTest {
+        var now = 1_000L
+        val ada = Device("Ada", { now }, Links())
+        val bo = Device("Bo", { now }, Links())
+        val cy = Device("Cy", { now }, Links())
+        ada.know(bo)
+        ada.know(cy)
+        val message = ada.engine.queueText(bo.keys.directId, "later")
+        val forwarded = ada.engine.forward(message.id, cy.keys.directId, ada.keys.directId)
+        assertEquals(true, forwarded.forwarded)
+        assertEquals("later", forwarded.body)
+        assertEquals(cy.keys.directId, forwarded.peerId)
+        assertTrue(forwarded.id != message.id)
     }
 }

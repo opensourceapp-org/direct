@@ -271,6 +271,7 @@ struct CallVideo: UIViewRepresentable {
         let view = RTCMTLVideoView()
         view.videoContentMode = .scaleAspectFill
         view.clipsToBounds = true
+        view.isUserInteractionEnabled = false
         return view
     }
 

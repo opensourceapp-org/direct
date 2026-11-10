@@ -787,15 +787,21 @@ struct MediaBubble: View {
     let message: MessageRecord
     var tail: Bool
     var showReceipt: Bool
+    var onEdit: (() -> Void)?
+    var onForward: (() -> Void)?
+    var onDelete: (() -> Void)?
     @EnvironmentObject private var model: AppModel
     @State private var bytes: Data?
     @State private var videoOpen = false
     @State private var settled: Bool
 
-    init(message: MessageRecord, tail: Bool = true, showReceipt: Bool = false) {
+    init(message: MessageRecord, tail: Bool = true, showReceipt: Bool = false, onEdit: (() -> Void)? = nil, onForward: (() -> Void)? = nil, onDelete: (() -> Void)? = nil) {
         self.message = message
         self.tail = tail
         self.showReceipt = showReceipt
+        self.onEdit = onEdit
+        self.onForward = onForward
+        self.onDelete = onDelete
         let age = Date().timeIntervalSince1970 * 1000 - Double(message.createdAt)
         let justSent = message.direction == .outgoing && age > -2_000 && age < 1_500
         _bytes = State(initialValue: nil)
@@ -808,8 +814,20 @@ struct MediaBubble: View {
         HStack(alignment: .bottom, spacing: 0) {
             if outgoing { Spacer(minLength: 64) }
             VStack(alignment: outgoing ? .trailing : .leading, spacing: 3) {
+                if message.forwarded, !message.deleted {
+                    Text("Forwarded")
+                        .font(.caption2)
+                        .foregroundStyle(Ink.muted)
+                        .padding(.horizontal, 4)
+                }
                 content(outgoing: outgoing)
-                if showReceipt, !receipt.isEmpty {
+                if message.edited, !message.deleted {
+                    Text("Edited")
+                        .font(.caption2)
+                        .foregroundStyle(Ink.muted)
+                        .padding(.horizontal, 4)
+                }
+                if showReceipt, !receipt.isEmpty, !message.deleted {
                     Button {
                         if message.state == .failed { model.retry(message.id) }
                     } label: {
@@ -841,6 +859,17 @@ struct MediaBubble: View {
                 PlayerSheet(data: bytes, mime: message.mediaMime ?? "video/mp4", name: "video.mp4")
             }
         }
+        .contextMenu {
+            if message.mediaKind != "call", message.mediaKind != "group" {
+                if !message.deleted, message.direction == .outgoing, message.mediaKind == nil, onEdit != nil {
+                    Button("Edit") { onEdit?() }
+                }
+                if !message.deleted, onForward != nil {
+                    Button("Forward") { onForward?() }
+                }
+                Button("Delete", role: .destructive) { onDelete?() }
+            }
+        }
     }
 
     private var receipt: String {
@@ -860,7 +889,14 @@ struct MediaBubble: View {
         let label = MediaNotes.label(kind)
         let fill = outgoing ? Ink.accent : Ink.incoming
         let shape = messageBubble(outgoing, tail: tail)
-        if let bytes, let image = UIImage(data: bytes), let kind, ["image", "sticker", "gif"].contains(kind) {
+        if message.deleted {
+            Text("This message was deleted")
+                .font(.system(size: 17).italic())
+                .foregroundStyle(outgoing ? Color.white.opacity(0.85) : Ink.muted)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(fill, in: shape)
+        } else if let bytes, let image = UIImage(data: bytes), let kind, ["image", "sticker", "gif"].contains(kind) {
             VStack(alignment: outgoing ? .trailing : .leading, spacing: 2) {
                 let caption = !message.body.isEmpty && message.body != label
                 Image(uiImage: image)
