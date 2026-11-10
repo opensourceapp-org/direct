@@ -69,25 +69,27 @@ struct FeedView: View {
         List {
             Section {
                 StoriesTray { storyOwner = $0 }
-                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
             if posts.isEmpty {
                 Section {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 10) {
                         Image(systemName: "newspaper")
-                            .font(.system(size: 44, weight: .ultraLight))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 40, weight: .ultraLight))
+                            .foregroundStyle(.tertiary)
+                            .padding(.bottom, 2)
                         Text("No Posts")
-                            .font(.title2.weight(.semibold))
+                            .font(.title3.weight(.semibold))
                         Text("When people you know share photos and videos, they appear here.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
+                            .padding(.horizontal, 12)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 36)
+                    .padding(.vertical, 48)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
@@ -95,7 +97,7 @@ struct FeedView: View {
                 ForEach(posts) { item in
                     Section {
                         FeedPostCard(item: item, onOpen: { viewingId = item.id }, onProfile: { profilePeer = item.ownerId })
-                            .listRowInsets(EdgeInsets())
+                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 14, trailing: 16))
                             .listRowBackground(Ink.surface)
                             .listRowSeparator(.hidden)
                     }
@@ -144,31 +146,30 @@ struct FeedPostCard: View {
 
     var body: some View {
         let name = feedOwnerName(model.state, item.ownerId)
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 12) {
             Button(action: onProfile) {
                 HStack(spacing: 10) {
-                    Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 36)
+                    Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 34)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(name).font(.headline)
-                        Text(formatFeedTime(item.createdAt)).font(.footnote).foregroundStyle(Ink.muted)
+                        Text(name).font(.subheadline.weight(.semibold))
+                        Text(formatFeedTime(item.createdAt)).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.forward")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Ink.muted)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
             }
             .buttonStyle(.plain)
             Button(action: onOpen) {
                 FeedThumb(item: item)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 8) {
                 FeedActions(item: item, onComments: onOpen)
                 if let summary = likeSummary(model.state, item) {
-                    Text(summary).font(.subheadline.weight(.semibold))
+                    Text(summary).font(.footnote.weight(.semibold))
                 }
                 if !item.caption.isEmpty {
                     Text(item.caption).font(.subheadline)
@@ -176,18 +177,12 @@ struct FeedPostCard: View {
                 if !item.comments.isEmpty {
                     Button(action: onOpen) {
                         Text(item.comments.count == 1 ? "1 Comment" : "\(item.comments.count) Comments")
-                            .font(.subheadline)
-                            .foregroundStyle(Ink.muted)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    if let latest = item.comments.last {
-                        CommentRow(fromId: latest.fromId, text: latest.body, createdAt: latest.createdAt, compact: true)
-                    }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 14)
         }
     }
 }
@@ -199,21 +194,23 @@ struct FeedActions: View {
 
     var body: some View {
         let liked = item.likes.contains { $0.fromId == model.state.profile?.directId }
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Button { model.likeFeed(item.id) } label: {
                 Label(liked ? "Liked" : "Like", systemImage: liked ? "heart.fill" : "heart")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.footnote.weight(.semibold))
             }
             .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
             .tint(liked ? Color.pink : Ink.accent)
-            .controlSize(.regular)
+            .controlSize(.small)
             Button(action: onComments) {
-                Label("Comment", systemImage: "text.bubble")
-                    .font(.subheadline.weight(.semibold))
+                Label(item.comments.isEmpty ? "Comment" : "\(item.comments.count)", systemImage: "text.bubble")
+                    .font(.footnote.weight(.semibold))
             }
             .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
             .tint(Ink.accent)
-            .controlSize(.regular)
+            .controlSize(.small)
             Spacer(minLength: 0)
         }
     }
@@ -230,14 +227,20 @@ struct CommentRow: View {
         let name = feedOwnerName(model.state, fromId)
         HStack(alignment: .top, spacing: 10) {
             Avatar(name: name, jpeg: feedOwnerJpeg(model.state, fromId), size: compact ? 28 : 34)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(compact ? .footnote.weight(.semibold) : .subheadline.weight(.semibold))
-                Text(text)
-                    .font(compact ? .footnote : .subheadline)
-                    .foregroundStyle(.primary)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(compact ? .footnote.weight(.semibold) : .subheadline.weight(.semibold))
+                    Text(text)
+                        .font(compact ? .footnote : .subheadline)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 Text(formatFeedTime(createdAt)).font(.caption2).foregroundStyle(.secondary)
+                    .padding(.leading, 4)
             }
             Spacer(minLength: 0)
         }
@@ -417,52 +420,16 @@ struct ProfilePosts: View {
 
     var body: some View {
         let posts = profilePosts(model.state, ownerId: ownerId)
-        VStack(alignment: .leading, spacing: 10) {
-            if showsHeading || canAdd {
-                HStack {
-                    if showsHeading {
-                        Text("Photos & Videos").font(.title3.weight(.semibold))
-                    }
-                    Spacer()
-                    if canAdd {
-                        PhotosPicker(selection: $item, matching: .any(of: [.images, .videos])) {
-                            Image(systemName: "plus.circle.fill")
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(Color.accentColor)
-                                .font(.title3)
-                        }
-                    }
-                }
-                .padding(.horizontal, showsHeading ? 0 : 16)
+        VStack(alignment: .leading, spacing: 12) {
+            if showsHeading {
+                Text("Posts").font(.headline)
             }
-            if posts.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(canAdd ? "No Posts Yet" : "No Posts")
-                        .font(.subheadline.weight(.semibold))
-                    Text(canAdd ? "Add photos and videos. People you know will see them in Feed." : "Nothing on this profile yet.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, showsHeading ? 0 : 16)
+            if posts.isEmpty && !canAdd {
+                Text("Nothing on this profile yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             } else {
-                VStack(spacing: 8) {
-                    ForEach(Array(stride(from: 0, to: posts.count, by: 2)), id: \.self) { start in
-                        let row = Array(posts[start..<min(start + 2, posts.count)])
-                        HStack(spacing: 8) {
-                            ForEach(row) { post in
-                                Button { viewingId = post.id } label: {
-                                    FeedThumb(item: post)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                }
-                                .buttonStyle(.plain)
-                                .frame(maxWidth: .infinity)
-                            }
-                            if row.count == 1 {
-                                Color.clear.aspectRatio(1, contentMode: .fit).frame(maxWidth: .infinity)
-                            }
-                        }
-                    }
-                }
+                profileGrid(tiles(from: posts))
             }
         }
         .onChange(of: item) { picked in
@@ -484,6 +451,73 @@ struct ProfilePosts: View {
             FeedLightbox(id: viewingId ?? "", canDelete: canAdd)
         }
     }
+
+    private func tiles(from posts: [FeedItem]) -> [ProfileTile] {
+        (canAdd ? [.add] : []) + posts.map(ProfileTile.post)
+    }
+
+    @ViewBuilder
+    private func profileGrid(_ tiles: [ProfileTile]) -> some View {
+        VStack(spacing: 10) {
+            ForEach(Array(stride(from: 0, to: tiles.count, by: 2)), id: \.self) { start in
+                profileRow(row(from: tiles, start: start))
+            }
+        }
+    }
+
+    private func row(from tiles: [ProfileTile], start: Int) -> [ProfileTile] {
+        Array(tiles[start..<min(start + 2, tiles.count)])
+    }
+
+    @ViewBuilder
+    private func profileRow(_ row: [ProfileTile]) -> some View {
+        HStack(spacing: 10) {
+            ForEach(row) { tile in
+                profileTile(tile)
+            }
+            if row.count == 1 {
+                Color.clear.aspectRatio(1, contentMode: .fit).frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func profileTile(_ tile: ProfileTile) -> some View {
+        switch tile {
+        case .add:
+            PhotosPicker(selection: $item, matching: .any(of: [.images, .videos])) {
+                VStack(spacing: 8) {
+                    Image(systemName: "plus")
+                        .font(.title2.weight(.semibold))
+                    Text("Add")
+                        .font(.footnote.weight(.semibold))
+                }
+                .foregroundStyle(Ink.accent)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        case .post(let post):
+            Button { viewingId = post.id } label: {
+                FeedThumb(item: post)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+private enum ProfileTile: Identifiable {
+    case add
+    case post(FeedItem)
+
+    var id: String {
+        switch self {
+        case .add: return "add"
+        case .post(let item): return item.id
+        }
+    }
 }
 
 struct ContactProfileView: View {
@@ -501,9 +535,9 @@ struct ContactProfileView: View {
         let stories = liveStories(model.state, ownerId: peerId)
         List {
             Section {
-                VStack(spacing: 10) {
+                VStack(spacing: 8) {
                     Button { if !stories.isEmpty { storyOpen = true } } label: {
-                        Avatar(name: name, jpeg: jpeg, size: 96)
+                        Avatar(name: name, jpeg: jpeg, size: 108)
                             .overlay {
                                 Circle().strokeBorder(stories.isEmpty ? Color.clear : Color.accentColor, lineWidth: 2)
                             }
@@ -516,19 +550,18 @@ struct ContactProfileView: View {
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
+                    Text(profilePosts(model.state, ownerId: peerId).count == 1 ? "1 post" : "\(profilePosts(model.state, ownerId: peerId).count) posts")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .padding(.vertical, 12)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
             Section {
-                LabeledContent("Posts", value: "\(profilePosts(model.state, ownerId: peerId).count)")
-            }
-            .listRowBackground(Ink.surface)
-            Section {
                 ProfilePosts(ownerId: peerId, canAdd: selfProfile, showsHeading: false)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 16, trailing: 16))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             } header: {
@@ -594,7 +627,7 @@ struct FeedLightbox: View {
         let name = item.map { feedOwnerName(model.state, $0.ownerId) } ?? "Post"
         VStack(spacing: 0) {
             ZStack {
-                Ink.surface
+                Color(uiColor: .secondarySystemFill)
                 if let item, let bytes, item.kind != "video", let image = UIImage(data: bytes) {
                     Image(uiImage: image).resizable().scaledToFit()
                 } else if let item, let bytes, item.kind == "video" {
@@ -604,29 +637,30 @@ struct FeedLightbox: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: commenting ? 120 : 220)
-            .clipped()
+            .frame(height: commenting ? 140 : 260)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
             if let item {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
                         Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 36)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(name).font(.headline)
-                            Text(formatFeedTime(item.createdAt)).font(.footnote).foregroundStyle(Ink.muted)
+                            Text(name).font(.subheadline.weight(.semibold))
+                            Text(formatFeedTime(item.createdAt)).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
                     }
                     FeedActions(item: item) { commenting = true }
                     if let summary = likeSummary(model.state, item) {
-                        Text(summary).font(.subheadline.weight(.semibold))
+                        Text(summary).font(.footnote.weight(.semibold))
                     }
                     if !item.caption.isEmpty {
-                        Text(item.caption).font(.body)
+                        Text(item.caption).font(.subheadline)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Ink.surface)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
                 Divider().overlay(Ink.line)
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -634,8 +668,9 @@ struct FeedLightbox: View {
                             if item.comments.isEmpty {
                                 Text("No comments yet")
                                     .font(.subheadline)
-                                    .foregroundStyle(Ink.muted)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.vertical, 24)
                             } else {
                                 ForEach(item.comments) { comment in
                                     CommentRow(fromId: comment.fromId, text: comment.body, createdAt: comment.createdAt)
@@ -699,7 +734,7 @@ struct FeedLightbox: View {
                 .onSubmit { send(postId) }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(Ink.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             Button {
                 send(postId)
             } label: {

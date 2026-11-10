@@ -172,8 +172,11 @@ struct ChatsView: View {
                 .listRowBackground(Ink.surface)
             }
         }
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .background(Ink.background)
         .navigationTitle("Chats")
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink { NewGroupView() } label: {
@@ -671,8 +674,11 @@ struct ContactsView: View {
             }
             .listRowBackground(Ink.surface)
         }
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .background(Ink.background)
         .navigationTitle("Contacts")
+        .navigationBarTitleDisplayMode(.large)
         .sheet(isPresented: $scanning) {
             NavigationStack {
                 QrScannerView { text in
@@ -806,12 +812,11 @@ struct IdentityView: View {
         let profile = model.state.profile
         let posts = profile.map { profilePosts(model.state, ownerId: $0.directId).count } ?? 0
         let people = model.state.contacts.filter { $0.accepted && !$0.blocked }.count
-        let stories = profile.map { liveStories(model.state, ownerId: $0.directId).count } ?? 0
         List {
             if let profile {
                 Section {
-                    VStack(spacing: 10) {
-                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 96)
+                    VStack(spacing: 8) {
+                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 108)
                         Text(profile.name)
                             .font(.title2.weight(.semibold))
                         if !profile.status.isEmpty {
@@ -820,25 +825,22 @@ struct IdentityView: View {
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                         }
+                        Text("\(posts == 1 ? "1 post" : "\(posts) posts") · \(people == 1 ? "1 contact" : "\(people) contacts")")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 12)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }
                 Section {
-                    LabeledContent("Posts", value: "\(posts)")
-                    LabeledContent("Contacts", value: "\(people)")
-                    LabeledContent("Stories", value: "\(stories)")
-                }
-                .listRowBackground(Ink.surface)
-                Section {
                     ProfilePosts(ownerId: profile.directId, canAdd: true, showsHeading: false)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 16, trailing: 16))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 } header: {
-                    Text("Your Posts")
+                    Text("Posts")
                 }
             }
         }
