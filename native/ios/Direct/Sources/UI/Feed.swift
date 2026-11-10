@@ -76,7 +76,7 @@ struct FeedView: View {
             if posts.isEmpty {
                 Section {
                     VStack(spacing: 8) {
-                        Image(systemName: "photo.on.rectangle.angled")
+                        Image(systemName: "newspaper")
                             .font(.system(size: 44, weight: .ultraLight))
                             .foregroundStyle(.secondary)
                         Text("No Posts")
@@ -436,21 +436,28 @@ struct ProfilePosts: View {
                 .padding(.horizontal, showsHeading ? 0 : 16)
             }
             if posts.isEmpty {
-                Muted(canAdd ? "Add photos and videos to your profile. Accepted contacts see them." : "No photos or videos on this profile yet.")
-                    .padding(.horizontal, showsHeading ? 0 : 16)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(canAdd ? "No Posts Yet" : "No Posts")
+                        .font(.subheadline.weight(.semibold))
+                    Text(canAdd ? "Add photos and videos. People you know will see them in Feed." : "Nothing on this profile yet.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, showsHeading ? 0 : 16)
             } else {
-                VStack(spacing: 2) {
-                    ForEach(Array(stride(from: 0, to: posts.count, by: 3)), id: \.self) { start in
-                        let row = Array(posts[start..<min(start + 3, posts.count)])
-                        HStack(spacing: 2) {
+                VStack(spacing: 8) {
+                    ForEach(Array(stride(from: 0, to: posts.count, by: 2)), id: \.self) { start in
+                        let row = Array(posts[start..<min(start + 2, posts.count)])
+                        HStack(spacing: 8) {
                             ForEach(row) { post in
                                 Button { viewingId = post.id } label: {
                                     FeedThumb(item: post)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
                                 .buttonStyle(.plain)
                                 .frame(maxWidth: .infinity)
                             }
-                            ForEach(0..<(3 - row.count), id: \.self) { _ in
+                            if row.count == 1 {
                                 Color.clear.aspectRatio(1, contentMode: .fit).frame(maxWidth: .infinity)
                             }
                         }
@@ -492,30 +499,46 @@ struct ContactProfileView: View {
         let jpeg = selfProfile ? model.state.profile?.avatarJpegBase64 : contact?.avatarJpegBase64
         let about = selfProfile ? (model.state.profile?.status ?? "") : (contact?.about ?? "")
         let stories = liveStories(model.state, ownerId: peerId)
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 16) {
+        List {
+            Section {
+                VStack(spacing: 10) {
                     Button { if !stories.isEmpty { storyOpen = true } } label: {
-                        Avatar(name: name, jpeg: jpeg, size: 72)
+                        Avatar(name: name, jpeg: jpeg, size: 96)
                             .overlay {
                                 Circle().strokeBorder(stories.isEmpty ? Color.clear : Color.accentColor, lineWidth: 2)
                             }
                     }
                     .buttonStyle(.plain)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(name).font(.title2.weight(.semibold))
-                        if !about.isEmpty { Text(about).foregroundStyle(.secondary) }
-                        Text(profilePosts(model.state, ownerId: peerId).count == 1 ? "1 Photo" : "\(profilePosts(model.state, ownerId: peerId).count) Photos")
+                    Text(name).font(.title2.weight(.semibold))
+                    if !about.isEmpty {
+                        Text(about)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
                 }
-                ProfilePosts(ownerId: peerId, canAdd: selfProfile)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-            .padding()
+            Section {
+                LabeledContent("Posts", value: "\(profilePosts(model.state, ownerId: peerId).count)")
+            }
+            .listRowBackground(Ink.surface)
+            Section {
+                ProfilePosts(ownerId: peerId, canAdd: selfProfile, showsHeading: false)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } header: {
+                Text("Posts")
+            }
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .background(Ink.background)
-        .navigationTitle("Profile")
+        .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

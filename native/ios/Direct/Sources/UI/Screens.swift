@@ -126,7 +126,7 @@ struct HomeView: View {
                 .tabItem { Label("Contacts", systemImage: "person.2") }
                 .tag(HomeTab.contacts)
             NavigationStack { FeedView() }
-                .tabItem { Label("Feed", systemImage: "photo.on.rectangle.angled") }
+                .tabItem { Label("Feed", systemImage: "newspaper") }
                 .tag(HomeTab.feed)
             NavigationStack { IdentityView() }
                 .tabItem { Label("Profile", systemImage: "person.crop.circle") }
@@ -804,51 +804,53 @@ struct IdentityView: View {
 
     var body: some View {
         let profile = model.state.profile
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if let profile {
-                    HStack(spacing: 20) {
-                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 88)
-                        HStack {
-                            Spacer()
-                            ProfileStat(value: profilePosts(model.state, ownerId: profile.directId).count, label: "Posts")
-                            Spacer()
-                            ProfileStat(value: model.state.contacts.filter { $0.accepted && !$0.blocked }.count, label: "Contacts")
-                            Spacer()
-                            ProfileStat(value: liveStories(model.state, ownerId: profile.directId).count, label: "Stories")
-                            Spacer()
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(profile.name).font(.headline)
+        let posts = profile.map { profilePosts(model.state, ownerId: $0.directId).count } ?? 0
+        let people = model.state.contacts.filter { $0.accepted && !$0.blocked }.count
+        let stories = profile.map { liveStories(model.state, ownerId: $0.directId).count } ?? 0
+        List {
+            if let profile {
+                Section {
+                    VStack(spacing: 10) {
+                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 96)
+                        Text(profile.name)
+                            .font(.title2.weight(.semibold))
                         if !profile.status.isEmpty {
-                            Text(profile.status).font(.subheadline)
+                            Text(profile.status)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
                     }
-                    .padding(.horizontal, 20)
-                    NavigationLink {
-                        EditProfileView()
-                    } label: {
-                        Text("Edit profile")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Ink.text)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Ink.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Ink.line))
-                    }
-                    .padding(.horizontal, 20)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+                Section {
+                    LabeledContent("Posts", value: "\(posts)")
+                    LabeledContent("Contacts", value: "\(people)")
+                    LabeledContent("Stories", value: "\(stories)")
+                }
+                .listRowBackground(Ink.surface)
+                Section {
                     ProfilePosts(ownerId: profile.directId, canAdd: true, showsHeading: false)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } header: {
+                    Text("Your Posts")
                 }
             }
-            .padding(.top, 8)
-            .padding(.bottom, 24)
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .background(Ink.background)
         .navigationTitle("Profile")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink("Edit") { EditProfileView() }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     SettingsView()
@@ -1037,17 +1039,6 @@ struct SettingsView: View {
                     ShareSheet(items: [caption])
                 }
             }
-        }
-    }
-}
-
-private struct ProfileStat: View {
-    let value: Int
-    let label: String
-    var body: some View {
-        VStack(spacing: 2) {
-            Text("\(value)").font(.headline)
-            Text(label).font(.caption2).foregroundStyle(Ink.muted)
         }
     }
 }
