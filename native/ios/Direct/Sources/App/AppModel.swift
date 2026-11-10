@@ -109,6 +109,9 @@ final class AppModel: ObservableObject {
     }
 
     func send(_ peerId: String, _ body: String) { run { try $0.send(peerId, body) } }
+    func editMessage(_ messageId: String, _ body: String) { run { try $0.editMessage(messageId, body) } }
+    func deleteMessage(_ messageId: String, forEveryone: Bool) { run { try $0.deleteMessage(messageId, forEveryone: forEveryone) } }
+    func forwardMessage(_ messageId: String, to peerId: String) { run { try $0.forwardMessage(messageId, to: peerId) } }
 
     func createGroup(name: String, memberIds: [String], done: @escaping @MainActor (String) -> Void) {
         run { node in

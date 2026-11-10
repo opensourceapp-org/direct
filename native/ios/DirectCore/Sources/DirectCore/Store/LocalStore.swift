@@ -169,12 +169,15 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
     public var mediaFile: String?
     /// Incoming group messages: the member who wrote it.
     public var senderId: String?
+    public var edited: Bool
+    public var deleted: Bool
+    public var forwarded: Bool
 
     private enum CodingKeys: String, CodingKey {
-        case id, peerId, direction, body, createdAt, state, read, lastError, updatedAt, mediaKind, mediaMime, mediaName, mediaFile, senderId
+        case id, peerId, direction, body, createdAt, state, read, lastError, updatedAt, mediaKind, mediaMime, mediaName, mediaFile, senderId, edited, deleted, forwarded
     }
 
-    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil, mediaKind: String? = nil, mediaMime: String? = nil, mediaName: String? = nil, mediaFile: String? = nil, senderId: String? = nil) {
+    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil, mediaKind: String? = nil, mediaMime: String? = nil, mediaName: String? = nil, mediaFile: String? = nil, senderId: String? = nil, edited: Bool = false, deleted: Bool = false, forwarded: Bool = false) {
         self.id = id
         self.peerId = peerId
         self.direction = direction
@@ -189,6 +192,9 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         self.mediaName = mediaName
         self.mediaFile = mediaFile
         self.senderId = senderId
+        self.edited = edited
+        self.deleted = deleted
+        self.forwarded = forwarded
     }
 
     public init(from decoder: Decoder) throws {
@@ -207,6 +213,9 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         mediaName = try container.decodeIfPresent(String.self, forKey: .mediaName)
         mediaFile = try container.decodeIfPresent(String.self, forKey: .mediaFile)
         senderId = try container.decodeIfPresent(String.self, forKey: .senderId)
+        edited = try container.decodeIfPresent(Bool.self, forKey: .edited) ?? false
+        deleted = try container.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
+        forwarded = try container.decodeIfPresent(Bool.self, forKey: .forwarded) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -225,6 +234,9 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         try container.encodeIfPresent(mediaName, forKey: .mediaName)
         try container.encodeIfPresent(mediaFile, forKey: .mediaFile)
         try container.encodeIfPresent(senderId, forKey: .senderId)
+        try container.encode(edited, forKey: .edited)
+        try container.encode(deleted, forKey: .deleted)
+        try container.encode(forwarded, forKey: .forwarded)
     }
 }
 
@@ -352,6 +364,10 @@ public final class LocalStore {
     public func putMessage(_ message: MessageRecord) {
         if messageMap[message.id] == nil { messageOrder.append(message.id) }
         messageMap[message.id] = message
+    }
+    public func removeMessage(_ id: String) {
+        messageMap[id] = nil
+        messageOrder.removeAll { $0 == id }
     }
 
     public func queued(_ id: String) -> QueueItem? { queueMap[id] }

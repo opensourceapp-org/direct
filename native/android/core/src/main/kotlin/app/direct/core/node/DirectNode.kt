@@ -324,6 +324,53 @@ class DirectNode(
         message
     }
 
+    /** Rewrites an outgoing text bubble. Recipients get a sealed edit note. */
+    suspend fun editMessage(messageId: String, body: String): MessageRecord = onNode {
+        val message = try {
+            requireEngine().editText(messageId, body)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "Message was not edited.")
+        }
+        publish()
+        wake.trySend(Unit)
+        message
+    }
+
+    /**
+     * [forEveryone] replaces the bubble on every phone that has it.
+     * Otherwise it is removed only on this phone.
+     */
+    suspend fun deleteMessage(messageId: String, forEveryone: Boolean): MessageRecord? = onNode {
+        val message = try {
+            requireEngine().deleteMessage(messageId, forEveryone)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "Message was not deleted.")
+        }
+        publish()
+        wake.trySend(Unit)
+        message
+    }
+
+    /** Sends a copy of a bubble into another conversation. */
+    suspend fun forwardMessage(messageId: String, toPeerId: String): MessageRecord = onNode {
+        val self = keys ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+        if (GroupNotes.isGroupId(toPeerId)) {
+            store.group(toPeerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That group is not on this phone.")
+        } else {
+            val contact = store.contact(toPeerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+            if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+            if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before forwarding.")
+        }
+        val message = try {
+            requireEngine().forward(messageId, toPeerId, self.directId)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "Message was not forwarded.")
+        }
+        publish()
+        wake.trySend(Unit)
+        message
+    }
+
     /** Rings an accepted contact, or every member of a group. The invite is sealed and written now; it is not queued. */
     suspend fun placeCall(peerId: String, video: Boolean) = onNode {
         if (keys == null) throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
@@ -663,6 +710,12 @@ class DirectNode(
         return name
     }
 
+    private fun previewBody(message: MessageRecord): String? = when {
+        message.deleted -> "This message was deleted"
+        message.body.isNotBlank() -> message.body
+        else -> MediaNotes.label(message.mediaKind)
+    }
+
     private fun publish() {
         val profile = store.profile
         val identity = keys
@@ -675,7 +728,7 @@ class DirectNode(
             Conversation(
                 peerId = contact.directId,
                 name = contact.name,
-                lastBody = thread.lastOrNull()?.let { message -> message.body.ifBlank { MediaNotes.label(message.mediaKind) } },
+                lastBody = thread.lastOrNull()?.let(::previewBody),
                 lastAt = thread.lastOrNull()?.createdAt ?: contact.createdAt,
                 unread = thread.count { it.direction == Direction.INCOMING && !it.read },
                 request = !contact.accepted && !contact.blocked,
@@ -688,7 +741,7 @@ class DirectNode(
             Conversation(
                 peerId = group.id,
                 name = group.name,
-                lastBody = thread.lastOrNull()?.let { message -> message.body.ifBlank { MediaNotes.label(message.mediaKind) } },
+                lastBody = thread.lastOrNull()?.let(::previewBody),
                 lastAt = thread.lastOrNull()?.createdAt ?: group.createdAt,
                 unread = thread.count { it.direction == Direction.INCOMING && !it.read },
                 request = false,

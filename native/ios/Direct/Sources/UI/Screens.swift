@@ -208,6 +208,9 @@ struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @State private var draft = ""
     @State private var attachments = false
+    @State private var editing: MessageRecord?
+    @State private var forwarding: MessageRecord?
+    @State private var deleting: MessageRecord?
 
     private var contact: ContactRecord? { model.state.contacts.first { $0.directId == peerId } }
     private var group: GroupRecord? { model.state.groups.first { $0.id == peerId } }
@@ -241,7 +244,17 @@ struct ChatView: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(.leading, 8)
                                 }
-                                MediaBubble(message: message, tail: !continues, showReceipt: !continues && message.direction == .outgoing)
+                                MediaBubble(
+                                    message: message,
+                                    tail: !continues,
+                                    showReceipt: !continues && message.direction == .outgoing,
+                                    onEdit: {
+                                        editing = message
+                                        draft = message.body
+                                    },
+                                    onForward: { forwarding = message },
+                                    onDelete: { deleting = message }
+                                )
                             }
                             .padding(.top, previous?.direction == message.direction && !messageGap(previous, message) ? 2 : 8)
                             .id(message.id)
@@ -282,6 +295,30 @@ struct ChatView: View {
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .onAppear { model.open(peerId) }
+        .sheet(item: $forwarding) { message in
+            ForwardPicker(fromPeerId: peerId) { target in
+                model.forwardMessage(message.id, to: target)
+                forwarding = nil
+            }
+        }
+        .confirmationDialog("Delete message?", isPresented: Binding(
+            get: { deleting != nil },
+            set: { if !$0 { deleting = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete for me", role: .destructive) {
+                if let id = deleting?.id { model.deleteMessage(id, forEveryone: false) }
+                if deleting?.id == editing?.id { editing = nil; draft = "" }
+                deleting = nil
+            }
+            if let message = deleting, message.direction == .outgoing, !message.deleted, message.mediaKind != "call", message.mediaKind != "group" {
+                Button("Delete for everyone", role: .destructive) {
+                    model.deleteMessage(message.id, forEveryone: true)
+                    if editing?.id == message.id { editing = nil; draft = "" }
+                    deleting = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { deleting = nil }
+        }
     }
 
     /// Back control, photo, and name share one row. The status sits under the name, beside the photo.
@@ -354,25 +391,42 @@ struct ChatView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
-            AttachmentBar(expanded: $attachments,
-                onPhoto: { sendAttachment(kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0) },
-                onVideo: { sendAttachment(kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0) },
-                onGif: { sendAttachment(kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0) },
-                onSticker: { sendAttachment(kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: "") },
-                onVoice: { sendAttachment(kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0) },
-                onError: { model.toast = $0 }
-            )
-            HStack(alignment: .bottom, spacing: 8) {
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) { attachments.toggle() }
-                } label: {
-                    Image(systemName: attachments ? "xmark" : "plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Ink.accent)
-                        .frame(width: 36, height: 36)
-                        .background(Ink.surface, in: Circle())
+            if editing == nil {
+                AttachmentBar(expanded: $attachments,
+                    onPhoto: { sendAttachment(kind: "image", mime: "image/jpeg", name: "photo.jpg", bytes: $0) },
+                    onVideo: { sendAttachment(kind: "video", mime: "video/mp4", name: "video.mp4", bytes: $0) },
+                    onGif: { sendAttachment(kind: "gif", mime: "image/gif", name: "animation.gif", bytes: $0) },
+                    onSticker: { sendAttachment(kind: "sticker", mime: "image/png", name: "sticker.png", bytes: $0, caption: "") },
+                    onVoice: { sendAttachment(kind: "audio", mime: "audio/mp4", name: "voice.m4a", bytes: $0) },
+                    onError: { model.toast = $0 }
+                )
+            }
+            if editing != nil {
+                HStack {
+                    Text("Editing message").font(.caption).foregroundStyle(Ink.accent)
+                    Spacer()
+                    Button("Cancel") {
+                        editing = nil
+                        draft = ""
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Ink.muted)
                 }
-                .buttonStyle(ComposerPressStyle())
+                .padding(.horizontal, 4)
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                if editing == nil {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) { attachments.toggle() }
+                    } label: {
+                        Image(systemName: attachments ? "xmark" : "plus")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Ink.accent)
+                            .frame(width: 36, height: 36)
+                            .background(Ink.surface, in: Circle())
+                    }
+                    .buttonStyle(ComposerPressStyle())
+                }
                 TextField("Message", text: $draft, axis: .vertical)
                     .font(.body)
                     .foregroundStyle(Ink.text)
@@ -403,10 +457,16 @@ struct ChatView: View {
 
     private func sendDraft() {
         let body = draft
+        let editId = editing?.id
         draft = ""
+        editing = nil
         withAnimation(.easeOut(duration: 0.2)) { attachments = false }
         SendFeedback.play()
-        model.send(peerId, body)
+        if let editId {
+            model.editMessage(editId, body)
+        } else {
+            model.send(peerId, body)
+        }
     }
 
     private func sendAttachment(kind: String, mime: String, name: String, bytes: Data, caption: String? = nil) {
@@ -415,6 +475,47 @@ struct ChatView: View {
         withAnimation(.easeOut(duration: 0.2)) { attachments = false }
         SendFeedback.play()
         model.sendMedia(peerId: peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: text)
+    }
+}
+
+struct ForwardPicker: View {
+    let fromPeerId: String
+    var onPick: (String) -> Void
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    private var targets: [Conversation] {
+        model.state.conversations.filter { $0.peerId != fromPeerId && !$0.request && !$0.blocked }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if targets.isEmpty {
+                    Muted("Add another contact or group first.")
+                }
+                ForEach(targets) { conversation in
+                    Button {
+                        onPick(conversation.peerId)
+                        dismiss()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(conversation.name).foregroundStyle(Ink.text)
+                            if conversation.group {
+                                Text("\(conversation.memberCount) members").font(.caption).foregroundStyle(Ink.muted)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Forward to")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
     }
 }
 

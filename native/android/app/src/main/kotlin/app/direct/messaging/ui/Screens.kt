@@ -11,8 +11,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -70,12 +72,14 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.WifiTethering
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -107,6 +111,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -345,6 +350,9 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
     val request = contact != null && !contact.accepted && !contact.blocked
     val isGroup = group != null || conversation?.group == true
     var draft by rememberSaveable { mutableStateOf("") }
+    var editingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var forwarding by remember { mutableStateOf<MessageRecord?>(null) }
+    var deleting by remember { mutableStateOf<MessageRecord?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val list = rememberLazyListState()
     LaunchedEffect(peerId, messages.size, contact?.accepted, isGroup) {
@@ -391,13 +399,22 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item { Spacer(Modifier.padding(4.dp)) }
             items(messages, key = { it.id }) { message ->
-                MessageBubble(node, state, message, isGroup) { scope.attempt({ error = it }) { node.retry(message.id) } }
+                MessageBubble(
+                    node, state, message, isGroup,
+                    onRetry = { scope.attempt({ error = it }) { node.retry(message.id) } },
+                    onEdit = {
+                        editingId = message.id
+                        draft = message.body
+                    },
+                    onForward = { forwarding = message },
+                    onDelete = { deleting = message },
+                )
             }
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
         HorizontalDivider(color = Ink.border)
         when {
-            isGroup -> Composer(node, peerId, draft, { draft = it }, { error = it })
+            isGroup -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
             contact == null -> Unit
             request -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Muted("${contact.name} is not in your contacts. Accept to reply. Decline blocks this DIRECT ID.")
@@ -410,8 +427,42 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                 }
             }
             contact.blocked -> Muted("You blocked this DIRECT ID.", Modifier.padding(16.dp))
-            else -> Composer(node, peerId, draft, { draft = it }, { error = it })
+            else -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
         }
+    }
+    forwarding?.let { message ->
+        ForwardSheet(state, peerId, onDismiss = { forwarding = null }) { target ->
+            scope.attempt({ error = it }) {
+                node.forwardMessage(message.id, target)
+                forwarding = null
+            }
+        }
+    }
+    deleting?.let { message ->
+        DeleteSheet(
+            message = message,
+            onDismiss = { deleting = null },
+            onDeleteForMe = {
+                scope.attempt({ error = it }) {
+                    node.deleteMessage(message.id, false)
+                    if (editingId == message.id) {
+                        editingId = null
+                        draft = ""
+                    }
+                    deleting = null
+                }
+            },
+            onDeleteForEveryone = {
+                scope.attempt({ error = it }) {
+                    node.deleteMessage(message.id, true)
+                    if (editingId == message.id) {
+                        editingId = null
+                        draft = ""
+                    }
+                    deleting = null
+                }
+            },
+        )
     }
 }
 
@@ -776,7 +827,16 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
 }
 
 @Composable
-private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (String) -> Unit, onError: (String?) -> Unit, attachments: Boolean = true) {
+private fun Composer(
+    node: DirectNode,
+    peerId: String,
+    draft: String,
+    onDraft: (String) -> Unit,
+    onError: (String?) -> Unit,
+    attachments: Boolean = true,
+    editingId: String? = null,
+    onCancelEdit: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var attach by rememberSaveable { mutableStateOf(false) }
@@ -827,7 +887,13 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
         }
     }
     Column(Modifier.background(Ink.surface).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (attachments && stickers) {
+        if (editingId != null) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Editing message", color = Ink.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text("Cancel", color = Ink.muted, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onCancelEdit))
+            }
+        }
+        if (attachments && stickers && editingId == null) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 stickersArt.forEach { (prepared, bitmap) ->
                     if (bitmap != null) {
@@ -845,7 +911,7 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
                 }
             }
         }
-        if (attachments && attach && !recording) {
+        if (attachments && attach && !recording && editingId == null) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 AttachChoice(Icons.Outlined.Image, "Photo") { photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
                 AttachChoice(Icons.Outlined.Videocam, "Video") { video.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
@@ -887,7 +953,7 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
         } else {
             val canSend = draft.isNotBlank()
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (attachments) {
+                if (attachments && editingId == null) {
                     RoundIcon(
                         if (attach) Icons.Filled.Close else Icons.Filled.Add,
                         Ink.accentSoft,
@@ -924,13 +990,19 @@ private fun Composer(node: DirectNode, peerId: String, draft: String, onDraft: (
                     Icons.AutoMirrored.Filled.Send,
                     if (canSend) Ink.accent else Ink.border,
                     if (canSend) Color.White else Ink.muted,
-                    "Send",
+                    if (editingId != null) "Save" else "Send",
                 ) {
                     if (!canSend) return@RoundIcon
                     val body = draft
+                    val editId = editingId
                     onDraft("")
                     attach = false
-                    scope.attempt(onError) { node.send(peerId, body) }
+                    if (editId != null) {
+                        onCancelEdit()
+                        scope.attempt(onError) { node.editMessage(editId, body) }
+                    } else {
+                        scope.attempt(onError) { node.send(peerId, body) }
+                    }
                 }
             }
         }
@@ -1065,64 +1137,102 @@ private fun sendPrepared(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(node: DirectNode, state: NodeState, message: MessageRecord, group: Boolean, onRetry: () -> Unit) {
+private fun MessageBubble(
+    node: DirectNode,
+    state: NodeState,
+    message: MessageRecord,
+    group: Boolean,
+    onRetry: () -> Unit,
+    onEdit: () -> Unit,
+    onForward: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val outgoing = message.direction == Direction.OUTGOING
     val context = LocalContext.current
     val sender = message.senderId?.let { id -> state.contacts.firstOrNull { it.directId == id }?.name ?: id }
     var bytes by remember(message.id, message.mediaFile) { mutableStateOf<ByteArray?>(null) }
+    var menu by remember { mutableStateOf(false) }
     LaunchedEffect(message.id, message.mediaFile) {
         bytes = message.mediaFile?.let { node.readMedia(message.id) }
     }
     val kind = message.mediaKind
     val sticker = kind == "sticker"
+    val actionable = kind != "call" && kind != "group"
+    val ink = if (outgoing) Color.White else Ink.foreground
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start) {
         if (group && !outgoing && sender != null) {
             Text(sender, fontSize = 12.sp, color = Ink.muted, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
         }
-        Column(
-            Modifier
-                .widthIn(min = if (kind == "audio") 220.dp else 0.dp, max = 280.dp)
-                .then(
-                    if (sticker) Modifier else Modifier
-                        .background(if (outgoing) Ink.accent else Ink.surface, RoundedCornerShape(20.dp))
-                        .border(androidx.compose.foundation.BorderStroke(1.dp, if (outgoing) Ink.accent else Ink.border), RoundedCornerShape(20.dp))
-                        .padding(8.dp),
-                ),
-        ) {
-            val picture = if (kind == "image" || kind == "gif" || sticker) {
-                bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-            } else null
-            if (picture != null) {
-                Image(
-                    picture.asImageBitmap(),
-                    MediaNotes.label(kind) ?: "Attachment",
-                    if (sticker) Modifier.size(148.dp) else Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(12.dp)),
-                    contentScale = if (sticker) ContentScale.Fit else ContentScale.Crop,
-                )
-            }
-            val label = MediaNotes.label(kind)
-            val caption = message.body.isNotBlank() && message.body != label
-            if (kind == "audio") {
-                if (bytes != null) VoiceNote(bytes!!, outgoing)
-                else VoiceWave(emptyList(), 0f, if (outgoing) Color.White else Ink.success, if (outgoing) Color.White.copy(alpha = 0.35f) else Ink.foreground.copy(alpha = 0.28f), Modifier.fillMaxWidth())
-            }
-            if (caption || (picture == null && kind != "audio")) {
-                if (message.body.isNotBlank()) {
-                    Text(message.body, color = if (outgoing) Color.White else Ink.foreground, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+        Box {
+            Column(
+                Modifier
+                    .widthIn(min = if (kind == "audio") 220.dp else 0.dp, max = 280.dp)
+                    .then(
+                        if (sticker && !message.deleted) Modifier else Modifier
+                            .background(if (outgoing) Ink.accent else Ink.surface, RoundedCornerShape(20.dp))
+                            .border(androidx.compose.foundation.BorderStroke(1.dp, if (outgoing) Ink.accent else Ink.border), RoundedCornerShape(20.dp))
+                            .padding(8.dp),
+                    )
+                    .combinedClickable(
+                        onClick = { if (outgoing && message.state == MessageState.FAILED) onRetry() },
+                        onLongClick = { if (actionable) menu = true },
+                    ),
+            ) {
+                if (message.deleted) {
+                    Text("This message was deleted", color = ink.copy(alpha = 0.8f), fontStyle = FontStyle.Italic, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                } else {
+                    if (message.forwarded) {
+                        Text("Forwarded", fontSize = 12.sp, color = ink.copy(alpha = 0.72f), modifier = Modifier.padding(horizontal = 4.dp))
+                    }
+                    val picture = if (kind == "image" || kind == "gif" || sticker) {
+                        bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                    } else null
+                    if (picture != null) {
+                        Image(
+                            picture.asImageBitmap(),
+                            MediaNotes.label(kind) ?: "Attachment",
+                            if (sticker) Modifier.size(148.dp) else Modifier.fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(12.dp)),
+                            contentScale = if (sticker) ContentScale.Fit else ContentScale.Crop,
+                        )
+                    }
+                    val label = MediaNotes.label(kind)
+                    val caption = message.body.isNotBlank() && message.body != label
+                    if (kind == "audio") {
+                        if (bytes != null) VoiceNote(bytes!!, outgoing)
+                        else VoiceWave(emptyList(), 0f, if (outgoing) Color.White else Ink.success, if (outgoing) Color.White.copy(alpha = 0.35f) else Ink.foreground.copy(alpha = 0.28f), Modifier.fillMaxWidth())
+                    }
+                    if (caption || (picture == null && kind != "audio")) {
+                        if (message.body.isNotBlank()) {
+                            Text(message.body, color = ink, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                        }
+                    }
+                    if (kind == "video" && bytes != null) {
+                        Text(
+                            "Open",
+                            color = if (outgoing) Color.White else Ink.accent,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(4.dp).clickable { openAttachment(context, bytes!!, message.mediaMime ?: "*/*", message.id, kind) },
+                        )
+                    }
+                    if (message.edited) {
+                        Text("Edited", fontSize = 11.sp, color = ink.copy(alpha = 0.7f), modifier = Modifier.padding(horizontal = 4.dp, top = 2.dp))
+                    }
                 }
             }
-            if (kind == "video" && bytes != null) {
-                Text(
-                    "Open",
-                    color = if (outgoing) Color.White else Ink.accent,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(4.dp).clickable { openAttachment(context, bytes!!, message.mediaMime ?: "*/*", message.id, kind) },
-                )
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                if (!message.deleted && outgoing && kind == null) {
+                    DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
+                }
+                if (!message.deleted) {
+                    DropdownMenuItem(text = { Text("Forward") }, onClick = { menu = false; onForward() })
+                }
+                DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
             }
         }
         val state0 = message.state
-        if (outgoing && state0 != null) {
+        if (outgoing && state0 != null && !message.deleted) {
             Text(
                 state0.label(),
                 fontSize = 12.sp,
@@ -1131,6 +1241,59 @@ private fun MessageBubble(node: DirectNode, state: NodeState, message: MessageRe
             )
         }
     }
+}
+
+@Composable
+private fun ForwardSheet(state: NodeState, fromPeerId: String, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val targets = state.conversations.filter { it.peerId != fromPeerId && !it.request && !it.blocked }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Forward to") },
+        text = {
+            if (targets.isEmpty()) {
+                Text("Add another contact or group first.", color = Ink.muted)
+            } else {
+                Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    targets.forEach { conversation ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onPick(conversation.peerId) }.padding(vertical = 10.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Avatar(conversation.name, null, 36.dp)
+                            Column {
+                                Text(conversation.name, color = Ink.foreground, fontWeight = FontWeight.Medium)
+                                if (conversation.group) Text("${conversation.memberCount} members", color = Ink.muted, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun DeleteSheet(
+    message: MessageRecord,
+    onDismiss: () -> Unit,
+    onDeleteForMe: () -> Unit,
+    onDeleteForEveryone: () -> Unit,
+) {
+    val everyone = message.direction == Direction.OUTGOING && !message.deleted && message.mediaKind != "call" && message.mediaKind != "group"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete message") },
+        text = { Text(if (everyone) "Remove it on this phone, or for everyone who still has it." else "Remove this message on this phone.") },
+        confirmButton = {
+            Column(horizontalAlignment = Alignment.End) {
+                TextButton(onClick = onDeleteForMe) { Text("Delete for me") }
+                if (everyone) TextButton(onClick = onDeleteForEveryone) { Text("Delete for everyone") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

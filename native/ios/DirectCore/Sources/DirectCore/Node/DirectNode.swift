@@ -373,6 +373,56 @@ public final class DirectNode {
         return message
     }
 
+    /// Rewrites an outgoing text bubble. Recipients get a sealed edit note.
+    @discardableResult
+    public func editMessage(_ messageId: String, _ body: String) throws -> MessageRecord {
+        let message: MessageRecord
+        do {
+            message = try requireEngine().editText(messageId, body)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+        return message
+    }
+
+    /// `forEveryone` replaces the bubble on every phone that has it. Otherwise it is removed only on this phone.
+    @discardableResult
+    public func deleteMessage(_ messageId: String, forEveryone: Bool) throws -> MessageRecord? {
+        let message: MessageRecord?
+        do {
+            message = try requireEngine().deleteMessage(messageId, forEveryone: forEveryone)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+        return message
+    }
+
+    /// Sends a copy of a bubble into another conversation.
+    @discardableResult
+    public func forwardMessage(_ messageId: String, to toPeerId: String) throws -> MessageRecord {
+        guard let selfId = keys?.directId else { throw DirectError(.noIdentity, "Create your identity first.") }
+        if GroupNotes.isGroupId(toPeerId) {
+            guard store.group(toPeerId) != nil else { throw DirectError(.notFound, "That group is not on this phone.") }
+        } else {
+            guard let contact = store.contact(toPeerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
+            guard !contact.blocked else { throw DirectError(.blocked, "This contact is blocked.") }
+            guard contact.accepted else { throw DirectError(.notAccepted, "Accept the message request before forwarding.") }
+        }
+        let message: MessageRecord
+        do {
+            message = try requireEngine().forward(messageId, to: toPeerId, selfId: selfId)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+        return message
+    }
+
     /// Rings an accepted contact. The invite is sealed and written now; it is not queued.
     public func placeCall(_ peerId: String, video: Bool) async throws {
         guard keys != nil else { throw DirectError(.noIdentity, "Create your identity first.") }
@@ -741,6 +791,13 @@ public final class DirectNode {
         return encoded
     }
 
+    private static func previewBody(_ message: MessageRecord) -> String? {
+        if message.deleted { return "This message was deleted" }
+        let body = message.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty { return message.body }
+        return MediaNotes.label(message.mediaKind)
+    }
+
     private func publish() {
         let identity = keys
         let contacts = store.contacts()
@@ -754,9 +811,7 @@ public final class DirectNode {
             return Conversation(
                 peerId: contact.directId,
                 name: contact.name,
-                lastBody: thread.last.flatMap { message in
-                    message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? MediaNotes.label(message.mediaKind) : message.body
-                },
+                lastBody: thread.last.flatMap(Self.previewBody),
                 lastAt: thread.last?.createdAt ?? contact.createdAt,
                 unread: thread.filter { $0.direction == .incoming && !$0.read }.count,
                 request: !contact.accepted && !contact.blocked,
@@ -769,9 +824,7 @@ public final class DirectNode {
             return Conversation(
                 peerId: group.id,
                 name: group.name,
-                lastBody: thread.last.flatMap { message in
-                    message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? MediaNotes.label(message.mediaKind) : message.body
-                },
+                lastBody: thread.last.flatMap(Self.previewBody),
                 lastAt: thread.last?.createdAt ?? group.createdAt,
                 unread: thread.filter { $0.direction == .incoming && !$0.read }.count,
                 request: false,

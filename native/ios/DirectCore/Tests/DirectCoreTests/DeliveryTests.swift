@@ -284,4 +284,87 @@ final class DeliveryEngineTests: XCTestCase {
         XCTAssertEqual(.accepted, ada.store.message(message.id)?.state)
         XCTAssertFalse(ada.store.queue().contains { $0.logicalId() == message.id })
     }
+
+    func testEditAndDeleteNotesRewriteTheOriginalBubble() async throws {
+        let clock = Clock()
+        let adaLinks = Links(); adaLinks.reachable = true
+        let boLinks = Links(); boLinks.reachable = true
+        let ada = Device("Ada", clock, adaLinks)
+        let bo = Device("Bo", clock, boLinks)
+        ada.know(bo)
+        bo.know(ada)
+        let encoded = ChatNotes.encode(ChatNotes.Note(op: "edit", messageId: "msg_abcd", body: "hi"))
+        XCTAssertEqual("edit", ChatNotes.parsePrefixed(encoded)?.op)
+        XCTAssertEqual("hi", ChatNotes.parsePrefixed(encoded)?.body)
+        XCTAssertNil(ChatNotes.parsePrefixed("DIRECT-CHAT/1\n{}"))
+
+        let message = try ada.engine.queueText(bo.keys.directId, "hello")
+        try await ada.engine.flush()
+        XCTAssertEqual(.stored, try bo.engine.receive(ada.keys.directId, adaLinks.sent.last!))
+        try await bo.engine.flush()
+        XCTAssertEqual(.receipt, try ada.engine.receive(bo.keys.directId, boLinks.sent.last!))
+        XCTAssertEqual(.accepted, ada.store.message(message.id)?.state)
+
+        adaLinks.sent.removeAll()
+        _ = try ada.engine.editText(message.id, "hello there")
+        XCTAssertEqual("hello there", ada.store.message(message.id)?.body)
+        XCTAssertEqual(true, ada.store.message(message.id)?.edited)
+        try await ada.engine.flush()
+        XCTAssertEqual(.stored, try bo.engine.receive(ada.keys.directId, adaLinks.sent.last!))
+        XCTAssertEqual("hello there", bo.store.message(message.id)?.body)
+        XCTAssertEqual(true, bo.store.message(message.id)?.edited)
+
+        adaLinks.sent.removeAll()
+        _ = try ada.engine.deleteMessage(message.id, forEveryone: true)
+        XCTAssertEqual(true, ada.store.message(message.id)?.deleted)
+        try await ada.engine.flush()
+        XCTAssertEqual(.stored, try bo.engine.receive(ada.keys.directId, adaLinks.sent.last!))
+        XCTAssertEqual(true, bo.store.message(message.id)?.deleted)
+        XCTAssertEqual("", bo.store.message(message.id)?.body)
+    }
+
+    func testDeleteForMeDropsABubbleOnlyOnThisPhone() async throws {
+        let clock = Clock()
+        let adaLinks = Links(); adaLinks.reachable = true
+        let ada = Device("Ada", clock, adaLinks)
+        let bo = Device("Bo", clock, Links())
+        ada.know(bo)
+        bo.know(ada)
+        let message = try ada.engine.queueText(bo.keys.directId, "hello")
+        try await ada.engine.flush()
+        XCTAssertEqual(.stored, try bo.engine.receive(ada.keys.directId, adaLinks.sent.last!))
+        _ = try ada.engine.deleteMessage(message.id, forEveryone: false)
+        XCTAssertNil(ada.store.message(message.id))
+        XCTAssertEqual("hello", bo.store.message(message.id)?.body)
+    }
+
+    func testAnUnsentEditResealsTheOriginalEnvelope() async throws {
+        let clock = Clock()
+        let adaLinks = Links()
+        let ada = Device("Ada", clock, adaLinks)
+        let bo = Device("Bo", clock, Links())
+        ada.know(bo)
+        let message = try ada.engine.queueText(bo.keys.directId, "hello")
+        _ = try ada.engine.editText(message.id, "changed")
+        adaLinks.reachable = true
+        try await ada.engine.flush()
+        let opened = Encoding.text(try Envelopes.open(recipient: bo.keys, envelope: try Envelopes.decode(adaLinks.sent.last!, senderSigningPublic: ada.keys.signingPublic, now: clock.now)))
+        XCTAssertEqual("changed", opened)
+        XCTAssertNil(ChatNotes.parsePrefixed(opened))
+    }
+
+    func testForwardCopiesATextBubbleIntoAnotherThread() throws {
+        let clock = Clock()
+        let ada = Device("Ada", clock, Links())
+        let bo = Device("Bo", clock, Links())
+        let cy = Device("Cy", clock, Links())
+        ada.know(bo)
+        ada.know(cy)
+        let message = try ada.engine.queueText(bo.keys.directId, "later")
+        let forwarded = try ada.engine.forward(message.id, to: cy.keys.directId, selfId: ada.keys.directId)
+        XCTAssertEqual(true, forwarded.forwarded)
+        XCTAssertEqual("later", forwarded.body)
+        XCTAssertEqual(cy.keys.directId, forwarded.peerId)
+        XCTAssertNotEqual(forwarded.id, message.id)
+    }
 }
