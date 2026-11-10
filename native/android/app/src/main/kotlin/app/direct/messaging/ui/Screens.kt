@@ -24,10 +24,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -113,6 +116,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -124,6 +128,7 @@ import app.direct.core.delivery.MessageState
 import app.direct.core.node.DirectNode
 import app.direct.core.node.NodeState
 import app.direct.core.signaling.BootstrapUrl
+import app.direct.core.protocol.ChatNotes
 import app.direct.core.protocol.MediaNotes
 import app.direct.core.protocol.ProfileCards
 import app.direct.core.store.Direction
@@ -408,6 +413,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                     },
                     onForward = { forwarding = message },
                     onDelete = { deleting = message },
+                    onReact = { emoji -> scope.attempt({ error = it }) { node.react(message.id, emoji) } },
                 )
             }
         }
@@ -1137,7 +1143,7 @@ private fun sendPrepared(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun MessageBubble(
     node: DirectNode,
@@ -1148,6 +1154,7 @@ private fun MessageBubble(
     onEdit: () -> Unit,
     onForward: () -> Unit,
     onDelete: () -> Unit,
+    onReact: (String) -> Unit,
 ) {
     val outgoing = message.direction == Direction.OUTGOING
     val context = LocalContext.current
@@ -1161,11 +1168,12 @@ private fun MessageBubble(
     val sticker = kind == "sticker"
     val actionable = kind != "call" && kind != "group"
     val ink = if (outgoing) Color.White else Ink.foreground
+    val hasReactions = message.reactions.isNotEmpty() && !message.deleted
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start) {
         if (group && !outgoing && sender != null) {
             Text(sender, fontSize = 12.sp, color = Ink.muted, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
         }
-        Box {
+        Box(Modifier.padding(bottom = if (hasReactions) 16.dp else 0.dp)) {
             Column(
                 Modifier
                     .widthIn(min = if (kind == "audio") 220.dp else 0.dp, max = 280.dp)
@@ -1175,6 +1183,7 @@ private fun MessageBubble(
                             .border(androidx.compose.foundation.BorderStroke(1.dp, if (outgoing) Ink.accent else Ink.border), RoundedCornerShape(20.dp))
                             .padding(8.dp),
                     )
+                    .padding(bottom = if (hasReactions) 14.dp else 0.dp)
                     .combinedClickable(
                         onClick = { if (outgoing && message.state == MessageState.FAILED) onRetry() },
                         onLongClick = { if (actionable) menu = true },
@@ -1221,7 +1230,47 @@ private fun MessageBubble(
                     }
                 }
             }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            if (hasReactions) {
+                val selfId = state.profile?.directId
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .align(if (outgoing) Alignment.BottomEnd else Alignment.BottomStart)
+                        .padding(horizontal = 8.dp)
+                        .wrapContentWidth(if (outgoing) Alignment.End else Alignment.Start)
+                        .widthIn(max = 264.dp),
+                ) {
+                    message.reactions.groupBy { it.emoji }.forEach { (emoji, people) ->
+                        val mine = people.any { it.fromId == selfId }
+                        ReactionChip(emoji, people.size, mine) { onReact(emoji) }
+                    }
+                }
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.width(320.dp)) {
+                if (!message.deleted) {
+                    Row(
+                        Modifier.width(308.dp).padding(horizontal = 4.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ChatNotes.EMOJIS.forEach { emoji ->
+                            Box(
+                                Modifier
+                                    .size(width = 36.dp, height = 48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        menu = false
+                                        onReact(emoji)
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(emoji, fontSize = 22.sp, textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = Ink.border)
+                }
                 if (!message.deleted && outgoing && kind == null) {
                     DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
                 }
@@ -1240,6 +1289,24 @@ private fun MessageBubble(
                 modifier = Modifier.padding(top = 2.dp).clickable(enabled = state0 == MessageState.FAILED, onClick = onRetry),
             )
         }
+    }
+}
+
+@Composable
+private fun ReactionChip(emoji: String, count: Int, mine: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .height(28.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (mine) Ink.accentSoft else Ink.surface)
+            .border(androidx.compose.foundation.BorderStroke(1.dp, if (mine) Ink.accent else Ink.border), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(emoji, fontSize = 14.sp, lineHeight = 16.sp)
+        if (count > 1) Text(count.toString(), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Ink.foreground, lineHeight = 16.sp)
     }
 }
 

@@ -1,10 +1,11 @@
 import Foundation
 
-/// Edit and delete travel as ordinary `message` envelopes whose plaintext starts with `prefix`.
+/// Edit, delete, and react travel as ordinary `message` envelopes whose plaintext starts with `prefix`.
 /// The original chat id is inside the JSON, so a new envelope cannot be mistaken for a new bubble.
 public enum ChatNotes {
     public static let prefix = "DIRECT-CHAT/1\n"
-    public static let ops: Set<String> = ["edit", "delete"]
+    public static let ops: Set<String> = ["edit", "delete", "react"]
+    public static let emojis = ["❤️", "👍", "👎", "😂", "😮", "😢", "🙏", "🔥"]
 
     public struct Note: Equatable, Sendable {
         public var op: String
@@ -49,6 +50,9 @@ public enum ChatNotes {
             return Note(op: op, messageId: messageId, body: body, groupId: groupId)
         case "delete":
             return Note(op: op, messageId: messageId, groupId: groupId)
+        case "react":
+            guard let emoji = json["body"]?.string, emojis.contains(emoji) else { return nil }
+            return Note(op: op, messageId: messageId, body: emoji, groupId: groupId)
         default:
             return nil
         }

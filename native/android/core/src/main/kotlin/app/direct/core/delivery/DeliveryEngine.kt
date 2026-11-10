@@ -17,6 +17,7 @@ import app.direct.core.store.LocalStore
 import app.direct.core.store.MessageRecord
 import app.direct.core.store.QueueItem
 import app.direct.core.store.QueueKind
+import app.direct.core.store.toggling
 import java.io.File
 
 /** Moves envelope bytes to a peer. Implemented by the WebRTC data channel on each platform. */
@@ -224,7 +225,8 @@ class DeliveryEngine(
                 return null
             }
             val tombstone = message.copy(
-                deleted = true, body = "", mediaKind = null, mediaMime = null, mediaName = null, mediaFile = null, updatedAt = clock(),
+                deleted = true, body = "", mediaKind = null, mediaMime = null, mediaName = null, mediaFile = null,
+                reactions = emptyList(), updatedAt = clock(),
             )
             store.putMessage(tombstone)
             queueChatNote(message, ChatNotes.encode(ChatNotes.Note("delete", message.id, groupId = store.group(message.peerId)?.id)))
@@ -266,6 +268,20 @@ class DeliveryEngine(
         store.putMessage(marked)
         store.save()
         return marked
+    }
+
+    /** One emoji per person. Tapping the same emoji again clears it; another emoji replaces it. */
+    fun react(messageId: String, emoji: String): MessageRecord {
+        val (keys, _) = identity() ?: throw DeliveryRejected("Create an identity before sending.")
+        if (emoji !in ChatNotes.EMOJIS) throw DeliveryRejected("That reaction is not supported.")
+        val message = store.message(messageId) ?: throw DeliveryRejected("That message is gone.")
+        if (message.deleted) throw DeliveryRejected("That message was deleted.")
+        if (message.mediaKind == "call" || message.mediaKind == "group") throw DeliveryRejected("That item cannot be reacted to.")
+        val updated = message.copy(reactions = message.reactions.toggling(keys.directId, emoji), updatedAt = clock())
+        store.putMessage(updated)
+        queueChatNote(updated, ChatNotes.encode(ChatNotes.Note("react", message.id, emoji, store.group(message.peerId)?.id)))
+        store.save()
+        return updated
     }
 
     /** Requeues a FAILED message with a fresh envelope under the same id. The recipient deduplicates by id. */
@@ -645,12 +661,7 @@ class DeliveryEngine(
     private fun ingestChatNote(peerId: String, contact: ContactRecord, note: ChatNotes.Note, envelopeId: String): ReceiveOutcome {
         val message = store.message(note.messageId)
         queueReceipt(contact, EnvelopeType.ACK, envelopeId)
-        if (message == null || message.direction != Direction.INCOMING) {
-            store.save()
-            return ReceiveOutcome.IGNORED
-        }
-        val expected = message.senderId ?: message.peerId
-        if (expected != peerId) {
+        if (message == null) {
             store.save()
             return ReceiveOutcome.IGNORED
         }
@@ -661,6 +672,10 @@ class DeliveryEngine(
         val now = clock()
         when (note.op) {
             "edit" -> {
+                if (!fromOriginalSender(message, peerId)) {
+                    store.save()
+                    return ReceiveOutcome.IGNORED
+                }
                 val body = note.body?.trim().orEmpty()
                 if (body.isEmpty() || message.deleted || message.mediaKind != null) {
                     store.save()
@@ -668,9 +683,27 @@ class DeliveryEngine(
                 }
                 store.putMessage(message.copy(body = body, edited = true, updatedAt = now))
             }
-            "delete" -> store.putMessage(
-                message.copy(deleted = true, body = "", mediaKind = null, mediaMime = null, mediaName = null, mediaFile = null, updatedAt = now),
-            )
+            "delete" -> {
+                if (!fromOriginalSender(message, peerId)) {
+                    store.save()
+                    return ReceiveOutcome.IGNORED
+                }
+                store.putMessage(
+                    message.copy(
+                        deleted = true, body = "", mediaKind = null, mediaMime = null, mediaName = null, mediaFile = null,
+                        reactions = emptyList(), updatedAt = now,
+                    ),
+                )
+            }
+            "react" -> {
+                val emoji = note.body
+                val inGroup = store.group(message.peerId)?.members?.contains(peerId) == true
+                if (emoji == null || emoji !in ChatNotes.EMOJIS || message.deleted || (message.peerId != peerId && !inGroup)) {
+                    store.save()
+                    return ReceiveOutcome.IGNORED
+                }
+                store.putMessage(message.copy(reactions = message.reactions.toggling(peerId, emoji), updatedAt = now))
+            }
             else -> {
                 store.save()
                 return ReceiveOutcome.IGNORED
@@ -678,6 +711,12 @@ class DeliveryEngine(
         }
         store.save()
         return ReceiveOutcome.STORED
+    }
+
+    private fun fromOriginalSender(message: MessageRecord, peerId: String): Boolean {
+        if (message.direction != Direction.INCOMING) return false
+        val expected = message.senderId ?: message.peerId
+        return expected == peerId
     }
 
     private fun queueChatNote(message: MessageRecord, plaintext: String) {

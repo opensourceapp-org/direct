@@ -371,6 +371,18 @@ class DirectNode(
         message
     }
 
+    /** Adds or clears an emoji on a bubble. Recipients get a sealed react note. */
+    suspend fun react(messageId: String, emoji: String): MessageRecord = onNode {
+        val message = try {
+            requireEngine().react(messageId, emoji)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "Reaction was not sent.")
+        }
+        publish()
+        wake.trySend(Unit)
+        message
+    }
+
     /** Rings an accepted contact, or every member of a group. The invite is sealed and written now; it is not queued. */
     suspend fun placeCall(peerId: String, video: Boolean) = onNode {
         if (keys == null) throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")

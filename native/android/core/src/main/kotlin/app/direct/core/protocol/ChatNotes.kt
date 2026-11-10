@@ -7,13 +7,14 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
 /**
- * Edit and delete travel as ordinary `message` envelopes whose plaintext starts with [PREFIX].
+ * Edit, delete, and react travel as ordinary `message` envelopes whose plaintext starts with [PREFIX].
  * The original chat id is inside the JSON, so a new envelope cannot be mistaken for a new bubble.
  * The bootstrap never sees this.
  */
 object ChatNotes {
     const val PREFIX = "DIRECT-CHAT/1\n"
-    val OPS = setOf("edit", "delete")
+    val OPS = setOf("edit", "delete", "react")
+    val EMOJIS = listOf("❤️", "👍", "👎", "😂", "😮", "😢", "🙏", "🔥")
 
     data class Note(
         val op: String,
@@ -51,6 +52,10 @@ object ChatNotes {
         return when (op) {
             "edit" -> if (body == null) null else Note(op, messageId, body, groupId)
             "delete" -> Note(op, messageId, groupId = groupId)
+            "react" -> {
+                val emoji = json.string("body")?.takeIf { it in EMOJIS } ?: return null
+                Note(op, messageId, emoji, groupId)
+            }
             else -> null
         }
     }

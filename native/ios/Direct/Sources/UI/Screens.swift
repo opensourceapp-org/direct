@@ -211,6 +211,7 @@ struct ChatView: View {
     @State private var editing: MessageRecord?
     @State private var forwarding: MessageRecord?
     @State private var deleting: MessageRecord?
+    @State private var actionMessageId: String?
 
     private var contact: ContactRecord? { model.state.contacts.first { $0.directId == peerId } }
     private var group: GroupRecord? { model.state.groups.first { $0.id == peerId } }
@@ -248,14 +249,28 @@ struct ChatView: View {
                                     message: message,
                                     tail: !continues,
                                     showReceipt: !continues && message.direction == .outgoing,
+                                    menuOpen: actionMessageId == message.id,
+                                    onOpenMenu: { actionMessageId = message.id },
+                                    onCloseMenu: { actionMessageId = nil },
                                     onEdit: {
+                                        actionMessageId = nil
                                         editing = message
                                         draft = message.body
                                     },
-                                    onForward: { forwarding = message },
-                                    onDelete: { deleting = message }
+                                    onForward: {
+                                        actionMessageId = nil
+                                        forwarding = message
+                                    },
+                                    onDelete: {
+                                        actionMessageId = nil
+                                        deleting = message
+                                    }
                                 )
                             }
+                            .opacity(actionMessageId == nil || actionMessageId == message.id ? 1 : 0.38)
+                            .modifier(TapIfEnabled(enabled: actionMessageId != nil && actionMessageId != message.id) {
+                                actionMessageId = nil
+                            })
                             .padding(.top, previous?.direction == message.direction && !messageGap(previous, message) ? 2 : 8)
                             .id(message.id)
                         }
@@ -964,6 +979,19 @@ struct IdentityView: View {
                 .foregroundStyle(Ink.muted)
         }
         .contentShape(Rectangle())
+    }
+}
+
+private struct TapIfEnabled: ViewModifier {
+    var enabled: Bool
+    var action: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.onTapGesture(perform: action)
+        } else {
+            content
+        }
     }
 }
 

@@ -367,4 +367,41 @@ final class DeliveryEngineTests: XCTestCase {
         XCTAssertEqual(cy.keys.directId, forwarded.peerId)
         XCTAssertNotEqual(forwarded.id, message.id)
     }
+
+    func testAReactionReachesTheOtherPhoneAndTogglingClearsIt() async throws {
+        let clock = Clock()
+        let adaLinks = Links(); adaLinks.reachable = true
+        let boLinks = Links(); boLinks.reachable = true
+        let ada = Device("Ada", clock, adaLinks)
+        let bo = Device("Bo", clock, boLinks)
+        ada.know(bo)
+        bo.know(ada)
+        let encoded = ChatNotes.encode(ChatNotes.Note(op: "react", messageId: "msg_abcd", body: "👍"))
+        XCTAssertEqual("react", ChatNotes.parsePrefixed(encoded)?.op)
+        XCTAssertEqual("👍", ChatNotes.parsePrefixed(encoded)?.body)
+        XCTAssertNil(ChatNotes.parsePrefixed(ChatNotes.encode(ChatNotes.Note(op: "react", messageId: "msg_abcd", body: "not-an-emoji"))))
+
+        let message = try ada.engine.queueText(bo.keys.directId, "hello")
+        try await ada.engine.flush()
+        XCTAssertEqual(.stored, try bo.engine.receive(ada.keys.directId, adaLinks.sent.last!))
+        try await bo.engine.flush()
+        _ = try ada.engine.receive(bo.keys.directId, boLinks.sent.last!)
+
+        adaLinks.sent.removeAll()
+        boLinks.sent.removeAll()
+        _ = try bo.engine.react(message.id, "👍")
+        XCTAssertEqual("👍", bo.store.message(message.id)?.reactions.first?.emoji)
+        XCTAssertEqual(bo.keys.directId, bo.store.message(message.id)?.reactions.first?.fromId)
+        try await bo.engine.flush()
+        XCTAssertEqual(.stored, try ada.engine.receive(bo.keys.directId, boLinks.sent.last!))
+        XCTAssertEqual("👍", ada.store.message(message.id)?.reactions.first?.emoji)
+        XCTAssertEqual(bo.keys.directId, ada.store.message(message.id)?.reactions.first?.fromId)
+
+        boLinks.sent.removeAll()
+        _ = try bo.engine.react(message.id, "👍")
+        XCTAssertTrue(bo.store.message(message.id)?.reactions.isEmpty ?? false)
+        try await bo.engine.flush()
+        XCTAssertEqual(.stored, try ada.engine.receive(bo.keys.directId, boLinks.sent.last!))
+        XCTAssertTrue(ada.store.message(message.id)?.reactions.isEmpty ?? false)
+    }
 }

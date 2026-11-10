@@ -250,6 +250,7 @@ public final class DeliveryEngine {
             tombstone.mediaMime = nil
             tombstone.mediaName = nil
             tombstone.mediaFile = nil
+            tombstone.reactions = []
             tombstone.updatedAt = clock()
             store.putMessage(tombstone)
             try queueChatNote(message, ChatNotes.encode(ChatNotes.Note(op: "delete", messageId: message.id, groupId: store.group(message.peerId)?.id)))
@@ -295,6 +296,24 @@ public final class DeliveryEngine {
         store.putMessage(marked)
         try store.save()
         return marked
+    }
+
+    /// One emoji per person. Tapping the same emoji again clears it; another emoji replaces it.
+    @discardableResult
+    public func react(_ messageId: String, _ emoji: String) throws -> MessageRecord {
+        guard let (keys, _) = identity() else { throw DeliveryRejected(message: "Create an identity before sending.") }
+        guard ChatNotes.emojis.contains(emoji) else { throw DeliveryRejected(message: "That reaction is not supported.") }
+        guard var message = store.message(messageId) else { throw DeliveryRejected(message: "That message is gone.") }
+        guard !message.deleted else { throw DeliveryRejected(message: "That message was deleted.") }
+        guard message.mediaKind != "call", message.mediaKind != "group" else {
+            throw DeliveryRejected(message: "That item cannot be reacted to.")
+        }
+        message.reactions = message.reactions.toggling(fromId: keys.directId, emoji: emoji)
+        message.updatedAt = clock()
+        store.putMessage(message)
+        try queueChatNote(message, ChatNotes.encode(ChatNotes.Note(op: "react", messageId: message.id, body: emoji, groupId: store.group(message.peerId)?.id)))
+        try store.save()
+        return message
     }
 
     /// Requeues a failed message with a fresh envelope under the same id. The recipient deduplicates by id.
@@ -708,14 +727,9 @@ public final class DeliveryEngine {
     }
 
     private func ingestChatNote(_ peerId: String, _ contact: ContactRecord, _ note: ChatNotes.Note, _ envelopeId: String) throws -> ReceiveOutcome {
-        let message = store.message(note.messageId)
+        let found = store.message(note.messageId)
         try queueReceipt(contact, .ack, envelopeId)
-        guard var message, message.direction == .incoming else {
-            try store.save()
-            return .ignored
-        }
-        let expected = message.senderId ?? message.peerId
-        guard expected == peerId else {
+        guard var message = found else {
             try store.save()
             return .ignored
         }
@@ -726,6 +740,10 @@ public final class DeliveryEngine {
         let now = clock()
         switch note.op {
         case "edit":
+            guard fromOriginalSender(message, peerId) else {
+                try store.save()
+                return .ignored
+            }
             let body = note.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !body.isEmpty, !message.deleted, message.mediaKind == nil else {
                 try store.save()
@@ -736,12 +754,28 @@ public final class DeliveryEngine {
             message.updatedAt = now
             store.putMessage(message)
         case "delete":
+            guard fromOriginalSender(message, peerId) else {
+                try store.save()
+                return .ignored
+            }
             message.deleted = true
             message.body = ""
             message.mediaKind = nil
             message.mediaMime = nil
             message.mediaName = nil
             message.mediaFile = nil
+            message.reactions = []
+            message.updatedAt = now
+            store.putMessage(message)
+        case "react":
+            let inGroup = store.group(message.peerId)?.members.contains(peerId) == true
+            guard let emoji = note.body, ChatNotes.emojis.contains(emoji), !message.deleted,
+                  message.peerId == peerId || inGroup
+            else {
+                try store.save()
+                return .ignored
+            }
+            message.reactions = message.reactions.toggling(fromId: peerId, emoji: emoji)
             message.updatedAt = now
             store.putMessage(message)
         default:
@@ -750,6 +784,12 @@ public final class DeliveryEngine {
         }
         try store.save()
         return .stored
+    }
+
+    private func fromOriginalSender(_ message: MessageRecord, _ peerId: String) -> Bool {
+        guard message.direction == .incoming else { return false }
+        let expected = message.senderId ?? message.peerId
+        return expected == peerId
     }
 
     private func queueChatNote(_ message: MessageRecord, _ plaintext: String) throws {
