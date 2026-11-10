@@ -231,6 +231,8 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     var newGroup by rememberSaveable { mutableStateOf(false) }
     var storyOwner by rememberSaveable { mutableStateOf<String?>(null) }
     var profilePeer by rememberSaveable { mutableStateOf<String?>(null) }
+    var viewingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var viewingCanDelete by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(pending) {
         val target = pending ?: return@LaunchedEffect
         openPeer = target
@@ -251,9 +253,20 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
         NewGroupScreen(node, state, back = { newGroup = false }) { openPeer = it; newGroup = false }
         return
     }
+    if (viewingId != null) {
+        FeedPostViewer(
+            node, state, viewingId, canDelete = viewingCanDelete,
+            onClose = { viewingId = null },
+            onError = {},
+        )
+        return
+    }
     val profile = profilePeer
     if (profile != null) {
-        ContactProfileScreen(node, state, profile) { profilePeer = null }
+        ContactProfileScreen(node, state, profile, back = { profilePeer = null }) { id ->
+            viewingId = id
+            viewingCanDelete = profile == state.profile?.directId
+        }
         return
     }
     val story = storyOwner
@@ -266,8 +279,16 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
             when (tab) {
                 Tab.CHATS -> ChatsScreen(state, onNewGroup = { newGroup = true }) { openPeer = it }
                 Tab.CONTACTS -> ContactsScreen(node, state) { openPeer = it }
-                Tab.FEED -> FeedScreen(node, state, onOpenStory = { storyOwner = it }, onOpenProfile = { profilePeer = it })
-                Tab.PROFILE -> IdentityScreen(node, state, onHowItWorks)
+                Tab.FEED -> FeedScreen(
+                    node, state,
+                    onOpenStory = { storyOwner = it },
+                    onOpenProfile = { profilePeer = it },
+                    onOpenPost = { viewingId = it; viewingCanDelete = false },
+                )
+                Tab.PROFILE -> IdentityScreen(node, state, onHowItWorks) { id ->
+                    viewingId = id
+                    viewingCanDelete = true
+                }
             }
         }
         HorizontalDivider(color = Ink.border)
@@ -374,6 +395,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
     var deleting by remember { mutableStateOf<MessageRecord?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var profileOpen by rememberSaveable { mutableStateOf(false) }
+    var viewingId by rememberSaveable { mutableStateOf<String?>(null) }
     val list = rememberLazyListState()
     LaunchedEffect(peerId, messages.size, contact?.accepted, isGroup) {
         if (isGroup || contact?.accepted == true) node.openConversation(peerId)
@@ -488,7 +510,18 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         )
     }
     if (profileOpen && !isGroup) {
-        ContactProfileScreen(node, state, peerId) { profileOpen = false }
+        ContactProfileScreen(
+            node, state, peerId,
+            back = { profileOpen = false },
+            onOpenPost = { viewingId = it },
+        )
+    }
+    if (viewingId != null) {
+        FeedPostViewer(
+            node, state, viewingId, canDelete = false,
+            onClose = { viewingId = null },
+            onError = { error = it },
+        )
     }
 }
 
@@ -754,17 +787,23 @@ private fun HelpCode(text: String) = Text(
 )
 
 @Composable
-private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
+private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit, onOpenPost: (String) -> Unit) {
     var pane by rememberSaveable { mutableStateOf("home") }
     when (pane) {
         "edit" -> EditProfileScreen(node, state) { pane = "home" }
         "settings" -> SettingsScreen(node, state, onHowItWorks) { pane = "home" }
-        else -> ProfileHomeScreen(node, state, onEdit = { pane = "edit" }, onSettings = { pane = "settings" })
+        else -> ProfileHomeScreen(node, state, onEdit = { pane = "edit" }, onSettings = { pane = "settings" }, onOpenPost = onOpenPost)
     }
 }
 
 @Composable
-private fun ProfileHomeScreen(node: DirectNode, state: NodeState, onEdit: () -> Unit, onSettings: () -> Unit) {
+private fun ProfileHomeScreen(
+    node: DirectNode,
+    state: NodeState,
+    onEdit: () -> Unit,
+    onSettings: () -> Unit,
+    onOpenPost: (String) -> Unit,
+) {
     val profile = state.profile ?: return
     var error by remember { mutableStateOf<String?>(null) }
     val posts = profilePosts(state, profile.directId)
@@ -799,7 +838,7 @@ private fun ProfileHomeScreen(node: DirectNode, state: NodeState, onEdit: () -> 
             SecondaryButton("Edit profile") { onEdit() }
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
-        ProfilePosts(node, state, profile.directId, canAdd = true, showHeading = false, onError = { error = it })
+        ProfilePosts(node, state, profile.directId, canAdd = true, showHeading = false, onError = { error = it }, onOpenPost = onOpenPost)
     }
 }
 

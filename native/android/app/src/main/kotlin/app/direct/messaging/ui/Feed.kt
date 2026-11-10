@@ -1,10 +1,6 @@
 package app.direct.messaging.ui
 
-import android.app.Activity
 import android.graphics.BitmapFactory
-import android.view.View
-import android.view.ViewGroup
-import android.view.WindowManager
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,14 +17,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -58,13 +51,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -82,9 +70,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -96,8 +82,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.Image
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import app.direct.core.node.DirectNode
 import app.direct.core.node.NodeState
 import app.direct.core.protocol.FeedNotes
@@ -166,11 +150,11 @@ internal fun FeedScreen(
     state: NodeState,
     onOpenStory: (String) -> Unit,
     onOpenProfile: (String) -> Unit,
+    onOpenPost: (String) -> Unit,
 ) {
     val selfId = state.profile?.directId
     val posts = othersPosts(state)
     var error by remember { mutableStateOf<String?>(null) }
-    var viewingId by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().background(Ink.background)) {
         Header("From people you know", "Feed")
         Column(Modifier.fillMaxWidth().background(Ink.surface)) {
@@ -201,13 +185,12 @@ internal fun FeedScreen(
         } else {
             LazyColumn(Modifier.weight(1f)) {
                 items(posts, key = { it.id }) { item ->
-                    FeedPostCard(node, state, item, onOpenProfile) { viewingId = item.id }
+                    FeedPostCard(node, state, item, onOpenProfile) { onOpenPost(item.id) }
                     Spacer(Modifier.height(10.dp))
                 }
             }
         }
     }
-    FeedViewerDialog(node, state, viewingId, canDelete = false, onClose = { viewingId = null }, onError = { error = it })
 }
 
 @Composable
@@ -424,11 +407,11 @@ internal fun ProfilePosts(
     canAdd: Boolean,
     showHeading: Boolean = true,
     onError: (String?) -> Unit,
+    onOpenPost: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val posts = profilePosts(state, ownerId)
-    var viewingId by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -478,7 +461,7 @@ internal fun ProfilePosts(
                             FeedThumb(
                                 node,
                                 item,
-                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable { viewingId = item.id },
+                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable { onOpenPost(item.id) },
                             )
                         }
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
@@ -487,11 +470,16 @@ internal fun ProfilePosts(
             }
         }
     }
-    FeedViewerDialog(node, state, viewingId, canDelete = canAdd, onClose = { viewingId = null }, onError = onError)
 }
 
 @Composable
-internal fun ContactProfileScreen(node: DirectNode, state: NodeState, peerId: String, back: () -> Unit) {
+internal fun ContactProfileScreen(
+    node: DirectNode,
+    state: NodeState,
+    peerId: String,
+    back: () -> Unit,
+    onOpenPost: (String) -> Unit,
+) {
     val contact = state.contacts.firstOrNull { it.directId == peerId }
     val self = peerId == state.profile?.directId
     val name = if (self) state.profile?.name ?: "You" else contact?.name ?: peerId
@@ -524,7 +512,7 @@ internal fun ContactProfileScreen(node: DirectNode, state: NodeState, peerId: St
             }
         }
         error?.let { Text(it, color = Ink.danger, modifier = Modifier.padding(horizontal = 20.dp)) }
-        ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it })
+        ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenPost = onOpenPost)
     }
     if (storyOpen) StoryViewer(node, state, peerId) { storyOpen = false }
 }
@@ -548,40 +536,8 @@ private fun FeedThumb(node: DirectNode, item: FeedItem, modifier: Modifier) {
     }
 }
 
-/** Dialog windows do not inherit the activity's edge-to-edge insets, so the nav bar covers the composer unless we copy them. */
 @Composable
-private fun rememberViewerAvoidance(): PaddingValues {
-    val density = LocalDensity.current
-    val context = LocalContext.current
-    var activityTop by remember { mutableIntStateOf(0) }
-    var activityBottom by remember { mutableIntStateOf(0) }
-    DisposableEffect(context) {
-        val decor = (context as? Activity)?.window?.decorView ?: return@DisposableEffect onDispose {}
-        fun read() {
-            val insets = ViewCompat.getRootWindowInsets(decor) ?: return
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-            activityTop = bars.top
-            activityBottom = maxOf(bars.bottom, ime.bottom)
-        }
-        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> read() }
-        decor.addOnLayoutChangeListener(listener)
-        read()
-        onDispose { decor.removeOnLayoutChangeListener(listener) }
-    }
-    val composeBottom = maxOf(
-        WindowInsets.ime.getBottom(density),
-        WindowInsets.navigationBars.getBottom(density),
-    )
-    val composeTop = WindowInsets.statusBars.getTop(density)
-    return PaddingValues(
-        top = with(density) { maxOf(activityTop, composeTop).toDp() },
-        bottom = with(density) { maxOf(activityBottom, composeBottom).toDp() },
-    )
-}
-
-@Composable
-private fun FeedViewerDialog(
+internal fun FeedPostViewer(
     node: DirectNode,
     state: NodeState,
     viewingId: String?,
@@ -595,29 +551,21 @@ private fun FeedViewerDialog(
     }
     if (item == null) return
     val scope = rememberCoroutineScope()
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        val view = LocalView.current
-        SideEffect {
-            val window = (view.parent as? DialogWindowProvider)?.window ?: return@SideEffect
-            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
-        }
-        FeedLightbox(
-            node, state, item, canDelete = canDelete,
-            onDelete = {
-                scope.launch {
-                    try {
-                        node.deleteFeed(item.id)
-                        onClose()
-                    } catch (error: Exception) {
-                        onError(error.message)
-                    }
+    FeedLightbox(
+        node, state, item, canDelete = canDelete,
+        onDelete = {
+            scope.launch {
+                try {
+                    node.deleteFeed(item.id)
+                    onClose()
+                } catch (error: Exception) {
+                    onError(error.message)
                 }
-            },
-            onClose = onClose,
-            onError = onError,
-        )
-    }
+            }
+        },
+        onClose = onClose,
+        onError = onError,
+    )
 }
 
 @Composable
@@ -748,8 +696,7 @@ private fun FeedLightbox(
         if (item.comments.isNotEmpty()) comments.scrollToItem(item.comments.lastIndex)
     }
     BackHandler(onBack = onClose)
-    val avoidance = rememberViewerAvoidance()
-    Column(Modifier.fillMaxSize().background(Color.Black).padding(top = avoidance.calculateTopPadding())) {
+    Column(Modifier.fillMaxSize().background(Color.Black).imePadding()) {
         Box(Modifier.fillMaxWidth().height(240.dp).background(Color.Black)) {
             FeedMedia(node, item, Modifier.fillMaxSize())
             Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -764,8 +711,7 @@ private fun FeedLightbox(
                 .fillMaxWidth()
                 .weight(1f)
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                .background(Ink.surface)
-                .padding(bottom = avoidance.calculateBottomPadding()),
+                .background(Ink.surface),
         ) {
             Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Ink.border))
