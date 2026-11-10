@@ -56,6 +56,9 @@ class DeliveryEngine(
     /** Plaintext of a call signal, invoked on the node dispatcher before [receive] returns. */
     var onCall: ((String) -> Unit)? = null
 
+    /** A new incoming chat message, photo, or group invite the UI can turn into a notification. */
+    var onInbound: ((MessageRecord) -> Unit)? = null
+
     fun queueText(peerId: String, text: String): MessageRecord {
         val (keys, deviceId) = identity() ?: throw DeliveryRejected("Create an identity before sending.")
         val body = text.trim()
@@ -493,9 +496,11 @@ class DeliveryEngine(
             store.save()
             return ReceiveOutcome.DUPLICATE
         }
-        store.putMessage(MessageRecord(envelope.id, peerId, Direction.INCOMING, plaintext, envelope.createdAt))
+        val stored = MessageRecord(envelope.id, peerId, Direction.INCOMING, plaintext, envelope.createdAt)
+        store.putMessage(stored)
         queueReceipt(contact, EnvelopeType.ACK, envelope.id)
         store.save()
+        onInbound?.invoke(stored)
         return ReceiveOutcome.STORED
     }
 
@@ -662,15 +667,15 @@ class DeliveryEngine(
         partsDir.deleteRecursively()
         val already = store.message(header.mediaId)?.mediaFile != null
         val caption = header.caption.ifBlank { label }
-        store.putMessage(
-            MessageRecord(
-                header.mediaId, threadId, Direction.INCOMING, caption, createdAt,
-                mediaKind = header.kind, mediaMime = header.mime, mediaName = header.name, mediaFile = fileName,
-                senderId = senderId,
-            ),
+        val stored = MessageRecord(
+            header.mediaId, threadId, Direction.INCOMING, caption, createdAt,
+            mediaKind = header.kind, mediaMime = header.mime, mediaName = header.name, mediaFile = fileName,
+            senderId = senderId,
         )
+        store.putMessage(stored)
         queueReceipt(contact, EnvelopeType.ACK, header.mediaId)
         store.save()
+        if (!already) onInbound?.invoke(stored)
         return if (already) ReceiveOutcome.DUPLICATE else ReceiveOutcome.STORED
     }
 
@@ -690,17 +695,17 @@ class DeliveryEngine(
         )
         store.putGroup(group)
         if (existing == null) {
-            store.putMessage(
-                MessageRecord(
-                    Encoding.newId("sys"),
-                    group.id,
-                    Direction.INCOMING,
-                    "${store.contact(peerId)?.name ?: peerId} added you to ${group.name}",
-                    createdAt,
-                    mediaKind = "group",
-                    senderId = peerId,
-                ),
+            val stored = MessageRecord(
+                Encoding.newId("sys"),
+                group.id,
+                Direction.INCOMING,
+                "${store.contact(peerId)?.name ?: peerId} added you to ${group.name}",
+                createdAt,
+                mediaKind = "group",
+                senderId = peerId,
             )
+            store.putMessage(stored)
+            onInbound?.invoke(stored)
         }
         store.save()
         return ReceiveOutcome.STORED
@@ -722,11 +727,11 @@ class DeliveryEngine(
             store.save()
             return ReceiveOutcome.DUPLICATE
         }
-        store.putMessage(
-            MessageRecord(mid, group.id, Direction.INCOMING, body, createdAt, senderId = peerId),
-        )
+        val stored = MessageRecord(mid, group.id, Direction.INCOMING, body, createdAt, senderId = peerId)
+        store.putMessage(stored)
         queueReceipt(contact, EnvelopeType.ACK, mid)
         store.save()
+        onInbound?.invoke(stored)
         return ReceiveOutcome.STORED
     }
 

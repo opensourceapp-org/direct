@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "description": "Frames exchanged between a DIRECT device and the bootstrap. The bootstrap keeps public bundles and presence and forwards WebRTC negotiation. It never receives message text or sealed envelopes.",
   "transport": "WebSocket text frames, one JSON object per frame",
   "defaultPort": 8787,
@@ -14,8 +14,8 @@
     "presenceGraceMs": 120000
   },
   "rules": [
-    "A device sends hello on every socket open and whenever its bundle changes.",
-    "hello.bundle must contain the exact substring \"directId\":\"<from>\".",
+    "The hub sends a challenge nonce when the socket opens. hello must include that nonce and an Ed25519 proof over DIRECT-SIGNAL/1\\n<nonce>\\n<directId> using the bundle signing key.",
+    "hello.bundle must be a verified public identity bundle whose DIRECT ID equals from.",
     "offer, answer, and ice are forwarded only when from equals the DIRECT ID that this socket announced.",
     "An offer to a DIRECT ID without a live socket returns unreachable. answer and ice are dropped.",
     "lookup returns a bundle while the socket is live and for presenceGraceMs after it closes.",
@@ -84,6 +84,10 @@
       "kind": "presence",
       "directId": "dir_ABCDEFGHJKMNPQRS",
       "online": false
+    },
+    "challenge": {
+      "kind": "challenge",
+      "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     }
   },
   "forbidden": [

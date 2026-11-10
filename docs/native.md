@@ -6,7 +6,9 @@ Phones run DIRECT as a native app. Android is Kotlin in `native/android`. iOS is
 
 ## Signaling server
 
-On a computer both phones can reach, download Direct Server for macOS, Windows, or Linux from [direct-server.apps.grok.bot](https://direct-server.apps.grok.bot). Open it, press Start server, and share the `ws://` address it shows. The window lists each phone that connects. Builds are tagged on GitHub, starting at [v0.1.0](https://github.com/opensourceapp-org/direct/releases/tag/v0.1.0).
+iOS and Android save `wss://direct-signaling.apps.grok.bot` on first start and connect with that address. Open Network to see it already filled in. A LAN `ws://192.168…:8787` address saved before that public server existed is replaced once on the next launch. Save a different address only if both phones should use your own server.
+
+To run your own server on a computer both phones can reach, download Direct Server for macOS, Windows, or Linux from [direct-server.apps.grok.bot](https://direct-server.apps.grok.bot). Open it, press Start server, and share the `ws://` address it shows. The window lists each phone that connects. Builds are tagged on GitHub, starting at [v0.1.0](https://github.com/opensourceapp-org/direct/releases/tag/v0.1.0).
 
 To run the same window from source:
 
@@ -23,7 +25,7 @@ pnpm server
 pnpm signaling
 ```
 
-The process listens on `0.0.0.0:8787` (`HOST` and `PORT` override those). It prints one `ws://<LAN address>:8787` line per network interface. `GET /health` returns `{ "ok": true, "service": "direct-signaling" }`.
+The process listens on `0.0.0.0:8787` (`HOST` and `PORT` override those). It prints one `ws://<LAN address>:8787` line per network interface. `GET /health` returns `{ "ok": true, "service": "direct-signaling" }`. A connecting phone must sign a one-time challenge with its identity key; a copied public bundle is not enough to take over that DIRECT ID.
 
 Open TCP 8787 on that computer's firewall. If the phones are not on the same LAN, use an address both can route to (a public host, or a tunnel that forwards 8787) and put that address on both phones. `localhost`, `127.0.0.1`, and `0.0.0.0` are rejected: on a phone, localhost is the phone.
 
@@ -32,7 +34,7 @@ Both phones must save the same bootstrap, for example `ws://192.168.1.20:8787`. 
 ## What each phone does
 
 1. Create an identity. The 32-byte seed is generated on the device. Android stores it with an Android Keystore AES-256-GCM key in `noBackupFilesDir`. iOS stores it in the Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) and, on a device with a Secure Enclave, wraps it to a non-exportable enclave key. The recovery phrase is BIP-39, 24 words, and is shown once.
-2. Set the bootstrap to the address printed by `pnpm signaling`.
+2. The Network screen already has the hosted bootstrap. Leave it, or save the address printed by `pnpm signaling` if you are using your own server.
 3. On one phone, add the other by DIRECT ID. The lookup reads the public bundle the other phone announced. Pasting that bundle skips the lookup.
 4. Send. The envelope is sealed and queued before any network attempt. If the other phone is closed, the row stays `Queued` and retries with backoff.
 5. The recipient sees a message request. Accepting it sends read receipts. Declining it blocks that DIRECT ID.
@@ -55,7 +57,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 Open `native/android` in Android Studio and run the `app` configuration. The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. Cleartext `ws://` is allowed by `network_security_config.xml` so a LAN bootstrap works. Use `wss://` for a public bootstrap and tighten that config.
 
-The app process owns one `DirectNode` on a single-thread dispatcher. Foreground reconnects the bootstrap immediately. Background schedules a WorkManager pass (a one-shot retry and a 15-minute periodic job that requires a network).
+The app process owns one `DirectNode` on a single-thread dispatcher. Foreground reconnects the bootstrap immediately. Background starts a connected foreground service so inbound messages can still arrive and raise a local notification, and schedules a WorkManager pass for the outgoing queue (a one-shot retry and a 15-minute periodic job that requires a network).
 
 ## Xcode
 
@@ -65,7 +67,7 @@ Open `native/ios/Direct.xcodeproj`. The project file is in the repository, so th
 
 `App.xcodeproj` was the previous shell and is not part of this tree. A checkout that still has `apps/mobile/ios/App/App.xcodeproj` on disk, without `project.pbxproj` inside it, makes Xcode say the project does not contain a project definition file. Close that window and delete the leftover `apps/mobile/ios` directory. `project.yml` is only for regenerating `Direct.xcodeproj` with XcodeGen after the spec changes.
 
-`Info.plist` allows local networking and cleartext `ws://` for a development bootstrap, and registers `app.direct.messaging.delivery` as a `BGAppRefreshTask`. iOS decides when that task runs. Leaving the app also starts a short background flush. There is no push service, so a suspended or force-quit app cannot receive.
+`Info.plist` allows local networking and cleartext `ws://` for a development bootstrap, and registers `app.direct.messaging.delivery` as a `BGAppRefreshTask`. iOS decides when that task runs. Leaving the app asks iOS for a short keep-alive so inbound messages can still notify. After iOS suspends the process, or after a force-quit, nothing can arrive until the app opens again: there is no Apple push service.
 
 `DirectCore` itself builds on Linux:
 
@@ -106,4 +108,4 @@ This repository's CI environment can compile the Android debug APK and run the K
 - The seal is one-shot X25519 + HKDF-SHA256 + AES-256-GCM. It is not the Signal Double Ratchet.
 - The local store is one encrypted snapshot file, not a SQL database.
 - Writing to the data channel is Sent. Delivered requires the recipient's signed `ack`.
-- A closed app cannot receive. Android retries while WorkManager is allowed to run. iOS retries on the next foreground or background refresh. A call is live only: there is no push, so a force-quit phone cannot ring. Android keeps a call notification so the microphone can stay on while the screen is locked. iOS keeps the audio session while the app is in the background. The same STUN servers are used. A symmetric NAT still needs a TURN server you operate, or the call stays on Connecting.
+- Android stays connected after you leave the app or lock the screen (a silent “DIRECT is connected” notification) and shows a local notification for each inbound message. A force-stop still cannot receive. iOS shows a local notification while the process is still running (locked, or for a short time after you leave). After iOS suspends or you swipe the app away, inbound messages wait on the sender. A call is live only: there is no Apple/Google push, so a force-quit phone cannot ring. Android keeps a call notification so the microphone can stay on while the screen is locked. iOS keeps the audio session while the app is in the background. The same STUN servers are used. A symmetric NAT still needs a TURN server you operate, or the call stays on Connecting.

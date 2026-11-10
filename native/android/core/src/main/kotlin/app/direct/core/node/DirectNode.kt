@@ -15,6 +15,7 @@ import app.direct.core.protocol.ProfileCards
 import app.direct.core.signaling.BootstrapClient
 import app.direct.core.signaling.BootstrapStatus
 import app.direct.core.signaling.BootstrapUrl
+import app.direct.core.signaling.SignalProof
 import app.direct.core.signaling.WebSocketFactory
 import app.direct.core.store.ContactRecord
 import app.direct.core.store.Direction
@@ -57,6 +58,13 @@ data class Conversation(
     val blocked: Boolean,
     val group: Boolean = false,
     val memberCount: Int = 0,
+)
+
+data class InboundAlert(
+    val threadId: String,
+    val title: String,
+    val body: String,
+    val messageId: String,
 )
 
 data class NodeState(
@@ -115,6 +123,9 @@ class DirectNode(
     /** Media (microphone, camera, and the call's own peer connection) listens here. */
     var onCallEvent: ((CallEvent) -> Unit)? = null
 
+    /** A new inbound chat item. The app shows a notification when the UI is not on screen. */
+    var onInboundAlert: ((InboundAlert) -> Unit)? = null
+
     private val board by lazy {
         CallBoard(
             clock = clock,
@@ -139,7 +150,12 @@ class DirectNode(
         val loaded = vault.load()
         val profile = store.profile
         if (loaded != null && profile != null && profile.directId == loaded.directId) activate(loaded)
-        bootstrap.configure(store.settings.bootstrapUrl)
+        val chosen = BootstrapUrl.applyHostedDefault(store.settings.bootstrapUrl, store.settings.bootstrapDefaultVersion)
+        if (store.settings.bootstrapUrl != chosen.url || store.settings.bootstrapDefaultVersion != chosen.version) {
+            store.settings = store.settings.copy(bootstrapUrl = chosen.url, bootstrapDefaultVersion = chosen.version)
+            store.save()
+        }
+        bootstrap.configure(chosen.url)
         bootstrap.start()
         watchers = listOf(
             scope.launch { bootstrap.status.collect { status -> onBootstrapStatus(status) } },
@@ -200,7 +216,7 @@ class DirectNode(
             return@onNode accepted
         }
         val url = bootstrap.url
-            ?: throw DirectException(DirectException.Reason.NO_BOOTSTRAP, "Set the bootstrap first. Use the same address on both phones, such as ws://192.168.1.20:8787, while the signaling server is running.")
+            ?: throw DirectException(DirectException.Reason.NO_BOOTSTRAP, "Set the bootstrap first. Phones use ${BootstrapUrl.DEFAULT} unless you save a different address.")
         if (!bootstrap.status.value.isOpen) {
             bootstrap.reconnectNow()
             withTimeoutOrNull(CONNECT_WAIT_MS) { bootstrap.status.first { it.isOpen } }
@@ -515,9 +531,12 @@ class DirectNode(
         engine = DeliveryEngine(store, { keys?.let { it to profile.deviceId } }, linksProxy, clock, random, ttlMs, mediaDirectory = mediaDir).also {
             it.recover()
             it.onCall = { text -> callPlain = text }
+            it.onInbound = { notifyInbound(it) }
         }
         transport = transportFactory(bootstrap, identity.directId, scope).also { it.setListener(listener) }
-        bootstrap.announce(identity.directId, Bundles.create(identity, profile.name, profile.deviceId).encode())
+        bootstrap.announce(identity.directId, Bundles.create(identity, profile.name, profile.deviceId).encode()) { nonce ->
+            Encoding.base64Url(identity.sign(SignalProof.message(nonce, identity.directId)))
+        }
         refreshWatch()
         wake.trySend(Unit)
     }
@@ -705,18 +724,31 @@ class DirectNode(
 
     private fun recordCall(peerId: String, id: String, outgoing: Boolean, label: String, missed: Boolean) {
         val now = clock()
-        store.putMessage(
-            MessageRecord(
-                id = id,
-                peerId = peerId,
-                direction = if (outgoing) Direction.OUTGOING else Direction.INCOMING,
-                body = label,
-                createdAt = now,
-                read = !missed,
-                mediaKind = "call",
-            ),
+        val message = MessageRecord(
+            id = id,
+            peerId = peerId,
+            direction = if (outgoing) Direction.OUTGOING else Direction.INCOMING,
+            body = label,
+            createdAt = now,
+            read = !missed,
+            mediaKind = "call",
         )
+        store.putMessage(message)
         store.save()
+        if (!outgoing && missed) notifyInbound(message)
+    }
+
+    private fun notifyInbound(message: MessageRecord) {
+        val threadId = message.peerId
+        val group = store.group(threadId)
+        val sender = store.contact(message.senderId ?: threadId)
+        val title = group?.name ?: sender?.name ?: threadId
+        val body = when {
+            message.mediaKind == "group" || message.mediaKind == "call" -> message.body
+            !message.mediaKind.isNullOrBlank() -> MediaNotes.label(message.mediaKind) ?: "Attachment"
+            else -> message.body.trim().ifBlank { "New message" }.take(140)
+        }
+        onInboundAlert?.invoke(InboundAlert(threadId, title, body, message.id))
     }
 
     private suspend fun <T> onNode(block: suspend () -> T): T = withContext(dispatcher) { block() }

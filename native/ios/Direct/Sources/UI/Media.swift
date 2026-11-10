@@ -528,18 +528,25 @@ struct QrScannerView: UIViewControllerRepresentable {
 
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
-            if !session.isRunning { session.startRunning() }
+            let session = session
+            DispatchQueue.global(qos: .userInitiated).async {
+                if !session.isRunning { session.startRunning() }
+            }
         }
 
         override func viewWillDisappear(_ animated: Bool) {
             super.viewWillDisappear(animated)
-            if session.isRunning { session.stopRunning() }
+            let session = session
+            DispatchQueue.global(qos: .userInitiated).async {
+                if session.isRunning { session.stopRunning() }
+            }
         }
 
         func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
             guard !delivered, let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject, let text = object.stringValue else { return }
             delivered = true
-            session.stopRunning()
+            let session = session
+            DispatchQueue.global(qos: .userInitiated).async { session.stopRunning() }
             onCode?(text)
         }
     }
@@ -556,7 +563,6 @@ final class VoiceCapture: NSObject, ObservableObject {
     func start() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .default)
-        try session.setActive(true)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("voice-\(UUID().uuidString).m4a")
         let recorder = try AVAudioRecorder(url: url, settings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -564,15 +570,21 @@ final class VoiceCapture: NSObject, ObservableObject {
             AVNumberOfChannelsKey: 1,
         ])
         recorder.isMeteringEnabled = true
-        recorder.record()
         self.recorder = recorder
         file = url
-        levels = []
-        elapsed = 0
-        recording = true
-        meter?.invalidate()
-        meter = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
-            self?.sampleLevel()
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? session.setActive(true)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                recorder.record()
+                self.levels = []
+                self.elapsed = 0
+                self.recording = true
+                self.meter?.invalidate()
+                self.meter = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+                    self?.sampleLevel()
+                }
+            }
         }
     }
 
@@ -992,20 +1004,25 @@ final class VoicePlayback: ObservableObject {
             return
         }
         NotificationCenter.default.post(name: .directVoiceStarted, object: id)
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-        try? AVAudioSession.sharedInstance().setActive(true)
-        player.play()
-        playing = true
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            guard let self, let player = self.player else { return }
-            self.current = player.currentTime
-            self.progress = player.duration > 0 ? player.currentTime / player.duration : 0
-            if !player.isPlaying {
-                self.playing = false
-                self.progress = 0
-                self.current = 0
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let player = self.player else { return }
+                player.play()
+                self.playing = true
                 self.timer?.invalidate()
+                self.timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                    guard let self, let player = self.player else { return }
+                    self.current = player.currentTime
+                    self.progress = player.duration > 0 ? player.currentTime / player.duration : 0
+                    if !player.isPlaying {
+                        self.playing = false
+                        self.progress = 0
+                        self.current = 0
+                        self.timer?.invalidate()
+                    }
+                }
             }
         }
     }

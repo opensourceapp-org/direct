@@ -4,6 +4,7 @@ import app.direct.core.delivery.MessageState
 import app.direct.core.node.CallPhase
 import app.direct.core.node.DirectException
 import app.direct.core.node.DirectNode
+import app.direct.core.signaling.BootstrapUrl
 import app.direct.core.protocol.ProfileCards
 import app.direct.core.signaling.BootstrapStatus.Phase
 import app.direct.core.store.Direction
@@ -56,8 +57,8 @@ class DirectNodeTest {
         val adaId = ada.state.value.profile!!.directId
         val boId = bo.state.value.profile!!.directId
 
-        val noBootstrap = assertFailsWith<DirectException> { ada.addContact(boId) }
-        assertEquals(DirectException.Reason.NO_BOOTSTRAP, noBootstrap.reason)
+        assertEquals(BootstrapUrl.DEFAULT, ada.state.value.bootstrapUrl)
+        assertEquals(BootstrapUrl.DEFAULT, bo.state.value.bootstrapUrl)
 
         assertEquals("ws://192.168.1.20:8787", ada.setBootstrap("192.168.1.20"))
         assertEquals("ws://192.168.1.20:8787", bo.setBootstrap("ws://192.168.1.20:8787/"))
@@ -134,6 +135,37 @@ class DirectNodeTest {
         ada.send(boId, "second")
         settle()
         assertEquals(listOf("first"), bo.state.value.messages.getValue(adaId).map { it.body })
+        ada.close()
+        bo.close()
+    }
+
+    @Test
+    fun `an inbound message raises an alert the app can show while the screen is off`() = runTest {
+        val ada = node(MemorySecretStore(), "ada-alert")
+        val bo = node(MemorySecretStore(), "bo-alert")
+        val alerts = mutableListOf<app.direct.core.node.InboundAlert>()
+        bo.onInboundAlert = { alerts.add(it) }
+        ada.start()
+        bo.start()
+        ada.createIdentity("Ada")
+        bo.createIdentity("Bo")
+        ada.setBootstrap("10.0.0.9")
+        bo.setBootstrap("10.0.0.9")
+        settle()
+        val adaId = ada.state.value.profile!!.directId
+        val boId = bo.state.value.profile!!.directId
+        ada.addContact(boId)
+        ada.send(boId, "Are you there?")
+        settle()
+        assertEquals(1, alerts.size)
+        assertEquals(adaId, alerts.single().threadId)
+        assertEquals("Ada", alerts.single().title)
+        assertEquals("Are you there?", alerts.single().body)
+        bo.acceptRequest(adaId)
+        settle()
+        ada.setStatus("Out")
+        settle()
+        assertEquals(1, alerts.size)
         ada.close()
         bo.close()
     }
@@ -267,6 +299,21 @@ class DirectNodeTest {
         assertEquals("Unreachable", ada.state.value.call?.reason)
         ada.close()
         bo.close()
+    }
+
+    @Test
+    fun `the hosted bootstrap is saved on first start and used to connect`() = runTest {
+        val secrets = MemorySecretStore()
+        val ada = node(secrets, "ada-hosted")
+        ada.start()
+        assertEquals(BootstrapUrl.DEFAULT, ada.state.value.bootstrapUrl)
+        settle()
+        assertEquals(Phase.OPEN, ada.state.value.bootstrap.phase)
+        ada.close()
+        val again = node(secrets, "ada-hosted")
+        again.start()
+        assertEquals(BootstrapUrl.DEFAULT, again.state.value.bootstrapUrl)
+        again.close()
     }
 
     // Group fan-out and receipts are covered in DeliveryEngineTest. DirectNode group

@@ -92,4 +92,4 @@ A relay that accepts a payload does not mark the message delivered.
 
 ## Native projects
 
-`native/android` and `native/ios` are the apps that run on a phone. Each process owns one node. Foreground reconnects the bootstrap immediately. Android schedules the outbox with WorkManager. iOS registers a background refresh and retries again when the app becomes active. A suspended app cannot receive, because there is no push service. Details and the two-phone checklist are in [docs/native.md](docs/native.md).
+`native/android` and `native/ios` are the apps that run on a phone. Each process owns one node. Foreground reconnects the bootstrap immediately. Android keeps a connected foreground service so inbound messages can notify with the screen off, and schedules the outbox with WorkManager. iOS registers a background refresh and keeps a short keep-alive after you leave. A force-quit or fully suspended iOS app cannot receive, because there is no push service. Details and the two-phone checklist are in [docs/native.md](docs/native.md).

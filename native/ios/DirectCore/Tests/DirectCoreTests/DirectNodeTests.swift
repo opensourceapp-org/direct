@@ -57,7 +57,8 @@ final class DirectNodeTests: XCTestCase {
         let adaId = ada.state.profile!.directId
         let boId = bo.state.profile!.directId
 
-        _ = await assertThrows(.noBootstrap) { try await ada.addContact(boId) }
+        XCTAssertEqual(BootstrapUrl.defaultUrl, ada.state.bootstrapUrl)
+        XCTAssertEqual(BootstrapUrl.defaultUrl, bo.state.bootstrapUrl)
 
         XCTAssertEqual("ws://192.168.1.20:8787", try ada.setBootstrap("192.168.1.20"))
         XCTAssertEqual("ws://192.168.1.20:8787", try bo.setBootstrap("ws://192.168.1.20:8787/"))
@@ -135,6 +136,36 @@ final class DirectNodeTests: XCTestCase {
         bo.close()
     }
 
+    func testAnInboundMessageRaisesAnAlertTheAppCanShowWhileTheScreenIsOff() async throws {
+        let ada = node(MemorySecretStore(), "ada-alert")
+        let bo = node(MemorySecretStore(), "bo-alert")
+        var alerts: [InboundAlert] = []
+        bo.onInboundAlert = { alerts.append($0) }
+        await ada.start()
+        await bo.start()
+        _ = try ada.createIdentity("Ada")
+        _ = try bo.createIdentity("Bo")
+        try ada.setBootstrap("10.0.0.9")
+        try bo.setBootstrap("10.0.0.9")
+        await settle()
+        let adaId = ada.state.profile!.directId
+        let boId = bo.state.profile!.directId
+        try await ada.addContact(boId)
+        try ada.send(boId, "Are you there?")
+        await settle()
+        XCTAssertEqual(1, alerts.count)
+        XCTAssertEqual(adaId, alerts.first?.threadId)
+        XCTAssertEqual("Ada", alerts.first?.title)
+        XCTAssertEqual("Are you there?", alerts.first?.body)
+        try bo.acceptRequest(adaId)
+        await settle()
+        try ada.setStatus("Out")
+        await settle()
+        XCTAssertEqual(1, alerts.count)
+        ada.close()
+        bo.close()
+    }
+
     func testADisconnectedBootstrapIsReportedAsOfflineNotAsAMissingPhone() async throws {
         let ada = node(MemorySecretStore(), "ada3")
         await ada.start()
@@ -203,7 +234,14 @@ final class DirectNodeTests: XCTestCase {
         await ada.start()
         let error = await assertThrows(.invalidBootstrap) { try ada.setBootstrap("ws://localhost:8787") }
         XCTAssertTrue(error?.message.contains("the phone itself") == true)
-        XCTAssertNil(ada.state.bootstrapUrl)
+        XCTAssertEqual(BootstrapUrl.defaultUrl, ada.state.bootstrapUrl)
+        ada.close()
+    }
+
+    func testHostedBootstrapIsSavedOnFirstStart() async throws {
+        let ada = node(MemorySecretStore(), "ada-hosted")
+        await ada.start()
+        XCTAssertEqual(BootstrapUrl.defaultUrl, ada.state.bootstrapUrl)
         ada.close()
     }
 

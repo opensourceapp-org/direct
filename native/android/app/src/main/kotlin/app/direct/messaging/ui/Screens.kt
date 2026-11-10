@@ -118,11 +118,14 @@ import app.direct.core.Encoding
 import app.direct.core.delivery.MessageState
 import app.direct.core.node.DirectNode
 import app.direct.core.node.NodeState
+import app.direct.core.signaling.BootstrapUrl
 import app.direct.core.protocol.MediaNotes
 import app.direct.core.protocol.ProfileCards
 import app.direct.core.store.Direction
 import app.direct.core.store.MessageRecord
 import app.direct.core.store.Profile
+import app.direct.messaging.DirectApp
+import app.direct.messaging.platform.MessageAlerts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -208,9 +211,21 @@ private fun Onboarding(node: DirectNode) {
 
 @Composable
 private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
+    val context = LocalContext.current
+    val app = context.applicationContext as DirectApp
+    val pending by app.openPeer.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.CHATS) }
     var openPeer by rememberSaveable { mutableStateOf<String?>(null) }
     var newGroup by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(pending) {
+        val target = pending ?: return@LaunchedEffect
+        openPeer = target
+        newGroup = false
+        app.consumeOpenPeer()
+    }
+    LaunchedEffect(openPeer) {
+        openPeer?.let { MessageAlerts.cancel(context, it) }
+    }
     val peer = openPeer
     if (peer != null) {
         BackHandler { openPeer = null }
@@ -401,7 +416,6 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
 }
 
 @Composable
-@Composable
 private fun NewGroupScreen(node: DirectNode, state: NodeState, back: () -> Unit, opened: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val people = state.contacts.filter { it.accepted && !it.blocked }
@@ -546,7 +560,7 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
 @Composable
 private fun NetworkScreen(node: DirectNode, state: NodeState) {
     val scope = rememberCoroutineScope()
-    var address by rememberSaveable(state.bootstrapUrl) { mutableStateOf(state.bootstrapUrl ?: "") }
+    var address by rememberSaveable(state.bootstrapUrl) { mutableStateOf(state.bootstrapUrl ?: BootstrapUrl.DEFAULT) }
     var error by remember { mutableStateOf<String?>(null) }
     val (phase, color) = state.bootstrap.describe()
     var help by rememberSaveable { mutableStateOf(false) }
@@ -572,7 +586,7 @@ private fun NetworkScreen(node: DirectNode, state: NodeState) {
             Card {
                 StatusRow("Bootstrap", phase, color)
                 HorizontalDivider(color = Ink.border)
-                StatusRow("Address", state.bootstrapUrl ?: "Not set")
+                StatusRow("Address", state.bootstrapUrl ?: BootstrapUrl.DEFAULT)
                 HorizontalDivider(color = Ink.border)
                 StatusRow("Network", if (state.networkAvailable) "Available" else "Offline", if (state.networkAvailable) Ink.success else Ink.danger)
                 HorizontalDivider(color = Ink.border)
@@ -584,8 +598,8 @@ private fun NetworkScreen(node: DirectNode, state: NodeState) {
             }
             state.bootstrap.error?.let { Muted("Last error: $it") }
             Label("Bootstrap address")
-            Muted("Both phones must use the same address. Run the signaling server on a computer both phones can reach, then enter it here, for example ws://192.168.1.20:8787. It sees public bundles, presence, and WebRTC negotiation. It never receives message text.")
-            Field(address, { address = it }, "ws://192.168.1.20:8787")
+            Muted("This phone uses the public DIRECT signaling server unless you save a different address. Both phones must use the same value. It sees public bundles, presence, and WebRTC negotiation. It never receives message text.")
+            Field(address, { address = it }, BootstrapUrl.DEFAULT)
             PrimaryButton("Use this bootstrap", enabled = address.isNotBlank()) {
                 scope.attempt({ error = it }) { address = node.setBootstrap(address) }
             }
@@ -610,7 +624,9 @@ private fun ServerHelp(onClose: () -> Unit) {
             Modifier.verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Muted("Download Direct Server for Mac, Windows, or Linux from https://direct-server.apps.grok.bot. Open the app, press Start server, and share the address it shows. Each phone that connects is listed in the window.")
+            Muted("Phones already use the public DIRECT signaling server. Open Network and you will see that address filled in. Save a different address only if you want both phones on your own server.")
+            HelpCode(BootstrapUrl.DEFAULT)
+            Muted("To run your own server, download Direct Server for Mac, Windows, or Linux from https://direct-server.apps.grok.bot. Open the app, press Start server, and share the address it shows. Each phone that connects is listed in the window.")
             HelpCode("https://direct-server.apps.grok.bot")
             Muted("To run it from source instead, clone the project. On a Mac, double-click Start Server.command in that folder. Direct.app is the iPhone app. macOS will not open it.")
             HelpCode("git clone https://github.com/opensourceapp-org/direct.git\ncd direct\npnpm install\npnpm server")

@@ -4,6 +4,70 @@ import Foundation
 public enum BootstrapUrl {
     public static let defaultPort = 8787
 
+    /// Public hosted bootstrap. Phones save this on first start unless a different address is already stored.
+    public static let defaultUrl = "wss://direct-signaling.apps.grok.bot"
+
+    /// Bumped when the public hosted bootstrap became the default.
+    public static let hostedDefaultVersion = 1
+
+    public static func usesHttpSignal(_ url: String) -> Bool {
+        let value = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return value.hasPrefix("wss://") || value.hasPrefix("https://")
+    }
+
+    public static func httpSignalUrl(_ url: String) -> String {
+        var next = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if next.lowercased().hasPrefix("ws://") {
+            next = "http://" + next.dropFirst(5)
+        } else if next.lowercased().hasPrefix("wss://") {
+            next = "https://" + next.dropFirst(6)
+        }
+        while next.hasSuffix("/") { next.removeLast() }
+        return next.hasSuffix("/signal") ? next : next + "/signal"
+    }
+
+    public static func storedOrDefault(_ stored: String?) -> String {
+        let value = stored?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? defaultUrl : value
+    }
+
+    public struct Chosen: Equatable, Sendable {
+        public let url: String
+        public let version: Int
+
+        public init(url: String, version: Int) {
+            self.url = url
+            self.version = version
+        }
+    }
+
+    public static func isLegacyLanDefault(_ input: String) -> Bool {
+        guard case let .success(url) = normalize(input) else { return false }
+        guard url.hasPrefix("ws://"), !url.dropFirst(5).contains("/"), url.hasSuffix(":\(defaultPort)") else { return false }
+        let host = String(url.dropFirst(5).dropLast(1 + String(defaultPort).count))
+        if host.hasPrefix("[") { return false }
+        return privateIPv4(host)
+    }
+
+    public static func applyHostedDefault(stored: String?, version: Int) -> Chosen {
+        if version >= hostedDefaultVersion {
+            return Chosen(url: storedOrDefault(stored), version: version)
+        }
+        let current = stored?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let url = current.isEmpty || isLegacyLanDefault(current) ? defaultUrl : current
+        return Chosen(url: url, version: hostedDefaultVersion)
+    }
+
+    private static func privateIPv4(_ host: String) -> Bool {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        let octets = parts.compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return false }
+        let a = octets[0]
+        let b = octets[1]
+        return a == 10 || (a == 192 && b == 168) || (a == 172 && (16...31).contains(b)) || (a == 169 && b == 254)
+    }
+
     public enum Failure: String, Error, CaseIterable {
         case empty, scheme, host, port, userinfo, query, loopback
 

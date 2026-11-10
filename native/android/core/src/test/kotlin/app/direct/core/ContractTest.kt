@@ -100,7 +100,19 @@ class ContractTest {
 
     @Test
     fun `bootstrap addresses normalize like contracts bootstrap-url json`() {
-        val cases = Contracts.json("bootstrap-url.json").jsonObject.getValue("cases").jsonArray
+        val contract = Contracts.json("bootstrap-url.json").jsonObject
+        assertEquals(contract.getValue("hostedDefault").jsonPrimitive.content, BootstrapUrl.DEFAULT)
+        assertEquals(BootstrapUrl.Result.Ok(BootstrapUrl.DEFAULT), BootstrapUrl.normalize(BootstrapUrl.DEFAULT))
+        assertEquals(BootstrapUrl.DEFAULT, BootstrapUrl.storedOrDefault(null))
+        assertEquals(true, BootstrapUrl.usesHttpSignal(BootstrapUrl.DEFAULT))
+        assertEquals("https://direct-signaling.apps.grok.bot/signal", BootstrapUrl.httpSignalUrl(BootstrapUrl.DEFAULT))
+        assertEquals(false, BootstrapUrl.usesHttpSignal("ws://192.168.1.20:8787"))
+        assertEquals(BootstrapUrl.Chosen(BootstrapUrl.DEFAULT, BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault(null, 0))
+        assertEquals(BootstrapUrl.Chosen(BootstrapUrl.DEFAULT, BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault("ws://192.168.1.121:8787", 0))
+        assertEquals(BootstrapUrl.Chosen(BootstrapUrl.DEFAULT, BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault("192.168.1.121", 0))
+        assertEquals(BootstrapUrl.Chosen("ws://192.168.1.121:8787", BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault("ws://192.168.1.121:8787", BootstrapUrl.HOSTED_DEFAULT_VERSION))
+        assertEquals(BootstrapUrl.Chosen("wss://signals.example.com", BootstrapUrl.HOSTED_DEFAULT_VERSION), BootstrapUrl.applyHostedDefault("wss://signals.example.com", 0))
+        val cases = contract.getValue("cases").jsonArray
         for (case in cases) {
             val row = case.jsonObject
             val result = BootstrapUrl.normalize(row.s("input"))

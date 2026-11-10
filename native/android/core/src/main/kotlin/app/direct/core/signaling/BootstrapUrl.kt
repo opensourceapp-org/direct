@@ -4,6 +4,59 @@ package app.direct.core.signaling
 object BootstrapUrl {
     const val DEFAULT_PORT = 8787
 
+    /** Public hosted bootstrap. Phones save this on first start unless a different address is already stored. */
+    const val DEFAULT = "wss://direct-signaling.apps.grok.bot"
+
+    /** Bumped when the public hosted bootstrap became the default. */
+    const val HOSTED_DEFAULT_VERSION = 1
+
+    fun usesHttpSignal(url: String): Boolean {
+        val value = url.trim()
+        return value.startsWith("wss://", ignoreCase = true) || value.startsWith("https://", ignoreCase = true)
+    }
+
+    fun httpSignalUrl(url: String): String {
+        val next = url.trim()
+            .replace(Regex("^ws://", RegexOption.IGNORE_CASE), "http://")
+            .replace(Regex("^wss://", RegexOption.IGNORE_CASE), "https://")
+            .trimEnd('/')
+        return if (next.endsWith("/signal")) next else "$next/signal"
+    }
+
+    fun storedOrDefault(stored: String?): String {
+        val value = stored?.trim().orEmpty()
+        return value.ifEmpty { DEFAULT }
+    }
+
+    data class Chosen(val url: String, val version: Int)
+
+    fun isLegacyLanDefault(input: String): Boolean {
+        val result = normalize(input)
+        if (result !is Result.Ok) return false
+        val url = result.url
+        if (!url.startsWith("ws://") || '/' in url.substring("ws://".length) || !url.endsWith(":$DEFAULT_PORT")) return false
+        val host = url.removePrefix("ws://").removeSuffix(":$DEFAULT_PORT")
+        if (host.startsWith("[")) return false
+        return privateIpv4(host)
+    }
+
+    fun applyHostedDefault(stored: String?, version: Int): Chosen {
+        if (version >= HOSTED_DEFAULT_VERSION) return Chosen(storedOrDefault(stored), version)
+        val current = stored?.trim().orEmpty()
+        val url = if (current.isEmpty() || isLegacyLanDefault(current)) DEFAULT else current
+        return Chosen(url, HOSTED_DEFAULT_VERSION)
+    }
+
+    private fun privateIpv4(host: String): Boolean {
+        val parts = host.split('.')
+        if (parts.size != 4) return false
+        val octets = parts.map { it.toIntOrNull() ?: return false }
+        if (octets.any { it !in 0..255 }) return false
+        val a = octets[0]
+        val b = octets[1]
+        return a == 10 || a == 192 && b == 168 || a == 172 && b in 16..31 || a == 169 && b == 254
+    }
+
     enum class Error(val message: String) {
         EMPTY("Enter the bootstrap address, such as ws://192.168.1.20:8787."),
         SCHEME("Use a ws:// or wss:// address."),

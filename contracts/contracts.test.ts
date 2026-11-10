@@ -10,9 +10,10 @@ import {
   open,
   parseBundle,
   seal,
+  signBytes,
   toPublicIdentity,
 } from '@direct/crypto';
-import { aadFor, decodeEnvelope, encodeEnvelope, nextDelayMs, normalizeBootstrapUrl } from '@direct/protocol';
+import { aadFor, applyHostedDefault, decodeEnvelope, encodeEnvelope, HOSTED_BOOTSTRAP_URL, HOSTED_DEFAULT_VERSION, httpSignalUrl, nextDelayMs, normalizeBootstrapUrl, signalProofMessage, usesHttpSignal } from '@direct/protocol';
 import type { Envelope } from '@direct/protocol';
 import { base64UrlToBytes, bytesToBase64Url, text, utf8 } from '@direct/shared';
 
@@ -35,6 +36,7 @@ const { createSignalHub } = createRequire(__filename)(
 const here = (name: string) => path.join(__dirname, name);
 const signaling = JSON.parse(readFileSync(here('signaling.json'), 'utf8'));
 const urls = JSON.parse(readFileSync(here('bootstrap-url.json'), 'utf8')) as {
+  hostedDefault: string;
   cases: { input: string; url?: string; error?: string }[];
 };
 
@@ -66,6 +68,23 @@ describe('bootstrap address contract', () => {
     else expect(result).toEqual({ ok: false, error });
   });
 
+  test('the hosted default is a public wss address both phones share', () => {
+    expect(urls.hostedDefault).toBe(HOSTED_BOOTSTRAP_URL);
+    expect(normalizeBootstrapUrl(HOSTED_BOOTSTRAP_URL)).toEqual({ ok: true, url: HOSTED_BOOTSTRAP_URL });
+    expect(normalizeBootstrapUrl('https://direct-signaling.apps.grok.bot/')).toEqual({ ok: true, url: HOSTED_BOOTSTRAP_URL });
+    expect(applyHostedDefault(null, 0)).toEqual({ url: HOSTED_BOOTSTRAP_URL, version: HOSTED_DEFAULT_VERSION });
+    expect(applyHostedDefault('ws://192.168.1.121:8787', 0)).toEqual({ url: HOSTED_BOOTSTRAP_URL, version: HOSTED_DEFAULT_VERSION });
+    expect(applyHostedDefault('192.168.1.121', 0)).toEqual({ url: HOSTED_BOOTSTRAP_URL, version: HOSTED_DEFAULT_VERSION });
+    expect(applyHostedDefault('ws://192.168.1.121:8787', HOSTED_DEFAULT_VERSION)).toEqual({
+      url: 'ws://192.168.1.121:8787',
+      version: HOSTED_DEFAULT_VERSION,
+    });
+    expect(applyHostedDefault('wss://signals.example.com', 0)).toEqual({ url: 'wss://signals.example.com', version: HOSTED_DEFAULT_VERSION });
+    expect(usesHttpSignal(HOSTED_BOOTSTRAP_URL)).toBe(true);
+    expect(httpSignalUrl(HOSTED_BOOTSTRAP_URL)).toBe('https://direct-signaling.apps.grok.bot/signal');
+    expect(usesHttpSignal('ws://192.168.1.20:8787')).toBe(false);
+  });
+
   test('both phones typing the same computer in different ways get one address', () => {
     const forms = ['192.168.1.20', 'ws://192.168.1.20', 'http://192.168.1.20:8787/', ' WS://192.168.1.20:8787 '];
     const normalized = new Set(forms.map((form) => {
@@ -77,13 +96,39 @@ describe('bootstrap address contract', () => {
 });
 
 describe('signaling contract', () => {
-  const ada = 'dir_0123456789ABCDEF';
-  const bo = 'dir_ABCDEFGHJKMNPQRS';
-  const boHello = {
-    kind: 'hello',
-    from: bo,
-    bundle: signaling.hubToClient.lookupPresent.bundle as string,
+  const identityVectors = JSON.parse(readFileSync(here('vectors.json'), 'utf8')) as {
+    ada: { seedHex: string; bundle: string; directId: string; name: string };
+    bo: { seedHex: string; bundle: string; directId: string; name: string };
   };
+  const ada = identityVectors.ada.directId;
+  const bo = identityVectors.bo.directId;
+  const missing = 'dir_0123456789ABCDEH';
+
+  function seedFromHex(value: string): Uint8Array {
+    return Uint8Array.from({ length: value.length / 2 }, (_, i) => Number.parseInt(value.slice(i * 2, i * 2 + 2), 16));
+  }
+
+  function signedHello(who: 'ada' | 'bo', nonce: string) {
+    const keys = keysFromSeed(seedFromHex(identityVectors[who].seedHex));
+    const directId = identityVectors[who].directId;
+    return {
+      kind: 'hello',
+      from: directId,
+      bundle: identityVectors[who].bundle,
+      nonce,
+      proof: bytesToBase64Url(signBytes(keys.signingSecret, signalProofMessage(nonce, directId))),
+    };
+  }
+
+  function challengeNonce(sock: { sent: Record<string, unknown>[] }): string {
+    const challenge = sock.sent.find((frame) => frame.kind === 'challenge');
+    expect(typeof challenge?.nonce).toBe('string');
+    return String(challenge?.nonce);
+  }
+
+  function announce(sock: ReturnType<typeof socket>, who: 'ada' | 'bo') {
+    sock.receive(signedHello(who, challengeNonce(sock)));
+  }
 
   test('hello, lookup, and watch produce the documented hub frames', () => {
     const hub = createSignalHub();
@@ -91,17 +136,23 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    a.receive(signaling.clientToHub.hello);
-    a.receive(signaling.clientToHub.watch);
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.presenceOffline);
-    b.receive(boHello);
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.presenceOnline);
-    a.receive(signaling.clientToHub.lookup);
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.lookupPresent);
-    a.receive({ kind: 'lookup', requestId: 'req-2', directId: 'dir_0123456789ABCDEH' });
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.lookupAbsent);
+    announce(a, 'ada');
+    a.receive({ kind: 'watch', ids: [bo] });
+    expect(a.sent.at(-1)).toEqual({ kind: 'presence', directId: bo, online: false });
+    announce(b, 'bo');
+    expect(a.sent.at(-1)).toEqual({ kind: 'presence', directId: bo, online: true });
+    a.receive({ kind: 'lookup', requestId: 'req-1', directId: bo });
+    expect(a.sent.at(-1)).toEqual({
+      kind: 'lookup',
+      requestId: 'req-1',
+      directId: bo,
+      present: true,
+      bundle: identityVectors.bo.bundle,
+    });
+    a.receive({ kind: 'lookup', requestId: 'req-2', directId: missing });
+    expect(a.sent.at(-1)).toEqual({ kind: 'lookup', requestId: 'req-2', directId: missing, present: false, bundle: null });
     b.close();
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.presenceOffline);
+    expect(a.sent.at(-1)).toEqual({ kind: 'presence', directId: bo, online: false });
   });
 
   test('offer, answer, and ice are forwarded unchanged between announced devices', () => {
@@ -110,14 +161,17 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    a.receive(signaling.clientToHub.hello);
-    b.receive(boHello);
-    a.receive(signaling.clientToHub.offer);
-    expect(b.sent.at(-1)).toEqual(signaling.clientToHub.offer);
-    b.receive(signaling.clientToHub.answer);
-    expect(a.sent.at(-1)).toEqual(signaling.clientToHub.answer);
-    a.receive(signaling.clientToHub.ice);
-    expect(b.sent.at(-1)).toEqual(signaling.clientToHub.ice);
+    announce(a, 'ada');
+    announce(b, 'bo');
+    const offer = { ...signaling.clientToHub.offer, from: ada, to: bo };
+    const answer = { ...signaling.clientToHub.answer, from: bo, to: ada };
+    const ice = { ...signaling.clientToHub.ice, from: ada, to: bo };
+    a.receive(offer);
+    expect(b.sent.at(-1)).toEqual(offer);
+    b.receive(answer);
+    expect(a.sent.at(-1)).toEqual(answer);
+    a.receive(ice);
+    expect(b.sent.at(-1)).toEqual(ice);
   });
 
   test('an offer to a missing device is unreachable and a spoofed sender is dropped', () => {
@@ -126,17 +180,38 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    a.receive(signaling.clientToHub.hello);
-    a.receive({ ...signaling.clientToHub.offer, to: 'dir_0123456789ABCDEH' });
-    expect(a.sent.at(-1)).toEqual(signaling.hubToClient.unreachable);
-    b.receive(boHello);
+    announce(a, 'ada');
+    a.receive({ ...signaling.clientToHub.offer, from: ada, to: missing });
+    expect(a.sent.at(-1)).toEqual({ kind: 'unreachable', to: missing });
+    announce(b, 'bo');
     const before = a.sent.length;
-    b.receive({ ...signaling.clientToHub.answer, from: 'dir_0123456789ABCDEH' });
+    b.receive({ ...signaling.clientToHub.answer, from: missing, to: ada });
     const spoofer = socket();
     hub.attach(spoofer);
-    spoofer.receive({ ...signaling.clientToHub.offer, from: ada });
+    spoofer.receive({ ...signaling.clientToHub.offer, from: ada, to: bo });
     expect(a.sent.length).toBe(before);
     expect(b.sent.some((frame) => frame.kind === 'offer')).toBe(false);
+  });
+
+  test('a socket that floods frames is closed', () => {
+    const hub = createSignalHub({ maxMessagesPerSec: 3 });
+    const a = socket();
+    hub.attach(a);
+    announce(a, 'ada');
+    for (let i = 0; i < 8; i += 1) a.receive({ kind: 'lookup', requestId: `r${i}`, directId: bo });
+    expect(a.readyState).toBe(3);
+  });
+
+  test('a public bundle without a matching proof cannot claim a DIRECT ID', () => {
+    const hub = createSignalHub();
+    const thief = socket();
+    hub.attach(thief);
+    const nonce = challengeNonce(thief);
+    thief.receive(signaling.clientToHub.hello);
+    thief.receive({ kind: 'hello', from: ada, bundle: identityVectors.ada.bundle, nonce, proof: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' });
+    expect(hub.roster()).toEqual([]);
+    announce(thief, 'ada');
+    expect(hub.roster()).toEqual([{ directId: ada, name: identityVectors.ada.name }]);
   });
 
   test('message text and envelopes are never forwarded', () => {
@@ -145,11 +220,13 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    a.receive(signaling.clientToHub.hello);
-    b.receive(boHello);
+    announce(a, 'ada');
+    announce(b, 'bo');
+    const beforeA = a.sent.length;
+    const beforeB = b.sent.length;
     for (const frame of signaling.forbidden) a.receive(frame);
-    expect(b.sent).toEqual([]);
-    expect(a.sent).toEqual([]);
+    expect(b.sent.length).toBe(beforeB);
+    expect(a.sent.length).toBe(beforeA);
   });
 
   test('the connected list is available on this computer', async () => {
@@ -161,21 +238,38 @@ describe('signaling contract', () => {
         close(): Promise<void>;
       };
     };
-    const WebSocket = createRequire(__filename)('ws') as new (url: string) => {
-      once(event: 'open', listener: () => void): void;
-      once(event: 'error', listener: (error: Error) => void): void;
+    const WebSocket = createRequire(__filename)('ws') as new (url: string, options?: { origin?: string }) => {
+      once(event: 'open' | 'message' | 'error' | 'unexpected-response', listener: (...args: never[]) => void): void;
       send(data: string): void;
       close(): void;
     };
     const server = createSignalingServer();
     const info = await server.listen(0, '127.0.0.1');
+    const health = await fetch(`http://127.0.0.1:${info.port}/health`);
+    expect(health.headers.get('content-type')).toMatch(/application\/json/);
+    expect(await health.json()).toEqual({ ok: true, service: 'direct-signaling', contract: 1 });
+    const home = await fetch(`http://127.0.0.1:${info.port}/`);
+    expect(home.headers.get('content-type')).toMatch(/text\/html/);
+    expect(await home.text()).toContain('Signaling is running.');
+    const blocked = new WebSocket(`ws://127.0.0.1:${info.port}`, { origin: 'https://evil.example' });
+    const blockedCode = await new Promise<number>((resolve, reject) => {
+      blocked.once('unexpected-response', (_request, response: { statusCode: number }) => resolve(response.statusCode));
+      blocked.once('open', () => reject(new Error('evil origin was accepted')));
+      blocked.once('error', () => {});
+    });
+    expect(blockedCode).toBe(403);
+    blocked.close();
     const phone = new WebSocket(`ws://127.0.0.1:${info.port}`);
     try {
-      await new Promise<void>((resolve, reject) => {
-        phone.once('open', () => resolve());
+      const nonce = await new Promise<string>((resolve, reject) => {
         phone.once('error', (openError) => reject(openError));
+        phone.once('message', (raw) => {
+          const frame = JSON.parse(String(raw)) as { kind?: string; nonce?: string };
+          if (frame.kind === 'challenge' && frame.nonce) resolve(frame.nonce);
+          else reject(new Error('expected challenge'));
+        });
       });
-      phone.send(JSON.stringify(signaling.clientToHub.hello));
+      phone.send(JSON.stringify(signedHello('ada', nonce)));
       let users: { directId: string; name: string }[] = [];
       for (let attempt = 0; attempt < 20 && users.length === 0; attempt += 1) {
         const response = await fetch(`http://127.0.0.1:${info.port}/roster`);
@@ -183,19 +277,166 @@ describe('signaling contract', () => {
         users = (await response.json()).users;
         if (users.length === 0) await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      expect(users).toEqual([{ directId: ada, name: 'Ada' }]);
+      expect(users).toEqual([{ directId: ada, name: identityVectors.ada.name }]);
     } finally {
       phone.close();
       await server.close();
     }
   });
 
+  test('admission uses the socket address unless the peer is a local proxy', () => {
+    const { clientIp } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/createServer.cjs'),
+    ) as {
+      clientIp: (request: {
+        headers: Record<string, string | undefined>;
+        socket: { remoteAddress?: string };
+      }) => string;
+    };
+    const req = (peer: string, forwarded?: string) => ({
+      headers: forwarded === undefined ? {} : { 'x-forwarded-for': forwarded },
+      socket: { remoteAddress: peer },
+    });
+    expect(clientIp(req('203.0.113.10', '198.51.100.1'))).toBe('203.0.113.10');
+    expect(clientIp(req('::ffff:203.0.113.10', '198.51.100.1'))).toBe('203.0.113.10');
+    expect(clientIp(req('2001:db8::10', '198.51.100.1'))).toBe('2001:db8::10');
+    expect(clientIp(req('127.0.0.1', '198.51.100.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('127.0.0.1', '10.0.0.1, 198.51.100.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('127.0.0.1', '1.1.1.1, 2.2.2.2, 198.51.100.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('::1', '198.51.100.1, 127.0.0.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('::ffff:127.0.0.1', '198.51.100.1'))).toBe('198.51.100.1');
+    expect(clientIp(req('127.0.0.1'))).toBe('127.0.0.1');
+    expect(clientIp(req('127.0.0.1', 'not-an-ip'))).toBe('127.0.0.1');
+    expect(clientIp(req('127.0.0.1', 'evil.example'))).toBe('127.0.0.1');
+  });
+
+  test('a flood of sockets from one address is refused even with spoofed forwarded-for', async () => {
+    const { createSignalingServer, MAX_CONNECTS_PER_WINDOW, lanUrls } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/createServer.cjs'),
+    ) as {
+      createSignalingServer: () => {
+        listen(port: number, host: string): Promise<{ port: number }>;
+        close(): Promise<void>;
+      };
+      MAX_CONNECTS_PER_WINDOW: number;
+      lanUrls: (port: number) => string[];
+    };
+    const WebSocket = createRequire(__filename)('ws') as new (
+      url: string,
+      options?: { headers?: Record<string, string> },
+    ) => {
+      once(event: 'open' | 'error' | 'unexpected-response', listener: (...args: never[]) => void): void;
+      close(): void;
+    };
+    const server = createSignalingServer();
+    const info = await server.listen(0, '0.0.0.0');
+    const lan = lanUrls(info.port)[0];
+    const url = lan ?? `ws://127.0.0.1:${info.port}`;
+    const sockets: InstanceType<typeof WebSocket>[] = [];
+    try {
+      let refused = 0;
+      for (let i = 0; i <= MAX_CONNECTS_PER_WINDOW; i += 1) {
+        const phone = new WebSocket(url, lan ? { headers: { 'X-Forwarded-For': `198.51.100.${i + 1}` } } : undefined);
+        sockets.push(phone);
+        const outcome = await new Promise<'open' | number>((resolve) => {
+          phone.once('unexpected-response', (_request, response: { statusCode: number }) => resolve(response.statusCode));
+          phone.once('open', () => resolve('open'));
+          phone.once('error', () => {});
+        });
+        if (outcome === 'open') continue;
+        expect(outcome).toBe(429);
+        refused += 1;
+      }
+      expect(refused).toBeGreaterThan(0);
+    } finally {
+      for (const socket of sockets) socket.close();
+      await server.close();
+    }
+  });
+
+  test('rewritten hosted paths still speak signaling JSON', async () => {
+    const { handler } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/httpHandler.cjs'),
+    ) as {
+      handler: (
+        request: { method?: string; url?: string; headers?: Record<string, string>; body?: string },
+        response: {
+          setHeader(name: string, value: string): void;
+          writeHead(status: number, headers?: Record<string, string>): void;
+          end(body?: string): void;
+        },
+      ) => Promise<void>;
+    };
+
+    function call(method: string, url: string, body?: object, headers: Record<string, string> = {}) {
+      return new Promise<{ status: number; type: string; body: string }>((resolve) => {
+        let status = 0;
+        const outHeaders: Record<string, string> = {};
+        const request = { method, url, headers, body: body === undefined ? '' : JSON.stringify(body) };
+        const response = {
+          setHeader(name: string, value: string) {
+            outHeaders[name.toLowerCase()] = value;
+          },
+          writeHead(code: number, next?: Record<string, string>) {
+            status = code;
+            for (const [name, value] of Object.entries(next || {})) outHeaders[name.toLowerCase()] = value;
+          },
+          end(payload?: string) {
+            resolve({ status, type: outHeaders['content-type'] || '', body: String(payload || '') });
+          },
+        };
+        void handler(request, response);
+      });
+    }
+
+    const posted = await call('POST', '/api', { frames: [], waitMs: 0 });
+    expect(posted.status).toBe(200);
+    expect(posted.type).toMatch(/application\/json/);
+    expect(JSON.parse(posted.body).frames[0].kind).toBe('challenge');
+
+    const signal = await call('POST', '/signal', { frames: [], waitMs: 0 });
+    expect(JSON.parse(signal.body).frames[0].kind).toBe('challenge');
+
+    const health = await call('GET', '/api');
+    expect(JSON.parse(health.body)).toEqual({ ok: true, service: 'direct-signaling', contract: 1 });
+
+    const forwarded = await call('GET', '/api', undefined, { 'x-forwarded-uri': '/health' });
+    expect(JSON.parse(forwarded.body)).toEqual({ ok: true, service: 'direct-signaling', contract: 1 });
+  });
+
+  test('HTTP long-poll signaling finds another phone by DIRECT ID', async () => {
+    const { exchange, createMemoryStore } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/httpHub.cjs'),
+    ) as {
+      createMemoryStore: () => object;
+      exchange: (
+        body: { session?: string; frames?: unknown[]; waitMs?: number },
+        options?: { store?: object },
+      ) => Promise<{ session: string; nonce: string; frames: { kind?: string; nonce?: string; present?: boolean; bundle?: string | null }[] }>;
+    };
+    const store = createMemoryStore();
+    const adaSession = await exchange({ frames: [], waitMs: 0 }, { store });
+    const boSession = await exchange({ frames: [], waitMs: 0 }, { store });
+    expect(adaSession.frames[0]?.kind).toBe('challenge');
+    expect(boSession.frames[0]?.kind).toBe('challenge');
+    await exchange({ session: adaSession.session, frames: [signedHello('ada', adaSession.nonce)], waitMs: 0 }, { store });
+    await exchange({ session: boSession.session, frames: [signedHello('bo', boSession.nonce)], waitMs: 0 }, { store });
+    const lookup = await exchange({
+      session: adaSession.session,
+      frames: [{ kind: 'lookup', requestId: 'req-http', directId: bo }],
+      waitMs: 0,
+    }, { store });
+    const found = lookup.frames.find((frame) => frame.kind === 'lookup');
+    expect(found?.present).toBe(true);
+    expect(found?.bundle).toContain(bo);
+  });
+
   test('the operator roster lists a phone only while its socket is open', () => {
     const hub = createSignalHub();
     const phone = socket();
     hub.attach(phone);
-    phone.receive(signaling.clientToHub.hello);
-    expect(hub.roster()).toEqual([{ directId: ada, name: 'Ada' }]);
+    announce(phone, 'ada');
+    expect(hub.roster()).toEqual([{ directId: ada, name: identityVectors.ada.name }]);
     phone.close();
     expect(hub.roster()).toEqual([]);
   });
@@ -207,12 +448,12 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    b.receive(boHello);
+    announce(b, 'bo');
     b.close();
-    a.receive(signaling.clientToHub.lookup);
+    a.receive({ kind: 'lookup', requestId: 'req-1', directId: bo });
     expect(a.sent.at(-1)).toMatchObject({ present: true });
     now += signaling.limits.presenceGraceMs;
-    a.receive(signaling.clientToHub.lookup);
+    a.receive({ kind: 'lookup', requestId: 'req-1', directId: bo });
     expect(a.sent.at(-1)).toMatchObject({ present: false, bundle: null });
   });
 });

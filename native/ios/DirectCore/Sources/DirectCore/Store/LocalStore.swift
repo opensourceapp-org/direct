@@ -42,6 +42,28 @@ public struct Profile: Codable, Equatable, Sendable {
 
 public struct Settings: Codable, Equatable, Sendable {
     public var bootstrapUrl: String?
+    public var bootstrapDefaultVersion: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case bootstrapUrl, bootstrapDefaultVersion
+    }
+
+    public init(bootstrapUrl: String? = nil, bootstrapDefaultVersion: Int = 0) {
+        self.bootstrapUrl = bootstrapUrl
+        self.bootstrapDefaultVersion = bootstrapDefaultVersion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        bootstrapUrl = try container.decodeIfPresent(String.self, forKey: .bootstrapUrl)
+        bootstrapDefaultVersion = try container.decodeIfPresent(Int.self, forKey: .bootstrapDefaultVersion) ?? 0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(bootstrapUrl, forKey: .bootstrapUrl)
+        try container.encode(bootstrapDefaultVersion, forKey: .bootstrapDefaultVersion)
+    }
 }
 
 public struct GroupRecord: Codable, Equatable, Identifiable, Sendable {

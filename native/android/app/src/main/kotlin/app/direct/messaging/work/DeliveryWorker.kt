@@ -15,9 +15,8 @@ import app.direct.messaging.DirectApp
 import java.util.concurrent.TimeUnit
 
 /**
- * Retries the encrypted queue while DIRECT is in the background. Android decides when this runs.
- * It can only deliver to a recipient that is online at that moment; it cannot receive for this
- * phone while the app is closed, because DIRECT has no push service holding messages.
+ * Retries the encrypted outgoing queue while DIRECT is in the background. Android decides when
+ * this runs. Receiving while the screen is off is the presence foreground service, not this worker.
  */
 class DeliveryWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {

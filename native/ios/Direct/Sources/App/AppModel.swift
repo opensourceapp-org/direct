@@ -4,40 +4,65 @@ import SwiftUI
 import UIKit
 
 /// Main-actor mirror of `NodeState` for SwiftUI. Every action runs on `DirectActor`.
+enum HomeTab: Hashable {
+    case chats, contacts, network, settings
+}
+
 @MainActor
 final class AppModel: ObservableObject {
+    static weak var shared: AppModel?
+
     @Published private(set) var state = NodeState()
     @Published var toast: String?
     @Published var newPhrase: String?
     @Published var showIntro = false
+    @Published var tab: HomeTab = .chats
+    @Published var chatPath: [String] = []
 
     private var started = false
 
     func start() {
         guard !started else { return }
         started = true
+        AppModel.shared = self
         _ = CallSession.shared
         Task { @DirectActor in
             let node = Runtime.shared.node
             node.onCallEvent = { event in
                 DispatchQueue.main.async { CallSession.shared.handle(event) }
             }
+            node.onInboundAlert = { alert in
+                DispatchQueue.main.async { MessageAlerts.show(alert) }
+            }
             node.onState = { state in
-                Task { @MainActor in self.state = state }
+                Task { @MainActor in
+                    self.state = state
+                    let unread = state.conversations.reduce(0) { $0 + $1.unread }
+                    MessageAlerts.setBadge(MessageAlerts.uiVisible ? 0 : unread)
+                }
             }
             await node.start()
         }
     }
 
+    func openChat(_ peerId: String) {
+        tab = .chats
+        chatPath = [peerId]
+        MessageAlerts.cancel(threadId: peerId)
+    }
+
     func scenePhaseChanged(_ phase: ScenePhase) {
         switch phase {
         case .active:
+            MessageAlerts.uiVisible = true
+            MessageAlerts.setBadge(0)
+            BackgroundDelivery.endKeepAlive()
             Task { @DirectActor in Runtime.shared.node.onForeground() }
-        case .background:
-            let pending = state.pending
+        case .inactive, .background:
+            MessageAlerts.uiVisible = false
             Task { @DirectActor in Runtime.shared.node.onBackground() }
-            if pending > 0 {
-                BackgroundDelivery.flushBeforeSuspension()
+            if phase == .background {
+                BackgroundDelivery.keepAlive()
                 BackgroundDelivery.schedule()
             }
         default:

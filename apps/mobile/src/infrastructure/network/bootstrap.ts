@@ -1,15 +1,14 @@
+import { HOSTED_BOOTSTRAP_URL, httpSignalUrl, usesHttpSignal } from '@direct/protocol';
 import type { SignalingClient, SignalMessage } from '@direct/transport';
 
 const OFFER_WAIT_MS = 500;
 const LOOKUP_WAIT_MS = 4_000;
 
 export function defaultBootstrapUrl(): string {
-  if (typeof location === 'undefined' || !location.host) return '';
-  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${scheme}//${location.host}/api/direct/signal`;
+  return HOSTED_BOOTSTRAP_URL;
 }
 
-/** Empty means the DIRECT address this phone already opened. */
+/** Empty uses the public hosted signaling server. */
 export function resolveBootstrapUrl(override: string): string {
   const trimmed = override.trim();
   return trimmed || defaultBootstrapUrl();
@@ -20,14 +19,18 @@ export function resolveBootstrapUrl(override: string): string {
  * Announces a public bundle, looks up another DIRECT ID, and forwards
  * WebRTC session descriptions. It does not carry message text.
  */
+type SignalSocket = { readyState: number; send(data: string): void; close(): void };
+
 export class DirectBootstrap implements SignalingClient {
-  private socket: WebSocket | null = null;
+  private socket: SignalSocket | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly handlers = new Set<(message: SignalMessage) => void>();
   private readonly lookups = new Map<string, (bundle: string | null) => void>();
   private readonly offers = new Map<string, (missing: boolean) => void>();
   private selfId = '';
   private bundle = '';
+  private nonce = '';
+  private signProof: ((nonce: string) => string) | null = null;
   private stopped = true;
   state: 'idle' | 'connecting' | 'open' = 'idle';
   currentUrl = '';
@@ -47,6 +50,7 @@ export class DirectBootstrap implements SignalingClient {
     this.timer = null;
     this.socket?.close();
     this.socket = null;
+    this.nonce = '';
     for (const resolve of this.lookups.values()) resolve(null);
     this.lookups.clear();
     for (const done of this.offers.values()) done(true);
@@ -57,13 +61,14 @@ export class DirectBootstrap implements SignalingClient {
     this.socket?.close();
   }
 
-  announce(bundle: string): void {
+  announce(bundle: string, signProof?: (nonce: string) => string): void {
     this.bundle = bundle;
+    if (signProof) this.signProof = signProof;
     this.hello();
   }
 
   lookup(directId: string): Promise<string | null> {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return Promise.resolve(null);
+    if (!this.socket || this.socket.readyState !== 1) return Promise.resolve(null);
     const requestId = globalThis.crypto.randomUUID();
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -79,7 +84,7 @@ export class DirectBootstrap implements SignalingClient {
   }
 
   async send(message: SignalMessage): Promise<void> {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) throw new Error('Bootstrap is not connected.');
+    if (!this.socket || this.socket.readyState !== 1) throw new Error('Bootstrap is not connected.');
     this.socket.send(JSON.stringify(message));
     if (message.kind !== 'offer') return;
     await new Promise<void>((resolve, reject) => {
@@ -107,12 +112,41 @@ export class DirectBootstrap implements SignalingClient {
     if (this.stopped) return;
     const url = this.urlFor();
     this.currentUrl = url;
-    if (!url || typeof WebSocket === 'undefined') {
+    if (!url) {
       this.state = 'idle';
       this.schedule();
       return;
     }
     this.state = 'connecting';
+    if (usesHttpSignal(url)) {
+      const socket = new HttpSignalSocket(httpSignalUrl(url), {
+        onOpen: () => {
+          if (this.socket !== socket) return;
+          this.state = 'open';
+          this.hello();
+        },
+        onMessage: (text) => {
+          if (this.socket !== socket) return;
+          this.incoming(text);
+        },
+        onClose: () => {
+          if (this.socket !== socket) return;
+          this.socket = null;
+          this.nonce = '';
+          this.state = this.stopped ? 'idle' : 'connecting';
+          for (const resolve of this.lookups.values()) resolve(null);
+          this.lookups.clear();
+          this.schedule();
+        },
+      });
+      this.socket = socket;
+      return;
+    }
+    if (typeof WebSocket === 'undefined') {
+      this.state = 'idle';
+      this.schedule();
+      return;
+    }
     let socket: WebSocket;
     try {
       socket = new WebSocket(url);
@@ -133,6 +167,7 @@ export class DirectBootstrap implements SignalingClient {
     socket.addEventListener('close', () => {
       if (this.socket !== socket) return;
       this.socket = null;
+      this.nonce = '';
       this.state = this.stopped ? 'idle' : 'connecting';
       for (const resolve of this.lookups.values()) resolve(null);
       this.lookups.clear();
@@ -151,7 +186,17 @@ export class DirectBootstrap implements SignalingClient {
   }
 
   private hello(): void {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN || !this.selfId || !this.bundle) return;
+    if (!this.socket || this.socket.readyState !== 1 || !this.selfId || !this.bundle) return;
+    if (this.nonce && this.signProof) {
+      this.socket.send(JSON.stringify({
+        kind: 'hello',
+        from: this.selfId,
+        bundle: this.bundle,
+        nonce: this.nonce,
+        proof: this.signProof(this.nonce),
+      }));
+      return;
+    }
     this.socket.send(JSON.stringify({ kind: 'hello', from: this.selfId, bundle: this.bundle }));
   }
 
@@ -163,7 +208,12 @@ export class DirectBootstrap implements SignalingClient {
       return;
     }
     if (!message || typeof message !== 'object') return;
-    const record = message as { kind?: string; requestId?: string; present?: boolean; bundle?: string | null; to?: string };
+    const record = message as { kind?: string; requestId?: string; present?: boolean; bundle?: string | null; to?: string; nonce?: string };
+    if (record.kind === 'challenge' && typeof record.nonce === 'string') {
+      this.nonce = record.nonce;
+      this.hello();
+      return;
+    }
     if (record.kind === 'lookup' && record.requestId) {
       const done = this.lookups.get(record.requestId);
       this.lookups.delete(record.requestId);
@@ -177,5 +227,60 @@ export class DirectBootstrap implements SignalingClient {
     if (record.kind === 'offer' || record.kind === 'answer' || record.kind === 'ice') {
       for (const handler of this.handlers) handler(record as SignalMessage);
     }
+  }
+}
+
+class HttpSignalSocket implements SignalSocket {
+  readyState = 0;
+  private session = '';
+  private outgoing: string[] = [];
+  private stopped = false;
+
+  constructor(
+    private readonly endpoint: string,
+    private readonly events: { onOpen: () => void; onMessage: (text: string) => void; onClose: () => void },
+  ) {
+    void this.loop();
+  }
+
+  send(data: string): void {
+    this.outgoing.push(data);
+  }
+
+  close(): void {
+    this.stopped = true;
+    this.readyState = 3;
+  }
+
+  private async loop(): Promise<void> {
+    this.readyState = 1;
+    this.events.onOpen();
+    while (!this.stopped) {
+      const frames = this.outgoing.splice(0);
+      try {
+        const response = await fetch(this.endpoint, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(this.session ? { 'x-direct-session': this.session } : {}),
+          },
+          body: JSON.stringify({
+            session: this.session || undefined,
+            waitMs: frames.length === 0 ? 2_000 : 0,
+            frames: frames.map((frame) => JSON.parse(frame) as unknown),
+          }),
+        });
+        if (!response.ok) throw new Error('The bootstrap closed the connection.');
+        const body = await response.json() as { session?: string; frames?: unknown[] };
+        if (typeof body.session === 'string') this.session = body.session;
+        for (const frame of body.frames ?? []) this.events.onMessage(JSON.stringify(frame));
+      } catch {
+        this.readyState = 3;
+        this.events.onClose();
+        return;
+      }
+    }
+    this.readyState = 3;
+    this.events.onClose();
   }
 }

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DIRECT signaling</title>
+  <style>
+    :root { color: #f4f4f4; background: #000; font-family: "Segoe UI", system-ui, sans-serif; }
+    body { margin: 0; background: #000; }
+    main { max-width: 720px; margin: 0 auto; padding: 64px 24px 80px; }
+    .mark { letter-spacing: 0.2em; text-transform: uppercase; color: #9a9a9a; font-size: 12px; margin: 0 0 12px; }
+    h1 { font-size: 48px; letter-spacing: -0.04em; margin: 0 0 12px; font-weight: 600; }
+    p, li { color: #c8c8c8; line-height: 1.5; }
+    .status { display: flex; gap: 12px; align-items: center; margin: 28px 0 8px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #5a5a5a; }
+    .dot.ok { background: #3dd68c; }
+    pre {
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: 14px;
+      padding: 16px;
+      overflow: auto;
+      color: #fff;
+      font-size: 14px;
+    }
+    code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="mark">Direct</p>
+    <h1>Signaling is running.</h1>
+    <p>Phones use this address to publish a public bundle, learn who is online, and exchange WebRTC setup. Message text, files, and calls stay on the phones.</p>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="health">Checking…</span>
+    </div>
+    <p>Bootstrap address for iOS and Android:</p>
+    <pre><code id="address">wss://…</code></pre>
+    <p>Both phones must use the same address. You can replace it on the Network screen if you run your own server.</p>
+  </main>
+  <script>
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    const url = scheme + "://" + location.host;
+    document.getElementById("address").textContent = url;
+    fetch("/health")
+      .then((response) => response.json())
+      .then((body) => {
+        const ok = body && body.ok === true && body.service === "direct-signaling";
+        document.getElementById("health").textContent = ok ? "Connected list is live. /health is ok." : "This page loaded, but /health did not confirm the hub.";
+        document.getElementById("dot").classList.toggle("ok", ok);
+      })
+      .catch(() => {
+        document.getElementById("health").textContent = "The page loaded without the signaling process.";
+      });
+  </script>
+</body>
+</html>

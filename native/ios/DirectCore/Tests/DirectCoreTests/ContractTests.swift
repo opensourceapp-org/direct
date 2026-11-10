@@ -92,7 +92,18 @@ final class ContractTests: XCTestCase {
     }
 
     func testBootstrapAddressesNormalizeLikeTheContract() {
-        for row in Contracts.json("bootstrap-url.json")["cases"]!.array! {
+        let contract = Contracts.json("bootstrap-url.json")
+        XCTAssertEqual(contract["hostedDefault"]?.string, BootstrapUrl.defaultUrl)
+        XCTAssertEqual(BootstrapUrl.defaultUrl, BootstrapUrl.storedOrDefault(nil))
+        XCTAssertTrue(BootstrapUrl.usesHttpSignal(BootstrapUrl.defaultUrl))
+        XCTAssertEqual("https://direct-signaling.apps.grok.bot/signal", BootstrapUrl.httpSignalUrl(BootstrapUrl.defaultUrl))
+        XCTAssertFalse(BootstrapUrl.usesHttpSignal("ws://192.168.1.20:8787"))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: BootstrapUrl.defaultUrl, version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: nil, version: 0))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: BootstrapUrl.defaultUrl, version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: "ws://192.168.1.121:8787", version: 0))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: BootstrapUrl.defaultUrl, version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: "192.168.1.121", version: 0))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: "ws://192.168.1.121:8787", version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: "ws://192.168.1.121:8787", version: BootstrapUrl.hostedDefaultVersion))
+        XCTAssertEqual(BootstrapUrl.Chosen(url: "wss://signals.example.com", version: BootstrapUrl.hostedDefaultVersion), BootstrapUrl.applyHostedDefault(stored: "wss://signals.example.com", version: 0))
+        for row in contract["cases"]!.array! {
             let input = row["input"]!.string!
             switch BootstrapUrl.normalize(input) {
             case let .success(url): XCTAssertEqual(row["url"]?.string, url, input)

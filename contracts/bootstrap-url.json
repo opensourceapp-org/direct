@@ -1,7 +1,10 @@
 {
   "description": "How a typed bootstrap address is normalized. Both phones must end up with the same url. A bare host or ws:// without a port uses 8787. Loopback is rejected because on a phone it points at the phone itself.",
   "defaultPort": 8787,
+  "hostedDefault": "wss://direct-signaling.apps.grok.bot",
   "cases": [
+    { "input": "https://direct-signaling.apps.grok.bot", "url": "wss://direct-signaling.apps.grok.bot" },
+    { "input": "wss://direct-signaling.apps.grok.bot/", "url": "wss://direct-signaling.apps.grok.bot" },
     { "input": "192.168.1.20", "url": "ws://192.168.1.20:8787" },
     { "input": "  ws://192.168.1.20:8787  ", "url": "ws://192.168.1.20:8787" },
     { "input": "ws://192.168.1.20", "url": "ws://192.168.1.20:8787" },

@@ -60,6 +60,8 @@ class BootstrapClient(
     private var running = false
     private var selfId: String? = null
     private var bundle: String? = null
+    private var nonce: String? = null
+    private var signProof: ((String) -> String)? = null
     private var watchIds: List<String> = emptyList()
     private var connection: WebSocketConnection? = null
     private var generation = 0
@@ -95,9 +97,10 @@ class BootstrapClient(
         if (running) connect()
     }
 
-    fun announce(directId: String, publicBundle: String) {
+    fun announce(directId: String, publicBundle: String, signProof: ((String) -> String)? = null) {
         selfId = directId
         bundle = publicBundle
+        this.signProof = signProof
         sendHello()
     }
 
@@ -197,6 +200,7 @@ class BootstrapClient(
         generation++
         connection?.close()
         connection = null
+        nonce = null
         failPending()
     }
 
@@ -209,6 +213,10 @@ class BootstrapClient(
 
     private fun incoming(text: String) {
         when (val frame = SignalCodec.decode(text)) {
+            is SignalFrame.Challenge -> {
+                nonce = frame.nonce
+                sendHello()
+            }
             is SignalFrame.LookupResult -> lookups.remove(frame.requestId)?.complete(if (frame.present) frame.bundle else null)
             is SignalFrame.Unreachable -> offers.remove(frame.to)?.complete(false)
             is SignalFrame.Presence -> _presence.tryEmit(frame)
@@ -220,7 +228,14 @@ class BootstrapClient(
     private fun sendHello() {
         val id = selfId ?: return
         val published = bundle ?: return
-        if (_status.value.isOpen) send(SignalFrame.Hello(id, published))
+        if (!_status.value.isOpen) return
+        val currentNonce = nonce
+        val signer = signProof
+        if (currentNonce != null && signer != null) {
+            send(SignalFrame.Hello(id, published, currentNonce, signer(currentNonce)))
+        } else {
+            send(SignalFrame.Hello(id, published))
+        }
     }
 
     private fun send(frame: SignalFrame): Boolean = connection?.send(SignalCodec.encode(frame)) ?: false

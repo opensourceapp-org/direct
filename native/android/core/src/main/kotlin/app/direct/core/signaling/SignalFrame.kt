@@ -12,7 +12,8 @@ import kotlinx.serialization.json.intOrNull
 
 /** Frames from contracts/signaling.json. Nothing here can carry message text. */
 sealed interface SignalFrame {
-    data class Hello(val from: String, val bundle: String) : SignalFrame
+    data class Hello(val from: String, val bundle: String, val nonce: String? = null, val proof: String? = null) : SignalFrame
+    data class Challenge(val nonce: String) : SignalFrame
     data class Lookup(val requestId: String, val directId: String) : SignalFrame
     data class Watch(val ids: List<String>) : SignalFrame
 
@@ -43,7 +44,15 @@ object SignalCodec {
     private fun str(value: String?): JsonElement = if (value == null) JsonNull else JsonPrimitive(value)
 
     fun encode(frame: SignalFrame): String = when (frame) {
-        is SignalFrame.Hello -> obj("kind" to str("hello"), "from" to str(frame.from), "bundle" to str(frame.bundle))
+        is SignalFrame.Hello -> {
+            val fields = linkedMapOf("kind" to str("hello"), "from" to str(frame.from), "bundle" to str(frame.bundle))
+            if (frame.nonce != null && frame.proof != null) {
+                fields["nonce"] = str(frame.nonce)
+                fields["proof"] = str(frame.proof)
+            }
+            JsonObject(fields)
+        }
+        is SignalFrame.Challenge -> obj("kind" to str("challenge"), "nonce" to str(frame.nonce))
         is SignalFrame.Lookup -> obj("kind" to str("lookup"), "requestId" to str(frame.requestId), "directId" to str(frame.directId))
         is SignalFrame.Watch -> obj("kind" to str("watch"), "ids" to JsonArray(frame.ids.take(MAX_WATCH).map(::JsonPrimitive)))
         is SignalFrame.Offer -> obj(
@@ -83,7 +92,8 @@ object SignalCodec {
         val to = json.text("to")
         val from = json.text("from")
         return when (json.text("kind")) {
-            "hello" -> SignalFrame.Hello(from ?: return null, json.text("bundle") ?: return null)
+            "hello" -> SignalFrame.Hello(from ?: return null, json.text("bundle") ?: return null, json.text("nonce"), json.text("proof"))
+            "challenge" -> SignalFrame.Challenge(json.text("nonce") ?: return null)
             "lookup" -> {
                 val requestId = json.text("requestId") ?: return null
                 val directId = json.text("directId") ?: return null
