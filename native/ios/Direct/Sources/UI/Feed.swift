@@ -163,7 +163,6 @@ struct FeedPostCard: View {
             .buttonStyle(.plain)
             Button(action: onOpen) {
                 FeedThumb(item: item)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 8) {
@@ -507,7 +506,6 @@ struct ProfilePosts: View {
         case .post(let post):
             Button { viewingId = post.id } label: {
                 FeedThumb(item: post)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
@@ -587,27 +585,36 @@ struct ContactProfileView: View {
 struct FeedThumb: View {
     @EnvironmentObject private var model: AppModel
     let item: FeedItem
+    var cornerRadius: CGFloat = 16
     @State private var bytes: Data?
 
     var body: some View {
-        ZStack {
-            if let bytes, let image = UIImage(data: bytes) {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                Color(uiColor: .tertiarySystemFill)
+        Color(uiColor: .tertiarySystemFill)
+            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                GeometryReader { geo in
+                    ZStack {
+                        if let bytes, let image = UIImage(data: bytes) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                        }
+                        if item.kind == "video" {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 36))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
             }
-            if item.kind == "video" {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 40))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.white)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(1, contentMode: .fit)
-        .clipped()
-        .onAppear { model.loadFeed(item.id) { bytes = $0 } }
-        .onChange(of: item.mediaFile) { _ in model.loadFeed(item.id) { bytes = $0 } }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .onAppear { model.loadFeed(item.id) { bytes = $0 } }
+            .onChange(of: item.mediaFile) { _ in model.loadFeed(item.id) { bytes = $0 } }
     }
 }
 
