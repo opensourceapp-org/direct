@@ -1247,22 +1247,25 @@ private fun MessageBubble(
                     }
                 }
             }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.width(248.dp)) {
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.width(320.dp)) {
                 if (!message.deleted) {
-                    Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        ChatNotes.EMOJIS.chunked(4).forEach { row ->
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                row.forEach { emoji ->
-                                    Box(
-                                        Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).clickable {
-                                            menu = false
-                                            onReact(emoji)
-                                        },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(emoji, fontSize = 24.sp, textAlign = TextAlign.Center)
-                                    }
-                                }
+                    Row(
+                        Modifier.width(308.dp).padding(horizontal = 4.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ChatNotes.EMOJIS.forEach { emoji ->
+                            Box(
+                                Modifier
+                                    .size(width = 36.dp, height = 48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        menu = false
+                                        onReact(emoji)
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(emoji, fontSize = 22.sp, textAlign = TextAlign.Center)
                             }
                         }
                     }

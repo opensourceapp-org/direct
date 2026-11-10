@@ -787,6 +787,9 @@ struct MediaBubble: View {
     let message: MessageRecord
     var tail: Bool
     var showReceipt: Bool
+    var menuOpen: Bool = false
+    var onOpenMenu: (() -> Void)?
+    var onCloseMenu: (() -> Void)?
     var onEdit: (() -> Void)?
     var onForward: (() -> Void)?
     var onDelete: (() -> Void)?
@@ -795,10 +798,23 @@ struct MediaBubble: View {
     @State private var videoOpen = false
     @State private var settled: Bool
 
-    init(message: MessageRecord, tail: Bool = true, showReceipt: Bool = false, onEdit: (() -> Void)? = nil, onForward: (() -> Void)? = nil, onDelete: (() -> Void)? = nil) {
+    init(
+        message: MessageRecord,
+        tail: Bool = true,
+        showReceipt: Bool = false,
+        menuOpen: Bool = false,
+        onOpenMenu: (() -> Void)? = nil,
+        onCloseMenu: (() -> Void)? = nil,
+        onEdit: (() -> Void)? = nil,
+        onForward: (() -> Void)? = nil,
+        onDelete: (() -> Void)? = nil
+    ) {
         self.message = message
         self.tail = tail
         self.showReceipt = showReceipt
+        self.menuOpen = menuOpen
+        self.onOpenMenu = onOpenMenu
+        self.onCloseMenu = onCloseMenu
         self.onEdit = onEdit
         self.onForward = onForward
         self.onDelete = onDelete
@@ -812,8 +828,11 @@ struct MediaBubble: View {
     var body: some View {
         let outgoing = message.direction == .outgoing
         HStack(alignment: .bottom, spacing: 0) {
-            if outgoing { Spacer(minLength: 64) }
-            VStack(alignment: outgoing ? .trailing : .leading, spacing: 3) {
+            if outgoing { Spacer(minLength: 36) }
+            VStack(alignment: outgoing ? .trailing : .leading, spacing: 8) {
+                if menuOpen, canReact {
+                    reactionBar
+                }
                 if message.forwarded, !message.deleted {
                     Text("Forwarded")
                         .font(.caption2)
@@ -850,9 +869,13 @@ struct MediaBubble: View {
                 if let error = message.lastError, message.state == .queued || message.state == .failed {
                     Text(error).font(.caption2).foregroundStyle(Ink.danger)
                 }
+                if menuOpen, canAct {
+                    actionList
+                }
             }
-            if !outgoing { Spacer(minLength: 64) }
+            if !outgoing { Spacer(minLength: 36) }
         }
+        .zIndex(menuOpen ? 2 : 0)
         .scaleEffect(settled ? 1 : 0.45, anchor: outgoing ? .bottomTrailing : .bottomLeading)
         .offset(y: settled ? 0 : 22)
         .onAppear {
@@ -868,29 +891,81 @@ struct MediaBubble: View {
                 PlayerSheet(data: bytes, mime: message.mediaMime ?? "video/mp4", name: "video.mp4")
             }
         }
-        .contextMenu {
-            if message.mediaKind != "call", message.mediaKind != "group" {
-                if !message.deleted {
-                    ControlGroup {
-                        ForEach(Array(ChatNotes.emojis.prefix(4)), id: \.self) { emoji in
-                            Button(emoji) { model.react(message.id, emoji) }
-                        }
-                    }
-                    ControlGroup {
-                        ForEach(Array(ChatNotes.emojis.suffix(4)), id: \.self) { emoji in
-                            Button(emoji) { model.react(message.id, emoji) }
-                        }
-                    }
-                }
-                if !message.deleted, message.direction == .outgoing, message.mediaKind == nil, onEdit != nil {
-                    Button("Edit") { onEdit?() }
-                }
-                if !message.deleted, onForward != nil {
-                    Button("Forward") { onForward?() }
-                }
-                Button("Delete", role: .destructive) { onDelete?() }
+        .onLongPressGesture(minimumDuration: 0.4) {
+            guard canAct else { return }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                onOpenMenu?()
             }
         }
+    }
+
+    private var canAct: Bool {
+        message.mediaKind != "call" && message.mediaKind != "group"
+    }
+
+    private var canReact: Bool { canAct && !message.deleted }
+
+    private var reactionBar: some View {
+        HStack(spacing: 0) {
+            ForEach(ChatNotes.emojis, id: \.self) { emoji in
+                Button {
+                    model.react(message.id, emoji)
+                    onCloseMenu?()
+                } label: {
+                    Text(emoji)
+                        .font(.system(size: 24))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(width: min(320, UIScreen.main.bounds.width - 32))
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Ink.line, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+    }
+
+    private var actionList: some View {
+        VStack(spacing: 0) {
+            if !message.deleted, message.direction == .outgoing, message.mediaKind == nil, onEdit != nil {
+                actionRow("Edit", color: Ink.text) {
+                    onEdit?()
+                    onCloseMenu?()
+                }
+                Divider().overlay(Ink.line)
+            }
+            if !message.deleted, onForward != nil {
+                actionRow("Forward", color: Ink.text) {
+                    onForward?()
+                    onCloseMenu?()
+                }
+                Divider().overlay(Ink.line)
+            }
+            actionRow("Delete", color: Ink.danger) {
+                onDelete?()
+                onCloseMenu?()
+            }
+        }
+        .frame(width: 168)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Ink.line, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+    }
+
+    private func actionRow(_ title: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 17))
+                .foregroundStyle(color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
     }
 
     private var hasReactions: Bool { !message.reactions.isEmpty && !message.deleted }
