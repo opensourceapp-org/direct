@@ -1,6 +1,7 @@
 package app.direct.messaging.ui
 
 import android.graphics.BitmapFactory
+import android.view.WindowManager
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -8,26 +9,26 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
@@ -49,11 +50,15 @@ import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -68,11 +73,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -549,7 +554,13 @@ private fun FeedViewerDialog(
     }
     if (item == null) return
     val scope = rememberCoroutineScope()
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val view = LocalView.current
+        SideEffect {
+            (view.parent as? DialogWindowProvider)?.window?.setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+            )
+        }
         FeedLightbox(
             node, state, item, canDelete = canDelete,
             onDelete = {
@@ -636,39 +647,43 @@ private fun CommentComposer(
     val focus = LocalFocusManager.current
     val self = state.profile
     val ready = draft.isNotBlank()
+    fun send() {
+        if (!ready) return
+        onSend()
+        focus.clearFocus()
+    }
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Avatar(self?.name ?: "You", jpegBytes(self?.avatarJpegBase64), 32.dp)
-        BasicTextField(
+        OutlinedTextField(
             value = draft,
             onValueChange = { onDraft(it.take(FeedNotes.MAX_COMMENT)) },
-            singleLine = true,
-            textStyle = TextStyle(fontSize = 15.sp, color = Ink.foreground),
-            cursorBrush = SolidColor(Ink.accent),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { if (ready) { onSend(); focus.clearFocus() } }),
             modifier = Modifier.weight(1f),
-            decorationBox = { inner ->
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(Ink.background)
-                        .border(1.dp, Ink.border, RoundedCornerShape(22.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                ) {
-                    if (draft.isEmpty()) Text("Add a comment…", color = Ink.muted, fontSize = 15.sp)
-                    inner()
-                }
-            },
+            placeholder = { Text("Add a comment…", color = Ink.muted, fontSize = 15.sp) },
+            singleLine = true,
+            shape = RoundedCornerShape(24.dp),
+            textStyle = TextStyle(fontSize = 15.sp, color = Ink.foreground),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { send() }),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Ink.accent,
+                unfocusedBorderColor = Ink.border,
+                focusedContainerColor = Ink.background,
+                unfocusedContainerColor = Ink.background,
+            ),
         )
         Text(
             "Post",
             color = if (ready) Ink.accent else Ink.muted,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.clickable(enabled = ready, onClick = { if (ready) { onSend(); focus.clearFocus() } }),
+            fontSize = 16.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = ready, onClick = { send() })
+                .padding(horizontal = 8.dp, vertical = 10.dp),
         )
     }
 }
@@ -685,10 +700,15 @@ private fun FeedLightbox(
 ) {
     val scope = rememberCoroutineScope()
     var draft by rememberSaveable(item.id) { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
     val name = feedOwnerName(state, item.ownerId)
+    val comments = rememberLazyListState()
+    LaunchedEffect(item.comments.size) {
+        if (item.comments.isNotEmpty()) comments.scrollToItem(item.comments.lastIndex)
+    }
     BackHandler(onBack = onClose)
-    Column(Modifier.fillMaxSize().background(Color.Black).imePadding()) {
-        Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
+    Column(Modifier.fillMaxSize().background(Color.Black).navigationBarsPadding().imePadding()) {
+        Box(Modifier.fillMaxWidth().height(240.dp).background(Color.Black)) {
             FeedMedia(node, item, Modifier.fillMaxSize())
             Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
@@ -700,6 +720,7 @@ private fun FeedLightbox(
         Column(
             Modifier
                 .fillMaxWidth()
+                .weight(1f)
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .background(Ink.surface),
         ) {
@@ -734,17 +755,22 @@ private fun FeedLightbox(
             }
             HorizontalDivider(color = Ink.border, modifier = Modifier.padding(top = 8.dp))
             if (item.comments.isEmpty()) {
-                Text("No comments yet. Say something.", color = Ink.muted, fontSize = 14.sp, modifier = Modifier.padding(14.dp))
+                Box(Modifier.weight(1f).fillMaxWidth().padding(14.dp), contentAlignment = Alignment.TopStart) {
+                    Text("No comments yet. Say something.", color = Ink.muted, fontSize = 14.sp)
+                }
             } else {
-                Column(
-                    Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 8.dp),
+                LazyColumn(
+                    state = comments,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    item.comments.forEach { comment ->
+                    items(item.comments, key = { it.id }) { comment ->
                         CommentRow(state, comment.fromId, comment.body, comment.createdAt)
                     }
                 }
             }
+            localError?.let { Text(it, color = Ink.danger, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) }
             HorizontalDivider(color = Ink.border)
             CommentComposer(state, draft, { draft = it }) {
                 val body = draft
@@ -752,9 +778,12 @@ private fun FeedLightbox(
                     try {
                         node.commentFeed(item.id, body)
                         draft = ""
+                        localError = null
                         onError(null)
                     } catch (error: Exception) {
-                        onError(error.message ?: "That comment was not saved.")
+                        val message = error.message ?: "That comment was not saved."
+                        localError = message
+                        onError(message)
                     }
                 }
             }
@@ -781,6 +810,8 @@ private fun FeedMedia(node: DirectNode, item: FeedItem, modifier: Modifier) {
         AndroidView(
             factory = { viewContext ->
                 VideoView(viewContext).apply {
+                    isFocusable = false
+                    isFocusableInTouchMode = false
                     setVideoPath(file.absolutePath)
                     setOnPreparedListener { it.isLooping = false; start() }
                 }

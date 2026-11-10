@@ -583,8 +583,8 @@ struct FeedLightbox: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(minHeight: 280)
-            .layoutPriority(1)
+            .frame(height: 240)
+            .clipped()
             if let item {
                 let name = feedOwnerName(model.state, item.ownerId)
                 VStack(alignment: .leading, spacing: 0) {
@@ -611,49 +611,64 @@ struct FeedLightbox: View {
                             .padding(.top, 4)
                     }
                     Divider().padding(.top, 10)
-                    if item.comments.isEmpty {
-                        Text("No comments yet. Say something.")
-                            .font(.subheadline)
-                            .foregroundStyle(Ink.muted)
-                            .padding(14)
-                    } else {
+                    ScrollViewReader { proxy in
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 12) {
-                                ForEach(item.comments) { comment in
-                                    CommentRow(fromId: comment.fromId, text: comment.body, createdAt: comment.createdAt)
+                            LazyVStack(alignment: .leading, spacing: 12) {
+                                if item.comments.isEmpty {
+                                    Text("No comments yet. Say something.")
+                                        .font(.subheadline)
+                                        .foregroundStyle(Ink.muted)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                } else {
+                                    ForEach(item.comments) { comment in
+                                        CommentRow(fromId: comment.fromId, text: comment.body, createdAt: comment.createdAt)
+                                            .id(comment.id)
+                                    }
                                 }
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                         }
-                        .frame(maxHeight: 220)
-                    }
-                    Divider()
-                    HStack(spacing: 10) {
-                        Avatar(name: model.state.profile?.name ?? "You", jpeg: model.state.profile?.avatarJpegBase64, size: 32)
-                        TextField("Add a comment…", text: $draft, axis: .vertical)
-                            .lineLimit(1...3)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(Ink.background, in: Capsule())
-                            .overlay(Capsule().stroke(Ink.line))
-                        Button("Post") {
-                            let body = draft
-                            draft = ""
-                            model.commentFeed(item.id, body)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
+                        .onChange(of: item.comments.count) { _ in
+                            if let last = item.comments.last {
+                                proxy.scrollTo(last.id, anchor: .bottom)
+                            }
                         }
-                        .font(.subheadline.weight(.semibold))
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .tint(Ink.accent)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .background(Ink.surface)
-                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 20, style: .continuous))
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    VStack(spacing: 0) {
+                        Divider()
+                        HStack(alignment: .bottom, spacing: 10) {
+                            Avatar(name: model.state.profile?.name ?? "You", jpeg: model.state.profile?.avatarJpegBase64, size: 32)
+                            TextField("Add a comment…", text: $draft, axis: .vertical)
+                                .lineLimit(1...4)
+                                .textInputAutocapitalization(.sentences)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(Ink.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Ink.line))
+                            Button("Post") {
+                                let body = draft
+                                draft = ""
+                                model.commentFeed(item.id, body)
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .tint(Ink.accent)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                    }
+                    .background(Ink.surface)
+                }
             }
         }
-        .background(Ink.background.ignoresSafeArea())
+        .background(Color.black.ignoresSafeArea())
         .onAppear { model.loadFeed(id) { bytes = $0 } }
     }
 }
