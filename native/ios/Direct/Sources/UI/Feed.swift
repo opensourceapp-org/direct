@@ -383,13 +383,21 @@ struct ProfilePosts: View {
                 Muted(canAdd ? "Add photos and videos to your profile. Accepted contacts see them." : "No photos or videos on this profile yet.")
                     .padding(.horizontal, showsHeading ? 0 : 16)
             } else {
-                let columns = [GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2), GridItem(.flexible(), spacing: 2)]
-                LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(posts) { post in
-                        Button { viewing = post } label: {
-                            FeedThumb(item: post)
+                VStack(spacing: 2) {
+                    ForEach(Array(stride(from: 0, to: posts.count, by: 3)), id: \.self) { start in
+                        let row = Array(posts[start..<min(start + 3, posts.count)])
+                        HStack(spacing: 2) {
+                            ForEach(row) { post in
+                                Button { viewing = post } label: {
+                                    FeedThumb(item: post)
+                                }
+                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity)
+                            }
+                            ForEach(0..<(3 - row.count), id: \.self) { _ in
+                                Color.clear.aspectRatio(1, contentMode: .fit).frame(maxWidth: .infinity)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -517,7 +525,9 @@ struct FeedLightbox: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 280)
+            .layoutPriority(1)
             if let item {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 10) {
@@ -566,9 +576,6 @@ struct FeedLightbox: View {
         }
         .background(Ink.background.ignoresSafeArea())
         .onAppear { model.loadFeed(id) { bytes = $0 } }
-        .onChange(of: model.state.feed.contains(where: { $0.id == id })) { present in
-            if !present { dismiss() }
-        }
     }
 }
 
