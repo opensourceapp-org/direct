@@ -1226,7 +1226,7 @@ private fun MessageBubble(
                         )
                     }
                     if (message.edited) {
-                        Text("Edited", fontSize = 11.sp, color = ink.copy(alpha = 0.7f), modifier = Modifier.padding(horizontal = 4.dp, top = 2.dp))
+                        Text("Edited", fontSize = 11.sp, color = ink.copy(alpha = 0.7f), modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 2.dp))
                     }
                 }
             }
