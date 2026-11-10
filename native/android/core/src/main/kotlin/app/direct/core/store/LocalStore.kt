@@ -52,6 +52,15 @@ data class GroupRecord(
 enum class Direction { OUTGOING, INCOMING }
 
 @Serializable
+data class MessageReaction(val emoji: String, val fromId: String)
+
+fun List<MessageReaction>.toggling(fromId: String, emoji: String): List<MessageReaction> {
+    val current = find { it.fromId == fromId }?.emoji
+    return if (current == emoji) filter { it.fromId != fromId }
+    else filter { it.fromId != fromId } + MessageReaction(emoji, fromId)
+}
+
+@Serializable
 data class MessageRecord(
     val id: String,
     val peerId: String,
@@ -75,6 +84,7 @@ data class MessageRecord(
     val edited: Boolean = false,
     val deleted: Boolean = false,
     val forwarded: Boolean = false,
+    val reactions: List<MessageReaction> = emptyList(),
 )
 
 @Serializable

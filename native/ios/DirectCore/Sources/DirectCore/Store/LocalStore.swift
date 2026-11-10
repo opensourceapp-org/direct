@@ -149,6 +149,25 @@ public enum Direction: String, Codable, Sendable {
     case incoming = "INCOMING"
 }
 
+public struct MessageReaction: Codable, Equatable, Sendable {
+    public var emoji: String
+    public var fromId: String
+
+    public init(emoji: String, fromId: String) {
+        self.emoji = emoji
+        self.fromId = fromId
+    }
+}
+
+extension Array where Element == MessageReaction {
+    public func toggling(fromId: String, emoji: String) -> [MessageReaction] {
+        if first(where: { $0.fromId == fromId })?.emoji == emoji {
+            return filter { $0.fromId != fromId }
+        }
+        return filter { $0.fromId != fromId } + [MessageReaction(emoji: emoji, fromId: fromId)]
+    }
+}
+
 public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var peerId: String
@@ -172,12 +191,13 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
     public var edited: Bool
     public var deleted: Bool
     public var forwarded: Bool
+    public var reactions: [MessageReaction]
 
     private enum CodingKeys: String, CodingKey {
-        case id, peerId, direction, body, createdAt, state, read, lastError, updatedAt, mediaKind, mediaMime, mediaName, mediaFile, senderId, edited, deleted, forwarded
+        case id, peerId, direction, body, createdAt, state, read, lastError, updatedAt, mediaKind, mediaMime, mediaName, mediaFile, senderId, edited, deleted, forwarded, reactions
     }
 
-    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil, mediaKind: String? = nil, mediaMime: String? = nil, mediaName: String? = nil, mediaFile: String? = nil, senderId: String? = nil, edited: Bool = false, deleted: Bool = false, forwarded: Bool = false) {
+    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil, mediaKind: String? = nil, mediaMime: String? = nil, mediaName: String? = nil, mediaFile: String? = nil, senderId: String? = nil, edited: Bool = false, deleted: Bool = false, forwarded: Bool = false, reactions: [MessageReaction] = []) {
         self.id = id
         self.peerId = peerId
         self.direction = direction
@@ -195,6 +215,7 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         self.edited = edited
         self.deleted = deleted
         self.forwarded = forwarded
+        self.reactions = reactions
     }
 
     public init(from decoder: Decoder) throws {
@@ -216,6 +237,7 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         edited = try container.decodeIfPresent(Bool.self, forKey: .edited) ?? false
         deleted = try container.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
         forwarded = try container.decodeIfPresent(Bool.self, forKey: .forwarded) ?? false
+        reactions = try container.decodeIfPresent([MessageReaction].self, forKey: .reactions) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -237,6 +259,7 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         try container.encode(edited, forKey: .edited)
         try container.encode(deleted, forKey: .deleted)
         try container.encode(forwarded, forKey: .forwarded)
+        try container.encode(reactions, forKey: .reactions)
     }
 }
 

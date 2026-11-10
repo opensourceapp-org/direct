@@ -423,6 +423,20 @@ public final class DirectNode {
         return message
     }
 
+    /// Adds or clears an emoji on a bubble. Recipients get a sealed react note.
+    @discardableResult
+    public func react(_ messageId: String, _ emoji: String) throws -> MessageRecord {
+        let message: MessageRecord
+        do {
+            message = try requireEngine().react(messageId, emoji)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+        return message
+    }
+
     /// Rings an accepted contact. The invite is sealed and written now; it is not queued.
     public func placeCall(_ peerId: String, video: Bool) async throws {
         guard keys != nil else { throw DirectError(.noIdentity, "Create your identity first.") }

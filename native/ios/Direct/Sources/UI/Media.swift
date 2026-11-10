@@ -827,6 +827,9 @@ struct MediaBubble: View {
                         .foregroundStyle(Ink.muted)
                         .padding(.horizontal, 4)
                 }
+                if !message.reactions.isEmpty, !message.deleted {
+                    reactionChips
+                }
                 if showReceipt, !receipt.isEmpty, !message.deleted {
                     Button {
                         if message.state == .failed { model.retry(message.id) }
@@ -861,6 +864,13 @@ struct MediaBubble: View {
         }
         .contextMenu {
             if message.mediaKind != "call", message.mediaKind != "group" {
+                if !message.deleted {
+                    ControlGroup {
+                        ForEach(ChatNotes.emojis, id: \.self) { emoji in
+                            Button(emoji) { model.react(message.id, emoji) }
+                        }
+                    }
+                }
                 if !message.deleted, message.direction == .outgoing, message.mediaKind == nil, onEdit != nil {
                     Button("Edit") { onEdit?() }
                 }
@@ -868,6 +878,31 @@ struct MediaBubble: View {
                     Button("Forward") { onForward?() }
                 }
                 Button("Delete", role: .destructive) { onDelete?() }
+            }
+        }
+    }
+
+    private var reactionChips: some View {
+        let selfId = model.state.profile?.directId
+        let groups = Dictionary(grouping: message.reactions, by: \.emoji)
+        let order = message.reactions.map(\.emoji).reduce(into: [String]()) { seen, emoji in
+            if !seen.contains(emoji) { seen.append(emoji) }
+        }
+        return HStack(spacing: 4) {
+            ForEach(order, id: \.self) { emoji in
+                let people = groups[emoji] ?? []
+                let mine = people.contains { $0.fromId == selfId }
+                Button {
+                    model.react(message.id, emoji)
+                } label: {
+                    Text(people.count > 1 ? "\(emoji) \(people.count)" : emoji)
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(mine ? Ink.accent.opacity(0.16) : Ink.surface, in: Capsule())
+                        .overlay(Capsule().stroke(mine ? Ink.accent : Ink.line, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
             }
         }
     }

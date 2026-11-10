@@ -112,6 +112,7 @@ final class AppModel: ObservableObject {
     func editMessage(_ messageId: String, _ body: String) { run { try $0.editMessage(messageId, body) } }
     func deleteMessage(_ messageId: String, forEveryone: Bool) { run { try $0.deleteMessage(messageId, forEveryone: forEveryone) } }
     func forwardMessage(_ messageId: String, to peerId: String) { run { try $0.forwardMessage(messageId, to: peerId) } }
+    func react(_ messageId: String, _ emoji: String) { run { try $0.react(messageId, emoji) } }
 
     func createGroup(name: String, memberIds: [String], done: @escaping @MainActor (String) -> Void) {
         run { node in

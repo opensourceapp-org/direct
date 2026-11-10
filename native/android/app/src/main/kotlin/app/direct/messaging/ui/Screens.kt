@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -124,6 +126,7 @@ import app.direct.core.delivery.MessageState
 import app.direct.core.node.DirectNode
 import app.direct.core.node.NodeState
 import app.direct.core.signaling.BootstrapUrl
+import app.direct.core.protocol.ChatNotes
 import app.direct.core.protocol.MediaNotes
 import app.direct.core.protocol.ProfileCards
 import app.direct.core.store.Direction
@@ -408,6 +411,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                     },
                     onForward = { forwarding = message },
                     onDelete = { deleting = message },
+                    onReact = { emoji -> scope.attempt({ error = it }) { node.react(message.id, emoji) } },
                 )
             }
         }
@@ -1137,7 +1141,7 @@ private fun sendPrepared(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun MessageBubble(
     node: DirectNode,
@@ -1148,6 +1152,7 @@ private fun MessageBubble(
     onEdit: () -> Unit,
     onForward: () -> Unit,
     onDelete: () -> Unit,
+    onReact: (String) -> Unit,
 ) {
     val outgoing = message.direction == Direction.OUTGOING
     val context = LocalContext.current
@@ -1222,6 +1227,21 @@ private fun MessageBubble(
                 }
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                if (!message.deleted) {
+                    Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        ChatNotes.EMOJIS.forEach { emoji ->
+                            Text(
+                                emoji,
+                                fontSize = 20.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
+                                    menu = false
+                                    onReact(emoji)
+                                }.padding(6.dp),
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = Ink.border)
+                }
                 if (!message.deleted && outgoing && kind == null) {
                     DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
                 }
@@ -1229,6 +1249,24 @@ private fun MessageBubble(
                     DropdownMenuItem(text = { Text("Forward") }, onClick = { menu = false; onForward() })
                 }
                 DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
+            }
+        }
+        if (message.reactions.isNotEmpty() && !message.deleted) {
+            val selfId = state.profile?.directId
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+                message.reactions.groupBy { it.emoji }.forEach { (emoji, people) ->
+                    val mine = people.any { it.fromId == selfId }
+                    Text(
+                        if (people.size > 1) "$emoji ${people.size}" else emoji,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (mine) Ink.accentSoft else Ink.surface)
+                            .border(androidx.compose.foundation.BorderStroke(1.dp, if (mine) Ink.accent else Ink.border), RoundedCornerShape(12.dp))
+                            .clickable { onReact(emoji) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
             }
         }
         val state0 = message.state

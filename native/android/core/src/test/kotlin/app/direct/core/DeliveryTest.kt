@@ -377,4 +377,43 @@ class DeliveryEngineTest {
         assertEquals(cy.keys.directId, forwarded.peerId)
         assertTrue(forwarded.id != message.id)
     }
+
+    @Test
+    fun `a reaction reaches the other phone and toggling clears it`() = runTest {
+        var now = 1_000L
+        val adaLinks = Links().apply { reachable = true }
+        val boLinks = Links().apply { reachable = true }
+        val ada = Device("Ada", { now }, adaLinks)
+        val bo = Device("Bo", { now }, boLinks)
+        ada.know(bo)
+        bo.know(ada)
+        val encoded = ChatNotes.encode(ChatNotes.Note("react", "msg_abcd", "👍"))
+        assertEquals("react", ChatNotes.parsePrefixed(encoded)?.op)
+        assertEquals("👍", ChatNotes.parsePrefixed(encoded)?.body)
+        assertNull(ChatNotes.parsePrefixed(ChatNotes.encode(ChatNotes.Note("react", "msg_abcd", "not-an-emoji"))))
+
+        val message = ada.engine.queueText(bo.keys.directId, "hello")
+        ada.engine.flush()
+        assertEquals(ReceiveOutcome.STORED, bo.engine.receive(ada.keys.directId, adaLinks.sent.last()))
+        bo.engine.flush()
+        ada.engine.receive(bo.keys.directId, boLinks.sent.last())
+
+        adaLinks.sent.clear()
+        boLinks.sent.clear()
+        bo.engine.react(message.id, "👍")
+        assertEquals("👍", bo.store.message(message.id)?.reactions?.single()?.emoji)
+        assertEquals(bo.keys.directId, bo.store.message(message.id)?.reactions?.single()?.fromId)
+        bo.engine.flush()
+        assertEquals(ReceiveOutcome.STORED, ada.engine.receive(bo.keys.directId, boLinks.sent.last()))
+        val onAda = ada.store.message(message.id)?.reactions?.single()
+        assertEquals("👍", onAda?.emoji)
+        assertEquals(bo.keys.directId, onAda?.fromId)
+
+        boLinks.sent.clear()
+        bo.engine.react(message.id, "👍")
+        assertTrue(bo.store.message(message.id)?.reactions.isNullOrEmpty())
+        bo.engine.flush()
+        assertEquals(ReceiveOutcome.STORED, ada.engine.receive(bo.keys.directId, boLinks.sent.last()))
+        assertTrue(ada.store.message(message.id)?.reactions.isNullOrEmpty())
+    }
 }
