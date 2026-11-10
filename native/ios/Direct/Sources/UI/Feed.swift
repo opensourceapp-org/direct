@@ -416,6 +416,7 @@ struct ProfilePosts: View {
     var canAdd: Bool
     var showsHeading: Bool = true
     @State private var item: PhotosPickerItem?
+    @State private var picking = false
     @State private var viewingId: String?
 
     var body: some View {
@@ -444,6 +445,7 @@ struct ProfilePosts: View {
                 await MainActor.run { item = nil }
             }
         }
+        .photosPicker(isPresented: $picking, selection: $item, matching: .any(of: [.images, .videos]))
         .navigationDestination(isPresented: Binding(
             get: { viewingId != nil },
             set: { if !$0 { viewingId = nil } }
@@ -485,22 +487,27 @@ struct ProfilePosts: View {
     private func profileTile(_ tile: ProfileTile) -> some View {
         switch tile {
         case .add:
-            PhotosPicker(selection: $item, matching: .any(of: [.images, .videos])) {
-                VStack(spacing: 8) {
-                    Image(systemName: "plus")
-                        .font(.title2.weight(.semibold))
-                    Text("Add")
-                        .font(.footnote.weight(.semibold))
+            Button { picking = true } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(uiColor: .tertiarySystemFill))
+                    VStack(spacing: 6) {
+                        Image(systemName: "plus")
+                            .font(.title.weight(.semibold))
+                        Text("Add")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(Color.accentColor)
                 }
-                .foregroundStyle(Ink.accent)
-                .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fit)
-                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Add post")
         case .post(let post):
             Button { viewingId = post.id } label: {
                 FeedThumb(item: post)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
@@ -533,8 +540,9 @@ struct ContactProfileView: View {
         let jpeg = selfProfile ? model.state.profile?.avatarJpegBase64 : contact?.avatarJpegBase64
         let about = selfProfile ? (model.state.profile?.status ?? "") : (contact?.about ?? "")
         let stories = liveStories(model.state, ownerId: peerId)
-        List {
-            Section {
+        let postCount = profilePosts(model.state, ownerId: peerId).count
+        ScrollView {
+            VStack(spacing: 28) {
                 VStack(spacing: 8) {
                     Button { if !stories.isEmpty { storyOpen = true } } label: {
                         Avatar(name: name, jpeg: jpeg, size: 108)
@@ -550,26 +558,17 @@ struct ContactProfileView: View {
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
-                    Text(profilePosts(model.state, ownerId: peerId).count == 1 ? "1 post" : "\(profilePosts(model.state, ownerId: peerId).count) posts")
+                    Text(postCount == 1 ? "1 post" : "\(postCount) posts")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                .padding(.top, 8)
+                ProfilePosts(ownerId: peerId, canAdd: selfProfile, showsHeading: true)
             }
-            Section {
-                ProfilePosts(ownerId: peerId, canAdd: selfProfile, showsHeading: false)
-                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 16, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            } header: {
-                Text("Posts")
-            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 32)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
         .background(Ink.background)
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)

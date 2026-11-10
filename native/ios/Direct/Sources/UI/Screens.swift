@@ -812,9 +812,9 @@ struct IdentityView: View {
         let profile = model.state.profile
         let posts = profile.map { profilePosts(model.state, ownerId: $0.directId).count } ?? 0
         let people = model.state.contacts.filter { $0.accepted && !$0.blocked }.count
-        List {
-            if let profile {
-                Section {
+        ScrollView {
+            VStack(spacing: 28) {
+                if let profile {
                     VStack(spacing: 8) {
                         Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 108)
                         Text(profile.name)
@@ -830,22 +830,13 @@ struct IdentityView: View {
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                }
-                Section {
-                    ProfilePosts(ownerId: profile.directId, canAdd: true, showsHeading: false)
-                        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 16, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                } header: {
-                    Text("Posts")
+                    .padding(.top, 8)
+                    ProfilePosts(ownerId: profile.directId, canAdd: true, showsHeading: true)
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 32)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
         .background(Ink.background)
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.large)
