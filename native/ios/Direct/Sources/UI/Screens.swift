@@ -141,11 +141,17 @@ struct HomeView: View {
 
 struct ChatsView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var storyOwner: String?
 
     var body: some View {
         List {
             if model.state.bootstrap.phase != .open {
                 StatusRow()
+            }
+            Section {
+                StoriesTray { storyOwner = $0 }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
             }
             if model.state.conversations.isEmpty {
                 Muted("No conversations yet. Add a contact by DIRECT ID on the Contacts tab.")
@@ -183,6 +189,15 @@ struct ChatsView: View {
             }
         }
         .navigationDestination(for: String.self) { ChatView(peerId: $0) }
+        .fullScreenCover(isPresented: Binding(
+            get: { storyOwner != nil },
+            set: { if !$0 { storyOwner = nil } }
+        )) {
+            if let storyOwner {
+                StoryViewer(ownerId: storyOwner) { self.storyOwner = nil }
+                    .environmentObject(model)
+            }
+        }
     }
 }
 
@@ -212,6 +227,7 @@ struct ChatView: View {
     @State private var forwarding: MessageRecord?
     @State private var deleting: MessageRecord?
     @State private var actionMessageId: String?
+    @State private var showProfile = false
 
     private var contact: ContactRecord? { model.state.contacts.first { $0.directId == peerId } }
     private var group: GroupRecord? { model.state.groups.first { $0.id == peerId } }
@@ -316,6 +332,12 @@ struct ChatView: View {
                 forwarding = nil
             }
         }
+        .sheet(isPresented: $showProfile) {
+            NavigationStack {
+                ContactProfileView(peerId: peerId)
+            }
+            .environmentObject(model)
+        }
         .confirmationDialog("Delete message?", isPresented: Binding(
             get: { deleting != nil },
             set: { if !$0 { deleting = nil } }
@@ -347,7 +369,10 @@ struct ChatView: View {
                         .frame(width: 28, height: 40)
                 }
                 .buttonStyle(.plain)
-                Avatar(name: contact?.name ?? conversation?.name ?? "?", jpeg: contact?.avatarJpegBase64, size: 40)
+                Button { if !isGroup { showProfile = true } } label: {
+                    Avatar(name: contact?.name ?? conversation?.name ?? "?", jpeg: contact?.avatarJpegBase64, size: 40)
+                }
+                .buttonStyle(.plain)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(contact?.name ?? conversation?.name ?? peerId)
                         .font(.system(size: 17, weight: .semibold))
@@ -813,6 +838,7 @@ struct IdentityView: View {
                             }
                         }
                     }
+                    ProfilePosts(ownerId: profile.directId, canAdd: true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("DIRECT ID").font(.caption).foregroundStyle(Ink.muted)
                         Text(profile.directId)

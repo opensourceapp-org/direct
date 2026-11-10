@@ -7,10 +7,12 @@ import app.direct.core.crypto.PublicBundle
 import app.direct.core.protocol.ChatNotes
 import app.direct.core.protocol.EnvelopeType
 import app.direct.core.protocol.Envelopes
+import app.direct.core.protocol.FeedNotes
 import app.direct.core.protocol.GroupNotes
 import app.direct.core.protocol.MediaNotes
 import app.direct.core.protocol.ProfileNotes
 import app.direct.core.store.ContactRecord
+import app.direct.core.store.FeedItem
 import app.direct.core.store.GroupRecord
 import app.direct.core.store.Direction
 import app.direct.core.store.LocalStore
@@ -385,6 +387,78 @@ class DeliveryEngine(
         if (targets.isNotEmpty()) store.save()
     }
 
+    /**
+     * Seals a story or profile photo/video to every accepted contact.
+     * Queued like a receipt: it is not a chat bubble, and it leaves the queue once written.
+     */
+    fun queueFeed(channel: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String): FeedItem {
+        val (keys, _) = identity() ?: throw DeliveryRejected("Create an identity before sending.")
+        if (channel !in FeedNotes.CHANNELS) throw DeliveryRejected("That post type is not supported.")
+        if (kind !in FeedNotes.KINDS) throw DeliveryRejected("Stories and posts take a photo or a video.")
+        if (bytes.isEmpty()) throw DeliveryRejected("That file is empty.")
+        if (bytes.size > MediaNotes.MAX_BYTES) throw DeliveryRejected("That file is over 6 MB. Choose a shorter one.")
+        val directory = mediaDirectory ?: throw DeliveryRejected("Attachments need local storage.")
+        val now = clock()
+        store.pruneFeed(now)
+        val selfId = keys.directId
+        val live = store.feed().filter { it.ownerId == selfId && it.channel == channel }
+        val limit = if (channel == FeedNotes.STORY) FeedNotes.MAX_STORIES else FeedNotes.MAX_POSTS
+        if (live.size >= limit) throw DeliveryRejected("Take some older ${if (channel == FeedNotes.STORY) "stories" else "posts"} down first.")
+        val id = Encoding.newId("fed")
+        val fileName = "$id.bin"
+        directory.mkdirs()
+        File(directory, fileName).writeBytes(bytes)
+        val expiresAt = if (channel == FeedNotes.STORY) now + FeedNotes.STORY_TTL_MS else null
+        val item = FeedItem(
+            id, selfId, channel, kind, mime, name, caption.trim().take(FeedNotes.MAX_CAPTION),
+            now, expiresAt, fileName, seen = true,
+        )
+        store.putFeed(item)
+        enqueueFeed(item)
+        store.save()
+        return item
+    }
+
+    /** Sends this phone's live stories and posts to [peerId], or to every accepted contact. */
+    fun shareFeed(peerId: String? = null) {
+        val selfId = identity()?.first?.directId ?: return
+        val now = clock()
+        store.pruneFeed(now)
+        val mine = store.feed().filter { it.ownerId == selfId }
+        if (mine.isEmpty()) return
+        val targets = store.contacts().filter { it.accepted && !it.blocked && (peerId == null || it.directId == peerId) }
+        if (targets.isEmpty()) return
+        for (item in mine) enqueueFeed(item, targets)
+        store.save()
+    }
+
+    fun deleteFeed(id: String) {
+        val (keys, deviceId) = identity() ?: throw DeliveryRejected("Create an identity first.")
+        val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")
+        if (item.ownerId != keys.directId) throw DeliveryRejected("You can only delete your own posts.")
+        store.removeFeed(id)
+        val now = clock()
+        val plain = Encoding.utf8(FeedNotes.encodeDelete(item.channel, item.id))
+        val targets = store.contacts().filter { it.accepted && !it.blocked }
+        for (contact in targets) {
+            val envelope = Envelopes.seal(
+                keys, deviceId, contact.directId, bundleFor(contact).agreementPublic,
+                Encoding.newId("fed"), EnvelopeType.FEED, plain, now, ttlMs,
+            )
+            store.putQueued(QueueItem(envelope.id, contact.directId, QueueKind.RECEIPT, envelope.encode(), 0, now, envelope.expiresAt))
+        }
+        store.save()
+    }
+
+    fun markFeedSeen(ownerId: String) {
+        var changed = false
+        for (item in store.feed().filter { it.ownerId == ownerId && !it.seen }) {
+            store.putFeed(item.copy(seen = true))
+            changed = true
+        }
+        if (changed) store.save()
+    }
+
     /** The peer just became reachable. Retry everything queued for it without waiting for backoff. */
     fun peerOnline(peerId: String) {
         val now = clock()
@@ -461,6 +535,10 @@ class DeliveryEngine(
                 }
                 if (MediaNotes.isJob(current.payload)) {
                     sendMediaChunks(current)
+                    continue
+                }
+                if (FeedNotes.isJob(current.payload)) {
+                    sendFeedChunks(current)
                     continue
                 }
                 if (links.send(peerId, Encoding.utf8(current.payload))) {
@@ -558,6 +636,10 @@ class DeliveryEngine(
         }
         if (envelope.type == EnvelopeType.GROUP) {
             return ingestInvite(peerId, plaintext, envelope.createdAt)
+        }
+        if (envelope.type == EnvelopeType.FEED) {
+            if (!contact.accepted) return ReceiveOutcome.IGNORED
+            return ingestFeed(peerId, opened, plaintext)
         }
         if (envelope.type == EnvelopeType.PROFILE) {
             val note = ProfileNotes.parse(plaintext) ?: return ReceiveOutcome.IGNORED
@@ -760,8 +842,29 @@ class DeliveryEngine(
     }
 
     private fun rewind(payload: String): String {
+        FeedNotes.parseJob(payload)?.let { return FeedNotes.encodeJob(it.copy(nextPart = 0)) }
         val job = MediaNotes.parseJob(payload) ?: return payload
         return MediaNotes.encodeJob(job.copy(nextPart = 0))
+    }
+
+    private fun enqueueFeed(item: FeedItem, targets: List<ContactRecord>? = null) {
+        val now = clock()
+        val directory = mediaDirectory ?: return
+        if (!File(directory, item.mediaFile).exists()) return
+        val parts = MediaNotes.split(File(directory, item.mediaFile).readBytes(), mediaChunkBytes).size
+        val job = FeedNotes.Job(
+            item.id, item.channel, item.kind, item.mime, item.name, item.caption,
+            item.createdAt, item.expiresAt, parts, 0, item.mediaFile,
+        )
+        val contacts = targets ?: store.contacts().filter { it.accepted && !it.blocked }
+        for (contact in contacts) {
+            store.putQueued(
+                QueueItem(
+                    Encoding.newId("fed"), contact.directId, QueueKind.RECEIPT, FeedNotes.encodeJob(job),
+                    0, now, now + ttlMs, messageId = item.id,
+                ),
+            )
+        }
     }
 
     private fun enqueueGroupMedia(group: GroupRecord, selfId: String, messageId: String, job: MediaNotes.Job, now: Long): Boolean {
@@ -826,6 +929,83 @@ class DeliveryEngine(
         transition(logicalId, DeliveryEvent.ATTEMPT, null)
         transition(logicalId, DeliveryEvent.WRITTEN, null)
         store.queued(item.id)?.let { store.putQueued(it.copy(sentAt = clock(), lastError = null, payload = MediaNotes.encodeJob(job))) }
+    }
+
+    private suspend fun sendFeedChunks(item: QueueItem) {
+        val initial = FeedNotes.parseJob(item.payload) ?: return
+        val (keys, deviceId) = identity() ?: return
+        val contact = store.contact(item.peerId) ?: return
+        val directory = mediaDirectory
+        val file = directory?.let { File(it, initial.fileName) }
+        if (file == null || !file.exists()) {
+            store.removeQueued(item.id)
+            return
+        }
+        val parts = MediaNotes.split(file.readBytes(), mediaChunkBytes)
+        var part = initial.nextPart.coerceIn(0, parts.size)
+        var job = initial
+        while (part < parts.size) {
+            val plain = FeedNotes.encodePart(
+                FeedNotes.Part(job.id, job.channel, job.kind, job.mime, job.name, job.caption, job.createdAt, job.expiresAt, part, parts.size),
+                parts[part],
+            )
+            val envelope = Envelopes.seal(
+                keys, deviceId, item.peerId, bundleFor(contact).agreementPublic,
+                "${item.id}.$part", EnvelopeType.FEED, plain, clock(), ttlMs,
+            )
+            if (!links.send(item.peerId, Encoding.utf8(envelope.encode()))) {
+                val latest = store.queued(item.id) ?: return
+                store.putQueued(
+                    latest.copy(
+                        payload = FeedNotes.encodeJob(job.copy(nextPart = part)),
+                        nextAttemptAt = clock() + Backoff.delayMs(latest.attempts, random),
+                        lastError = "Channel closed before the write",
+                    ),
+                )
+                return
+            }
+            part += 1
+            job = job.copy(nextPart = part)
+            store.queued(item.id)?.let { store.putQueued(it.copy(payload = FeedNotes.encodeJob(job), lastError = null)) }
+        }
+        store.removeQueued(item.id)
+    }
+
+    private fun ingestFeed(peerId: String, opened: ByteArray, plaintext: String): ReceiveOutcome {
+        val directory = mediaDirectory ?: return ReceiveOutcome.IGNORED
+        store.pruneFeed(clock())
+        val decoded = FeedNotes.decodePart(opened)
+        if (decoded == null) {
+            val deleted = FeedNotes.decodeDelete(plaintext) ?: return ReceiveOutcome.IGNORED
+            val existing = store.feed(deleted.id) ?: return ReceiveOutcome.DUPLICATE
+            if (existing.ownerId != peerId) return ReceiveOutcome.IGNORED
+            store.removeFeed(deleted.id)
+            File(directory, existing.mediaFile).delete()
+            store.save()
+            return ReceiveOutcome.STORED
+        }
+        val header = decoded.first
+        val chunk = decoded.second
+        val partsDir = File(directory, "parts/feed/${header.id}")
+        partsDir.mkdirs()
+        File(partsDir, header.part.toString()).writeBytes(chunk)
+        val complete = (0 until header.parts).all { File(partsDir, it.toString()).exists() }
+        if (!complete) {
+            store.save()
+            return ReceiveOutcome.STORED
+        }
+        val assembled = (0 until header.parts).fold(ByteArray(0)) { acc, index -> acc + File(partsDir, index.toString()).readBytes() }
+        val fileName = "${header.id}.bin"
+        File(directory, fileName).writeBytes(assembled)
+        partsDir.deleteRecursively()
+        val already = store.feed(header.id)?.mediaFile != null
+        val item = FeedItem(
+            header.id, peerId, header.channel, header.kind, header.mime, header.name, header.caption,
+            header.createdAt, header.expiresAt, fileName, seen = already && store.feed(header.id)?.seen == true,
+        )
+        store.putFeed(item)
+        store.save()
+        return if (already) ReceiveOutcome.DUPLICATE else ReceiveOutcome.STORED
     }
 
     private fun ingestMedia(peerId: String, contact: ContactRecord, header: MediaNotes.Part, chunk: ByteArray, createdAt: Long): ReceiveOutcome {

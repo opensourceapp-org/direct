@@ -335,7 +335,7 @@ public final class DeliveryEngine {
                     item.sentAt = nil
                     item.nextAttemptAt = now
                     item.lastError = nil
-                    item.payload = MediaNotes.rewind(item.payload)
+                    item.payload = rewind(item.payload)
                     store.putQueued(item)
                 }
                 try store.save()
@@ -412,7 +412,7 @@ public final class DeliveryEngine {
             if var current = store.queued(item.id) {
                 current.sentAt = nil
                 current.nextAttemptAt = min(current.nextAttemptAt, now)
-                current.payload = MediaNotes.rewind(current.payload)
+                current.payload = rewind(current.payload)
                 store.putQueued(current)
             }
         }
@@ -437,6 +437,79 @@ public final class DeliveryEngine {
             store.putQueued(QueueItem(id: id, peerId: contact.directId, kind: .receipt, payload: envelope.encode(), nextAttemptAt: now, expiresAt: now + ttlMs))
         }
         if !targets.isEmpty { try store.save() }
+    }
+
+    /// Seals a story or profile photo/video to every accepted contact.
+    @discardableResult
+    public func queueFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String) throws -> FeedItem {
+        guard let (keys, _) = identity() else { throw DeliveryRejected(message: "Create an identity before sending.") }
+        guard FeedNotes.channels.contains(channel) else { throw DeliveryRejected(message: "That post type is not supported.") }
+        guard FeedNotes.kinds.contains(kind) else { throw DeliveryRejected(message: "Stories and posts take a photo or a video.") }
+        guard !bytes.isEmpty else { throw DeliveryRejected(message: "That file is empty.") }
+        guard bytes.count <= MediaNotes.maxBytes else { throw DeliveryRejected(message: "That file is over 6 MB. Choose a shorter one.") }
+        guard let directory = mediaDirectory else { throw DeliveryRejected(message: "Attachments need local storage.") }
+        let now = clock()
+        store.pruneFeed(now)
+        let live = store.feed().filter { $0.ownerId == keys.directId && $0.channel == channel }
+        let limit = channel == FeedNotes.story ? FeedNotes.maxStories : FeedNotes.maxPosts
+        guard live.count < limit else {
+            throw DeliveryRejected(message: "Take some older \(channel == FeedNotes.story ? "stories" : "posts") down first.")
+        }
+        let id = Encoding.newId("fed")
+        let fileName = "\(id).bin"
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try bytes.write(to: directory.appendingPathComponent(fileName))
+        let expiresAt = channel == FeedNotes.story ? now + FeedNotes.storyTtlMs : nil
+        let captionText = String(caption.trimmingCharacters(in: .whitespacesAndNewlines).prefix(FeedNotes.maxCaption))
+        let item = FeedItem(
+            id: id, ownerId: keys.directId, channel: channel, kind: kind, mime: mime, name: name,
+            caption: captionText, createdAt: now, expiresAt: expiresAt, mediaFile: fileName, seen: true
+        )
+        store.putFeed(item)
+        enqueueFeed(item)
+        try store.save()
+        return item
+    }
+
+    public func shareFeed(peerId: String? = nil) throws {
+        guard let selfId = identity()?.0.directId else { return }
+        let now = clock()
+        store.pruneFeed(now)
+        let mine = store.feed().filter { $0.ownerId == selfId }
+        guard !mine.isEmpty else { return }
+        let targets = store.contacts().filter { $0.accepted && !$0.blocked && (peerId == nil || $0.directId == peerId) }
+        guard !targets.isEmpty else { return }
+        for item in mine { enqueueFeed(item, targets) }
+        try store.save()
+    }
+
+    public func deleteFeed(_ id: String) throws {
+        guard let (keys, deviceId) = identity() else { throw DeliveryRejected(message: "Create an identity first.") }
+        guard let item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }
+        guard item.ownerId == keys.directId else { throw DeliveryRejected(message: "You can only delete your own posts.") }
+        store.removeFeed(id)
+        let now = clock()
+        let plain = Encoding.utf8(FeedNotes.encodeDelete(channel: item.channel, id: item.id))
+        let targets = store.contacts().filter { $0.accepted && !$0.blocked }
+        for contact in targets {
+            let envelope = try Envelopes.seal(
+                sender: keys, deviceId: deviceId, recipientId: contact.directId, recipientAgreementPublic: try bundleFor(contact).agreementPublic,
+                id: Encoding.newId("fed"), type: .feed, plaintext: plain, createdAt: now, ttlMs: ttlMs
+            )
+            store.putQueued(QueueItem(id: envelope.id, peerId: contact.directId, kind: .receipt, payload: envelope.encode(), nextAttemptAt: now, expiresAt: envelope.expiresAt))
+        }
+        try store.save()
+    }
+
+    public func markFeedSeen(_ ownerId: String) throws {
+        var changed = false
+        for item in store.feed() where item.ownerId == ownerId && !item.seen {
+            var copy = item
+            copy.seen = true
+            store.putFeed(copy)
+            changed = true
+        }
+        if changed { try store.save() }
     }
 
     /// The peer just became reachable. Retry everything queued for it without waiting for backoff.
@@ -520,6 +593,10 @@ public final class DeliveryEngine {
                     try await sendMediaChunks(current)
                     continue
                 }
+                if FeedNotes.isJob(current.payload) {
+                    try await sendFeedChunks(current)
+                    continue
+                }
                 if await links.send(peerId, Encoding.utf8(current.payload)) {
                     guard var latest = store.queued(item.id) else { continue }
                     if latest.kind == .receipt {
@@ -573,7 +650,7 @@ public final class DeliveryEngine {
             if item.kind == .message, !fanOut { transition(item.logicalId(), .receiptTimeout, "No receipt yet") }
             if var current = store.queued(item.id) {
                 current.sentAt = nil
-                current.payload = MediaNotes.rewind(current.payload)
+                current.payload = rewind(current.payload)
                 current.nextAttemptAt = now + Backoff.delayMs(attempt: current.attempts, random: random)
                 current.lastError = "No receipt yet"
                 store.putQueued(current)
@@ -608,6 +685,10 @@ public final class DeliveryEngine {
         if let (header, chunk) = MediaNotes.decodePart(opened) {
             guard envelope.type == .message else { return .ignored }
             return try ingestMedia(peerId, contact, header, chunk, envelope.createdAt)
+        }
+        if envelope.type == .feed {
+            guard contact.accepted else { return .ignored }
+            return try ingestFeed(peerId, opened, String(data: opened, encoding: .utf8) ?? "")
         }
         guard let plaintext = String(data: opened, encoding: .utf8) else { return .ignored }
         if envelope.type == .call {
@@ -841,6 +922,31 @@ public final class DeliveryEngine {
         store.putQueued(QueueItem(id: envelope.id, peerId: contact.directId, kind: .receipt, payload: envelope.encode(), nextAttemptAt: now, expiresAt: envelope.expiresAt))
     }
 
+    private func rewind(_ payload: String) -> String {
+        if FeedNotes.isJob(payload) { return FeedNotes.rewind(payload) }
+        return MediaNotes.rewind(payload)
+    }
+
+    private func enqueueFeed(_ item: FeedItem, _ targets: [ContactRecord]? = nil) {
+        guard let directory = mediaDirectory else { return }
+        let file = directory.appendingPathComponent(item.mediaFile)
+        guard let bytes = try? Data(contentsOf: file), !bytes.isEmpty else { return }
+        let now = clock()
+        let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes).count
+        let job = FeedNotes.Job(
+            id: item.id, channel: item.channel, kind: item.kind, mime: item.mime, name: item.name,
+            caption: item.caption, createdAt: item.createdAt, expiresAt: item.expiresAt,
+            parts: parts, nextPart: 0, fileName: item.mediaFile
+        )
+        let contacts = targets ?? store.contacts().filter { $0.accepted && !$0.blocked }
+        for contact in contacts {
+            store.putQueued(QueueItem(
+                id: Encoding.newId("fed"), peerId: contact.directId, kind: .receipt, payload: FeedNotes.encodeJob(job),
+                nextAttemptAt: now, expiresAt: now + ttlMs, messageId: item.id
+            ))
+        }
+    }
+
     /// Writes every remaining chunk. The message stays queued until the last chunk is on the channel.
     private func sendMediaChunks(_ item: QueueItem) async throws {
         guard let initial = MediaNotes.parseJob(item.payload),
@@ -902,6 +1008,90 @@ public final class DeliveryEngine {
             latest.payload = MediaNotes.encodeJob(job)
             store.putQueued(latest)
         }
+    }
+
+    private func sendFeedChunks(_ item: QueueItem) async throws {
+        guard let initial = FeedNotes.parseJob(item.payload),
+              let (keys, deviceId) = identity(),
+              let contact = store.contact(item.peerId),
+              let directory = mediaDirectory
+        else { return }
+        let file = directory.appendingPathComponent(initial.fileName)
+        guard let bytes = try? Data(contentsOf: file), !bytes.isEmpty else {
+            store.removeQueued(item.id)
+            return
+        }
+        let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes)
+        var part = min(max(initial.nextPart, 0), parts.count)
+        var job = initial
+        while part < parts.count {
+            let plain = FeedNotes.encodePart(
+                FeedNotes.Part(
+                    id: job.id, channel: job.channel, kind: job.kind, mime: job.mime, name: job.name,
+                    caption: job.caption, createdAt: job.createdAt, expiresAt: job.expiresAt,
+                    part: part, parts: parts.count
+                ),
+                parts[part]
+            )
+            let envelope = try Envelopes.seal(
+                sender: keys, deviceId: deviceId, recipientId: item.peerId, recipientAgreementPublic: try bundleFor(contact).agreementPublic,
+                id: "\(item.id).\(part)", type: .feed, plaintext: plain, createdAt: clock(), ttlMs: ttlMs
+            )
+            if await links.send(item.peerId, Encoding.utf8(envelope.encode())) == false {
+                guard var latest = store.queued(item.id) else { return }
+                job.nextPart = part
+                latest.payload = FeedNotes.encodeJob(job)
+                latest.nextAttemptAt = clock() + Backoff.delayMs(attempt: latest.attempts, random: random)
+                latest.lastError = "Channel closed before the write"
+                store.putQueued(latest)
+                return
+            }
+            part += 1
+            job.nextPart = part
+            if var latest = store.queued(item.id) {
+                latest.payload = FeedNotes.encodeJob(job)
+                latest.lastError = nil
+                store.putQueued(latest)
+            }
+        }
+        store.removeQueued(item.id)
+    }
+
+    private func ingestFeed(_ peerId: String, _ opened: Data, _ plaintext: String) throws -> ReceiveOutcome {
+        guard let directory = mediaDirectory else { return .ignored }
+        store.pruneFeed(clock())
+        guard let (header, chunk) = FeedNotes.decodePart(opened) else {
+            guard let deleted = FeedNotes.decodeDelete(plaintext) else { return .ignored }
+            guard let existing = store.feed(deleted.id) else { return .duplicate }
+            guard existing.ownerId == peerId else { return .ignored }
+            store.removeFeed(deleted.id)
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(existing.mediaFile))
+            try store.save()
+            return .stored
+        }
+        let partsDir = directory.appendingPathComponent("parts").appendingPathComponent("feed").appendingPathComponent(header.id)
+        try FileManager.default.createDirectory(at: partsDir, withIntermediateDirectories: true)
+        try chunk.write(to: partsDir.appendingPathComponent(String(header.part)))
+        let complete = (0..<header.parts).allSatisfy { FileManager.default.fileExists(atPath: partsDir.appendingPathComponent(String($0)).path) }
+        if !complete {
+            try store.save()
+            return .stored
+        }
+        var assembled = Data()
+        for index in 0..<header.parts {
+            assembled.append(try Data(contentsOf: partsDir.appendingPathComponent(String(index))))
+        }
+        let fileName = "\(header.id).bin"
+        try assembled.write(to: directory.appendingPathComponent(fileName))
+        try? FileManager.default.removeItem(at: partsDir)
+        let already = store.feed(header.id)?.mediaFile != nil
+        let seen = already && store.feed(header.id)?.seen == true
+        store.putFeed(FeedItem(
+            id: header.id, ownerId: peerId, channel: header.channel, kind: header.kind, mime: header.mime, name: header.name,
+            caption: header.caption, createdAt: header.createdAt, expiresAt: header.expiresAt, mediaFile: fileName, seen: seen
+        ))
+        try store.save()
+        return already ? .duplicate : .stored
     }
 
     private func ingestMedia(_ peerId: String, _ contact: ContactRecord, _ header: MediaNotes.Part, _ chunk: Data, _ createdAt: Int64) throws -> ReceiveOutcome {

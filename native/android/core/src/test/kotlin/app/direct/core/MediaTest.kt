@@ -8,6 +8,7 @@ import app.direct.core.delivery.MessageState.QUEUED
 import app.direct.core.delivery.MessageState.SENT
 import app.direct.core.delivery.PeerLinks
 import app.direct.core.delivery.ReceiveOutcome
+import app.direct.core.protocol.FeedNotes
 import app.direct.core.protocol.MediaNotes
 import app.direct.core.protocol.ProfileCards
 import app.direct.core.store.ContactRecord
@@ -18,6 +19,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
 
@@ -147,5 +149,61 @@ class MediaTest {
         assertEquals(ReceiveOutcome.RECEIPT, ada.engine.receive(bo.keys.directId, boLinks.sent.last()))
         assertEquals(ACCEPTED, ada.store.message(message.id)?.state)
         assertTrue(ada.store.queue().none { it.logicalId() == message.id })
+    }
+
+    @Test
+    fun `a story is sealed to a contact and expires after a day`() = runTest {
+        var now = 1_000L
+        val adaLinks = Links()
+        val boLinks = Links()
+        val ada = Device("Ada", { now }, adaLinks, chunk = 4)
+        val bo = Device("Bo", { now }, boLinks, chunk = 4)
+        ada.know(bo)
+        bo.know(ada)
+        val payload = byteArrayOf(10, 11, 12, 13, 14)
+        val story = ada.engine.queueFeed(FeedNotes.STORY, "image", "image/jpeg", "story.jpg", payload, "hi")
+        assertEquals(FeedNotes.STORY, ada.store.feed(story.id)?.channel)
+        assertEquals(now + FeedNotes.STORY_TTL_MS, ada.store.feed(story.id)?.expiresAt)
+        ada.engine.flush()
+        assertTrue(adaLinks.sent.isNotEmpty())
+        for (bytes in adaLinks.sent) {
+            bo.engine.receive(ada.keys.directId, bytes)
+        }
+        val received = assertNotNull(bo.store.feed(story.id))
+        assertEquals(ada.keys.directId, received.ownerId)
+        assertEquals("hi", received.caption)
+        assertTrue(payload.contentEquals(bo.media.resolve("${story.id}.bin").readBytes()))
+        assertFalse(received.seen)
+        bo.engine.markFeedSeen(ada.keys.directId)
+        assertTrue(bo.store.feed(story.id)?.seen == true)
+
+        now += FeedNotes.STORY_TTL_MS + 1
+        assertEquals(1, bo.store.pruneFeed(now).size)
+        assertNull(bo.store.feed(story.id))
+    }
+
+    @Test
+    fun `a profile post reaches the other phone and delete removes it`() = runTest {
+        var now = 1_000L
+        val adaLinks = Links()
+        val boLinks = Links()
+        val ada = Device("Ada", { now }, adaLinks, chunk = 8)
+        val bo = Device("Bo", { now }, boLinks, chunk = 8)
+        ada.know(bo)
+        bo.know(ada)
+        val payload = byteArrayOf(1, 2, 3, 4, 5)
+        val post = ada.engine.queueFeed(FeedNotes.POST, "image", "image/jpeg", "pic.jpg", payload, "")
+        ada.engine.flush()
+        for (bytes in adaLinks.sent) bo.engine.receive(ada.keys.directId, bytes)
+        assertEquals(FeedNotes.POST, bo.store.feed(post.id)?.channel)
+        assertNull(bo.store.feed(post.id)?.expiresAt)
+
+        adaLinks.sent.clear()
+        ada.engine.deleteFeed(post.id)
+        assertNull(ada.store.feed(post.id))
+        ada.engine.flush()
+        assertTrue(adaLinks.sent.isNotEmpty())
+        for (bytes in adaLinks.sent) bo.engine.receive(ada.keys.directId, bytes)
+        assertNull(bo.store.feed(post.id))
     }
 }

@@ -188,6 +188,20 @@ final class AppModel: ObservableObject {
         run { try $0.sendMedia(peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption) }
     }
 
+    func publishFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String = "") {
+        run { try $0.publishFeed(channel: channel, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption) }
+    }
+
+    func deleteFeed(_ id: String) { run { try $0.deleteFeed(id) } }
+    func markStoriesSeen(_ ownerId: String) { run { try $0.markStoriesSeen(ownerId) } }
+
+    func loadFeed(_ id: String, done: @escaping @MainActor (Data?) -> Void) {
+        Task { @DirectActor in
+            let data = Runtime.shared.node.readFeed(id)
+            await MainActor.run { done(data) }
+        }
+    }
+
     func setStatus(_ text: String) { run { try $0.setStatus(text) } }
     func setAvatar(_ jpeg: Data) { run { try $0.setAvatar(jpeg) } }
     func clearAvatar() { run { try $0.clearAvatar() } }

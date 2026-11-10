@@ -157,4 +157,58 @@ final class MediaTests: XCTestCase {
         XCTAssertEqual(.accepted, ada.store.message(message.id)?.state)
         XCTAssertFalse(ada.store.queue().contains { $0.logicalId() == message.id })
     }
+
+    @DirectActor
+    func testAStoryIsSealedToAContactAndExpiresAfterADay() async throws {
+        let clock = Clock()
+        let adaLinks = Links()
+        let boLinks = Links()
+        let ada = Device("Ada", clock, adaLinks, chunk: 4)
+        let bo = Device("Bo", clock, boLinks, chunk: 4)
+        ada.know(bo)
+        bo.know(ada)
+        let payload = Data([10, 11, 12, 13, 14])
+        let story = try ada.engine.queueFeed(channel: FeedNotes.story, kind: "image", mime: "image/jpeg", name: "story.jpg", bytes: payload, caption: "hi")
+        XCTAssertEqual(FeedNotes.story, ada.store.feed(story.id)?.channel)
+        XCTAssertEqual(clock.now + FeedNotes.storyTtlMs, ada.store.feed(story.id)?.expiresAt)
+        try await ada.engine.flush()
+        XCTAssertFalse(adaLinks.sent.isEmpty)
+        for bytes in adaLinks.sent {
+            _ = try bo.engine.receive(ada.keys.directId, bytes)
+        }
+        let received = try XCTUnwrap(bo.store.feed(story.id))
+        XCTAssertEqual(ada.keys.directId, received.ownerId)
+        XCTAssertEqual("hi", received.caption)
+        XCTAssertEqual(payload, try Data(contentsOf: bo.media.appendingPathComponent("\(story.id).bin")))
+        XCTAssertFalse(received.seen)
+        try bo.engine.markFeedSeen(ada.keys.directId)
+        XCTAssertEqual(true, bo.store.feed(story.id)?.seen)
+        clock.now += FeedNotes.storyTtlMs + 1
+        XCTAssertEqual(1, bo.store.pruneFeed(clock.now).count)
+        XCTAssertNil(bo.store.feed(story.id))
+    }
+
+    @DirectActor
+    func testAProfilePostReachesTheOtherPhoneAndDeleteRemovesIt() async throws {
+        let clock = Clock()
+        let adaLinks = Links()
+        let boLinks = Links()
+        let ada = Device("Ada", clock, adaLinks, chunk: 8)
+        let bo = Device("Bo", clock, boLinks, chunk: 8)
+        ada.know(bo)
+        bo.know(ada)
+        let payload = Data([1, 2, 3, 4, 5])
+        let post = try ada.engine.queueFeed(channel: FeedNotes.post, kind: "image", mime: "image/jpeg", name: "pic.jpg", bytes: payload, caption: "")
+        try await ada.engine.flush()
+        for bytes in adaLinks.sent { _ = try bo.engine.receive(ada.keys.directId, bytes) }
+        XCTAssertEqual(FeedNotes.post, bo.store.feed(post.id)?.channel)
+        XCTAssertNil(bo.store.feed(post.id)?.expiresAt)
+        adaLinks.sent.removeAll()
+        try ada.engine.deleteFeed(post.id)
+        XCTAssertNil(ada.store.feed(post.id))
+        try await ada.engine.flush()
+        XCTAssertFalse(adaLinks.sent.isEmpty)
+        for bytes in adaLinks.sent { _ = try bo.engine.receive(ada.keys.directId, bytes) }
+        XCTAssertNil(bo.store.feed(post.id))
+    }
 }

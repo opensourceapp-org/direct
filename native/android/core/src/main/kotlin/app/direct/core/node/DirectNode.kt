@@ -17,8 +17,10 @@ import app.direct.core.signaling.BootstrapStatus
 import app.direct.core.signaling.BootstrapUrl
 import app.direct.core.signaling.SignalProof
 import app.direct.core.signaling.WebSocketFactory
+import app.direct.core.protocol.FeedNotes
 import app.direct.core.store.ContactRecord
 import app.direct.core.store.Direction
+import app.direct.core.store.FeedItem
 import app.direct.core.store.GroupRecord
 import app.direct.core.store.IdentityVault
 import app.direct.core.store.LocalStore
@@ -84,6 +86,7 @@ data class NodeState(
     val networkAvailable: Boolean = true,
     val storageError: String? = null,
     val call: CallSnapshot? = null,
+    val feed: List<FeedItem> = emptyList(),
 )
 
 /**
@@ -432,6 +435,40 @@ class DirectNode(
         if (!file.exists()) null else file.readBytes()
     }
 
+    suspend fun readFeed(id: String): ByteArray? = onNode {
+        val name = store.feed(id)?.mediaFile ?: return@onNode null
+        val file = mediaDir?.let { File(it, name) } ?: return@onNode null
+        if (!file.exists()) null else file.readBytes()
+    }
+
+    suspend fun publishFeed(channel: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String = ""): FeedItem = onNode {
+        val item = try {
+            requireEngine().queueFeed(channel, kind, mime, name, bytes, caption)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "That post was not saved.")
+        }
+        publish()
+        wake.trySend(Unit)
+        item
+    }
+
+    suspend fun deleteFeed(id: String) = onNode {
+        val item = store.feed(id)
+        try {
+            requireEngine().deleteFeed(id)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "That post was not deleted.")
+        }
+        item?.mediaFile?.let { name -> mediaDir?.let { File(it, name).delete() } }
+        publish()
+        wake.trySend(Unit)
+    }
+
+    suspend fun markStoriesSeen(ownerId: String) = onNode {
+        requireEngine().markFeedSeen(ownerId)
+        publish()
+    }
+
     suspend fun setStatus(text: String) = onNode {
         val profile = store.profile ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
         store.profile = profile.copy(status = text.trim().take(80))
@@ -486,6 +523,7 @@ class DirectNode(
         requireEngine().markRead(peerId)
         refreshWatch()
         requireEngine().shareProfile(peerId)
+        requireEngine().shareFeed(peerId)
         publish()
         wake.trySend(Unit)
     }
@@ -505,6 +543,10 @@ class DirectNode(
 
     suspend fun removeContact(peerId: String) = onNode {
         engine?.rejectPeer(peerId)
+        store.feed().filter { it.ownerId == peerId }.forEach { item ->
+            store.removeFeed(item.id)
+            mediaDir?.let { File(it, item.mediaFile).delete() }
+        }
         store.removeContact(peerId)
         store.save()
         transport?.close(peerId)
@@ -693,7 +735,10 @@ class DirectNode(
         store.putContact(contact)
         store.save()
         refreshWatch()
-        if (contact.accepted && !contact.blocked) engine?.shareProfile(contact.directId)
+        if (contact.accepted && !contact.blocked) {
+            engine?.shareProfile(contact.directId)
+            engine?.shareFeed(contact.directId)
+        }
         publish()
         wake.trySend(Unit)
         return contact
@@ -763,6 +808,11 @@ class DirectNode(
             )
         }
         val conversations = (contactConversations + groupConversations).sortedByDescending { it.lastAt }
+        val dropped = store.pruneFeed(clock())
+        if (dropped.isNotEmpty()) {
+            dropped.forEach { item -> mediaDir?.let { File(it, item.mediaFile).delete() } }
+            store.save()
+        }
         _state.value = _state.value.copy(
             profile = if (identity != null) profile else null,
             bundle = if (identity != null && profile != null) Bundles.create(identity, profile.name, profile.deviceId).encode() else null,
@@ -778,6 +828,7 @@ class DirectNode(
             foreground = foreground,
             networkAvailable = networkAvailable,
             call = board.snapshot,
+            feed = store.feed().sortedByDescending { it.createdAt },
         )
     }
 
