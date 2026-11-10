@@ -666,7 +666,7 @@ struct FeedLightbox: View {
 
     private func commentComposer(_ postId: String) -> some View {
         let ready = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        HStack(alignment: .bottom, spacing: 8) {
+        return HStack(alignment: .bottom, spacing: 8) {
             TextField("Comment", text: $draft, axis: .vertical)
                 .font(.body)
                 .lineLimit(1...5)
