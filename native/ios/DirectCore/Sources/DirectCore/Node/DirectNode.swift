@@ -74,6 +74,7 @@ public struct NodeState: Equatable, Sendable {
     public var networkAvailable = true
     public var storageError: String?
     public var call: CallSnapshot? = nil
+    public var feed: [FeedItem] = []
 
     public init() {}
 }
@@ -485,6 +486,43 @@ public final class DirectNode {
         return try? Data(contentsOf: mediaDir.appendingPathComponent(name))
     }
 
+    public func readFeed(_ id: String) -> Data? {
+        guard let name = store.feed(id)?.mediaFile, let mediaDir else { return nil }
+        return try? Data(contentsOf: mediaDir.appendingPathComponent(name))
+    }
+
+    @discardableResult
+    public func publishFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String = "") throws -> FeedItem {
+        let item: FeedItem
+        do {
+            item = try requireEngine().queueFeed(channel: channel, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+        return item
+    }
+
+    public func deleteFeed(_ id: String) throws {
+        let item = store.feed(id)
+        do {
+            try requireEngine().deleteFeed(id)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        if let name = item?.mediaFile, let mediaDir {
+            try? FileManager.default.removeItem(at: mediaDir.appendingPathComponent(name))
+        }
+        publish()
+        wake.fire()
+    }
+
+    public func markStoriesSeen(_ ownerId: String) throws {
+        try requireEngine().markFeedSeen(ownerId)
+        publish()
+    }
+
     public func setStatus(_ text: String) throws {
         guard var profile = store.profile else { throw DirectError(.noIdentity, "Create your identity first.") }
         profile.status = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
@@ -548,6 +586,7 @@ public final class DirectNode {
         try requireEngine().markRead(peerId)
         refreshWatch()
         try? engine?.shareProfile(peerId: peerId)
+        try? engine?.shareFeed(peerId: peerId)
         publish()
         wake.fire()
     }
@@ -568,6 +607,12 @@ public final class DirectNode {
 
     public func removeContact(_ peerId: String) throws {
         try engine?.rejectPeer(peerId)
+        for item in store.feed() where item.ownerId == peerId {
+            store.removeFeed(item.id)
+            if let mediaDir {
+                try? FileManager.default.removeItem(at: mediaDir.appendingPathComponent(item.mediaFile))
+            }
+        }
         store.removeContact(peerId)
         try store.save()
         transport?.close(peerId)
@@ -762,7 +807,10 @@ public final class DirectNode {
         store.putContact(contact)
         try store.save()
         refreshWatch()
-        if contact.accepted, !contact.blocked { try? engine?.shareProfile(peerId: contact.directId) }
+        if contact.accepted, !contact.blocked {
+            try? engine?.shareProfile(peerId: contact.directId)
+            try? engine?.shareFeed(peerId: contact.directId)
+        }
         publish()
         wake.fire()
         return contact
@@ -848,6 +896,15 @@ public final class DirectNode {
             )
         }
         let conversations = (contactConversations + groupConversations).sorted { $0.lastAt > $1.lastAt }
+        let dropped = store.pruneFeed(clock())
+        if !dropped.isEmpty {
+            for item in dropped {
+                if let mediaDir {
+                    try? FileManager.default.removeItem(at: mediaDir.appendingPathComponent(item.mediaFile))
+                }
+            }
+            try? store.save()
+        }
         var next = state
         next.profile = identity != nil ? store.profile : nil
         next.bundle = identity != nil ? currentBundle() : nil
@@ -863,6 +920,7 @@ public final class DirectNode {
         next.foreground = foreground
         next.networkAvailable = networkAvailable
         next.call = board.snapshot
+        next.feed = store.feed().sorted { $0.createdAt > $1.createdAt }
         state = next
     }
 

@@ -88,6 +88,21 @@ data class MessageRecord(
 )
 
 @Serializable
+data class FeedItem(
+    val id: String,
+    val ownerId: String,
+    val channel: String,
+    val kind: String,
+    val mime: String,
+    val name: String,
+    val caption: String = "",
+    val createdAt: Long,
+    val expiresAt: Long? = null,
+    val mediaFile: String,
+    val seen: Boolean = false,
+)
+
+@Serializable
 enum class QueueKind { MESSAGE, RECEIPT }
 
 @Serializable
@@ -118,6 +133,7 @@ data class Snapshot(
     val messages: List<MessageRecord> = emptyList(),
     val queue: List<QueueItem> = emptyList(),
     val groups: List<GroupRecord> = emptyList(),
+    val feed: List<FeedItem> = emptyList(),
 )
 
 /**
@@ -134,6 +150,7 @@ class LocalStore private constructor(private val file: File?, private val key: B
     private val messages = LinkedHashMap(snapshot.messages.associateBy { it.id })
     private val queue = LinkedHashMap(snapshot.queue.associateBy { it.id })
     private val groups = LinkedHashMap(snapshot.groups.associateBy { it.id })
+    private val feedItems = LinkedHashMap(snapshot.feed.associateBy { it.id })
 
     fun contact(directId: String): ContactRecord? = contacts[directId]
     fun contacts(): List<ContactRecord> = contacts.values.toList()
@@ -175,9 +192,24 @@ class LocalStore private constructor(private val file: File?, private val key: B
         groups.remove(id)
     }
 
+    fun feed(id: String): FeedItem? = feedItems[id]
+    fun feed(): List<FeedItem> = feedItems.values.toList()
+    fun putFeed(item: FeedItem) {
+        feedItems[item.id] = item
+    }
+    fun removeFeed(id: String) {
+        feedItems.remove(id)
+    }
+    fun pruneFeed(now: Long): List<FeedItem> {
+        val expired = feedItems.values.filter { item -> item.expiresAt != null && item.expiresAt <= now }
+        expired.forEach { feedItems.remove(it.id) }
+        return expired
+    }
+
     fun snapshot(): Snapshot = Snapshot(
         1, profile, settings,
         contacts.values.toList(), messages.values.toList(), queue.values.toList(), groups.values.toList(),
+        feedItems.values.toList(),
     )
 
     fun save() {

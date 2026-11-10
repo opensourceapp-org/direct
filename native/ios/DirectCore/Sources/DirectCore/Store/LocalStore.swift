@@ -263,6 +263,34 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var ownerId: String
+    public var channel: String
+    public var kind: String
+    public var mime: String
+    public var name: String
+    public var caption: String
+    public var createdAt: Int64
+    public var expiresAt: Int64?
+    public var mediaFile: String
+    public var seen: Bool
+
+    public init(id: String, ownerId: String, channel: String, kind: String, mime: String, name: String, caption: String = "", createdAt: Int64, expiresAt: Int64? = nil, mediaFile: String, seen: Bool = false) {
+        self.id = id
+        self.ownerId = ownerId
+        self.channel = channel
+        self.kind = kind
+        self.mime = mime
+        self.name = name
+        self.caption = caption
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.mediaFile = mediaFile
+        self.seen = seen
+    }
+}
+
 public enum QueueKind: String, Codable {
     case message = "MESSAGE"
     case receipt = "RECEIPT"
@@ -307,12 +335,13 @@ struct Snapshot: Codable {
     var messages: [MessageRecord] = []
     var queue: [QueueItem] = []
     var groups: [GroupRecord] = []
+    var feed: [FeedItem] = []
 
     private enum CodingKeys: String, CodingKey {
-        case version, profile, settings, contacts, messages, queue, groups
+        case version, profile, settings, contacts, messages, queue, groups, feed
     }
 
-    init(version: Int = 1, profile: Profile? = nil, settings: Settings = Settings(), contacts: [ContactRecord] = [], messages: [MessageRecord] = [], queue: [QueueItem] = [], groups: [GroupRecord] = []) {
+    init(version: Int = 1, profile: Profile? = nil, settings: Settings = Settings(), contacts: [ContactRecord] = [], messages: [MessageRecord] = [], queue: [QueueItem] = [], groups: [GroupRecord] = [], feed: [FeedItem] = []) {
         self.version = version
         self.profile = profile
         self.settings = settings
@@ -320,6 +349,7 @@ struct Snapshot: Codable {
         self.messages = messages
         self.queue = queue
         self.groups = groups
+        self.feed = feed
     }
 
     init(from decoder: Decoder) throws {
@@ -331,6 +361,7 @@ struct Snapshot: Codable {
         messages = try container.decodeIfPresent([MessageRecord].self, forKey: .messages) ?? []
         queue = try container.decodeIfPresent([QueueItem].self, forKey: .queue) ?? []
         groups = try container.decodeIfPresent([GroupRecord].self, forKey: .groups) ?? []
+        feed = try container.decodeIfPresent([FeedItem].self, forKey: .feed) ?? []
     }
 }
 
@@ -350,6 +381,8 @@ public final class LocalStore {
     private var queueMap: [String: QueueItem]
     private var groupOrder: [String]
     private var groupMap: [String: GroupRecord]
+    private var feedOrder: [String]
+    private var feedMap: [String: FeedItem]
     private let file: URL?
     private let key: Data?
 
@@ -366,6 +399,8 @@ public final class LocalStore {
         queueMap = Dictionary(snapshot.queue.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         groupOrder = snapshot.groups.map(\.id)
         groupMap = Dictionary(snapshot.groups.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        feedOrder = snapshot.feed.map(\.id)
+        feedMap = Dictionary(snapshot.feed.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     }
 
     public func contact(_ directId: String) -> ContactRecord? { contactMap[directId] }
@@ -420,9 +455,29 @@ public final class LocalStore {
         groupOrder.removeAll { $0 == id }
     }
 
+    public func feed(_ id: String) -> FeedItem? { feedMap[id] }
+    public func feed() -> [FeedItem] { feedOrder.compactMap { feedMap[$0] } }
+    public func putFeed(_ item: FeedItem) {
+        if feedMap[item.id] == nil { feedOrder.append(item.id) }
+        feedMap[item.id] = item
+    }
+    public func removeFeed(_ id: String) {
+        feedMap[id] = nil
+        feedOrder.removeAll { $0 == id }
+    }
+    @discardableResult
+    public func pruneFeed(_ now: Int64) -> [FeedItem] {
+        let expired = feed().filter { item in
+            guard let expiresAt = item.expiresAt else { return false }
+            return expiresAt <= now
+        }
+        for item in expired { removeFeed(item.id) }
+        return expired
+    }
+
     public func save() throws {
         guard let file, let key else { return }
-        let snapshot = Snapshot(profile: profile, settings: settings, contacts: contacts(), messages: messages(), queue: queue(), groups: groups())
+        let snapshot = Snapshot(profile: profile, settings: settings, contacts: contacts(), messages: messages(), queue: queue(), groups: groups(), feed: feed())
         let sealed = try Seal.sealAtRest(key: key, plaintext: try JSONEncoder().encode(snapshot))
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         // .atomic writes a sibling temp file and renames it over the target.

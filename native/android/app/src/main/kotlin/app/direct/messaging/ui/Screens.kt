@@ -227,6 +227,8 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.CHATS) }
     var openPeer by rememberSaveable { mutableStateOf<String?>(null) }
     var newGroup by rememberSaveable { mutableStateOf(false) }
+    var storyOwner by rememberSaveable { mutableStateOf<String?>(null) }
+    var profilePeer by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(pending) {
         val target = pending ?: return@LaunchedEffect
         openPeer = target
@@ -247,10 +249,20 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
         NewGroupScreen(node, state, back = { newGroup = false }) { openPeer = it; newGroup = false }
         return
     }
+    val profile = profilePeer
+    if (profile != null) {
+        ContactProfileScreen(node, state, profile) { profilePeer = null }
+        return
+    }
+    val story = storyOwner
+    if (story != null) {
+        StoryViewer(node, state, story) { storyOwner = null }
+        return
+    }
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
             when (tab) {
-                Tab.CHATS -> ChatsScreen(state, onNewGroup = { newGroup = true }) { openPeer = it }
+                Tab.CHATS -> ChatsScreen(node, state, onNewGroup = { newGroup = true }, onOpenStory = { storyOwner = it }) { openPeer = it }
                 Tab.CONTACTS -> ContactsScreen(node, state) { openPeer = it }
                 Tab.NETWORK -> NetworkScreen(node, state)
                 Tab.IDENTITY -> IdentityScreen(node, state, onHowItWorks)
@@ -285,7 +297,9 @@ private fun Header(eyebrow: String, title: String) = Column(Modifier.padding(sta
 }
 
 @Composable
-private fun ChatsScreen(state: NodeState, onNewGroup: () -> Unit, open: (String) -> Unit) {
+private fun ChatsScreen(node: DirectNode, state: NodeState, onNewGroup: () -> Unit, onOpenStory: (String) -> Unit, open: (String) -> Unit) {
+    val selfId = state.profile?.directId
+    var error by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Header("Messages", "Chats")
@@ -294,6 +308,10 @@ private fun ChatsScreen(state: NodeState, onNewGroup: () -> Unit, open: (String)
                 Icon(Icons.Outlined.Group, "New group", tint = Ink.accent)
             }
         }
+        if (selfId != null) {
+            StoriesTray(node, state, selfId, onOpenStory) { error = it }
+        }
+        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp)) }
         if (state.conversations.isEmpty()) {
             Column(
                 Modifier.weight(1f).fillMaxWidth().padding(32.dp),
@@ -359,6 +377,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
     var forwarding by remember { mutableStateOf<MessageRecord?>(null) }
     var deleting by remember { mutableStateOf<MessageRecord?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var profileOpen by rememberSaveable { mutableStateOf(false) }
     val list = rememberLazyListState()
     LaunchedEffect(peerId, messages.size, contact?.accepted, isGroup) {
         if (isGroup || contact?.accepted == true) node.openConversation(peerId)
@@ -384,7 +403,9 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
             }
-            Avatar(contact?.name ?: conversation?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 40.dp)
+            Box(Modifier.clickable(enabled = !isGroup && contact != null) { profileOpen = true }) {
+                Avatar(contact?.name ?: conversation?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 40.dp)
+            }
             Column(Modifier.weight(1f).padding(start = 12.dp, top = 8.dp, bottom = 8.dp)) {
                 Text(
                     contact?.name ?: conversation?.name ?: peerId,
@@ -469,6 +490,9 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                 }
             },
         )
+    }
+    if (profileOpen && !isGroup) {
+        ContactProfileScreen(node, state, peerId) { profileOpen = false }
     }
 }
 
@@ -771,6 +795,7 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                     if (profile.avatarJpegBase64 != null) SecondaryButton("Remove photo", Icons.Outlined.Delete) { scope.attempt({ error = it }) { node.clearAvatar() } }
                 }
             }
+            ProfilePosts(node, state, profile.directId, canAdd = true, onError = { error = it })
             Label("Status")
             Field(status, { status = it.take(80) }, "Write your own status")
             PrimaryButton(if (acknowledged == statusDraft) "Saved" else "Save status") {
