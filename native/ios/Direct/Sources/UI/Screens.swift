@@ -126,7 +126,7 @@ struct HomeView: View {
                 .tabItem { Label("Contacts", systemImage: "person.2") }
                 .tag(HomeTab.contacts)
             NavigationStack { FeedView() }
-                .tabItem { Label("Feed", systemImage: "rectangle.stack") }
+                .tabItem { Label("Feed", systemImage: "photo.on.rectangle.angled") }
                 .tag(HomeTab.feed)
             NavigationStack { IdentityView() }
                 .tabItem { Label("Profile", systemImage: "person.crop.circle") }

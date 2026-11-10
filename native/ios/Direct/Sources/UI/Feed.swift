@@ -42,11 +42,10 @@ func feedOwnerJpeg(_ state: NodeState, _ ownerId: String) -> String? {
 }
 
 func formatFeedTime(_ ms: Int64) -> String {
-    let seconds = max(0, Int64(Date().timeIntervalSince1970 * 1000) - ms) / 1000
-    if seconds < 60 { return "just now" }
-    if seconds < 3600 { return "\(seconds / 60)m" }
-    if seconds < 86_400 { return "\(seconds / 3600)h" }
-    return "\(seconds / 86_400)d"
+    let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    return formatter.localizedString(for: date, relativeTo: Date())
 }
 
 func likeSummary(_ state: NodeState, _ item: FeedItem) -> String? {
@@ -70,31 +69,36 @@ struct FeedView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 StoriesTray { storyOwner = $0 }
-                    .background(Ink.surface)
-                Divider()
+                    .padding(.top, 4)
+                    .padding(.bottom, 8)
                 if posts.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "rectangle.stack")
-                            .font(.system(size: 28, weight: .semibold))
-                            .foregroundStyle(Ink.accent)
-                            .frame(width: 64, height: 64)
-                            .background(Ink.accent.opacity(0.12), in: Circle())
-                        Text("No posts yet").font(.headline)
-                        Muted("When a contact adds photos or videos to their profile, they show up here.")
+                    VStack(spacing: 8) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 52, weight: .ultraLight))
+                            .foregroundStyle(.tertiary)
+                            .padding(.bottom, 4)
+                        Text("No Posts")
+                            .font(.title2.weight(.semibold))
+                        Text("When people you know share photos and videos, they appear here.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
+                            .padding(.horizontal, 28)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(32)
+                    .padding(.top, 72)
                 } else {
-                    VStack(spacing: 10) {
+                    LazyVStack(spacing: 20) {
                         ForEach(posts) { item in
                             FeedPostCard(item: item, onOpen: { viewing = item }, onProfile: { profilePeer = item.ownerId })
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                 }
             }
         }
-        .background(Ink.background)
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("Feed")
         .navigationBarTitleDisplayMode(.large)
         .fullScreenCover(isPresented: Binding(
@@ -106,7 +110,7 @@ struct FeedView: View {
                     .environmentObject(model)
             }
         }
-        .fullScreenCover(item: $viewing) { post in
+        .sheet(item: $viewing) { post in
             FeedLightbox(id: post.id, canDelete: false)
                 .environmentObject(model)
         }
@@ -132,52 +136,57 @@ struct FeedPostCard: View {
 
     var body: some View {
         let name = feedOwnerName(model.state, item.ownerId)
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 10) {
             Button(action: onProfile) {
                 HStack(spacing: 10) {
-                    Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 38)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(name).font(.subheadline.weight(.semibold)).foregroundStyle(Ink.text)
-                        Text(formatFeedTime(item.createdAt)).font(.caption).foregroundStyle(Ink.muted)
+                    Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 36)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(name).font(.headline)
+                        Text(formatFeedTime(item.createdAt)).font(.footnote).foregroundStyle(.secondary)
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                .padding(.top, 12)
             }
             .buttonStyle(.plain)
             Button(action: onOpen) {
                 FeedThumb(item: item)
-                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
-            FeedActions(item: item, onComments: onOpen)
-                .padding(.horizontal, 10)
-            if let summary = likeSummary(model.state, item) {
-                Text(summary).font(.subheadline.weight(.semibold)).padding(.horizontal, 14)
-            }
-            if !item.caption.isEmpty {
-                (Text(name).fontWeight(.semibold) + Text("  ") + Text(item.caption))
-                    .font(.subheadline)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 4)
-            }
-            if let latest = item.comments.last {
-                Button(action: onOpen) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(item.comments.count == 1 ? "View 1 comment" : "View all \(item.comments.count) comments")
-                            .font(.footnote)
-                            .foregroundStyle(Ink.muted)
+            .padding(.horizontal, 12)
+            VStack(alignment: .leading, spacing: 6) {
+                FeedActions(item: item, onComments: onOpen)
+                if let summary = likeSummary(model.state, item) {
+                    Text(summary).font(.subheadline.weight(.semibold))
+                }
+                if !item.caption.isEmpty {
+                    Text(item.caption).font(.subheadline)
+                }
+                if !item.comments.isEmpty {
+                    Button(action: onOpen) {
+                        HStack(spacing: 4) {
+                            Text(item.comments.count == 1 ? "1 Comment" : "\(item.comments.count) Comments")
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    if let latest = item.comments.last {
                         CommentRow(fromId: latest.fromId, text: latest.body, createdAt: latest.createdAt, compact: true)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 6)
                 }
-                .buttonStyle(.plain)
             }
-            Spacer().frame(height: 12)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
         }
-        .background(Ink.surface)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 
@@ -188,24 +197,22 @@ struct FeedActions: View {
 
     var body: some View {
         let liked = item.likes.contains { $0.fromId == model.state.profile?.directId }
-        HStack(spacing: 16) {
+        HStack(spacing: 18) {
             Button { model.likeFeed(item.id) } label: {
                 Image(systemName: liked ? "heart.fill" : "heart")
-                    .font(.system(size: 22))
-                    .foregroundStyle(liked ? Color(red: 0.88, green: 0.14, blue: 0.37) : Ink.text)
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(liked ? Color.pink : Color.primary)
+                    .symbolRenderingMode(.monochrome)
             }
             Button(action: onComments) {
                 Image(systemName: "bubble.right")
-                    .font(.system(size: 21))
-                    .foregroundStyle(Ink.text)
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(.primary)
             }
             Spacer()
-            if !item.comments.isEmpty {
-                Text("\(item.comments.count)").font(.footnote).foregroundStyle(Ink.muted)
-            }
         }
         .buttonStyle(.plain)
-        .padding(.vertical, 6)
+        .padding(.vertical, 2)
     }
 }
 
@@ -219,12 +226,15 @@ struct CommentRow: View {
     var body: some View {
         let name = feedOwnerName(model.state, fromId)
         HStack(alignment: .top, spacing: 10) {
-            Avatar(name: name, jpeg: feedOwnerJpeg(model.state, fromId), size: compact ? 24 : 32)
+            Avatar(name: name, jpeg: feedOwnerJpeg(model.state, fromId), size: compact ? 28 : 34)
             VStack(alignment: .leading, spacing: 2) {
-                (Text(name).fontWeight(.semibold) + Text("  ") + Text(text))
+                Text(name)
+                    .font(compact ? .footnote.weight(.semibold) : .subheadline.weight(.semibold))
+                Text(text)
                     .font(compact ? .footnote : .subheadline)
+                    .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(formatFeedTime(createdAt)).font(.caption2).foregroundStyle(Ink.muted)
+                Text(formatFeedTime(createdAt)).font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
         }
@@ -235,17 +245,16 @@ struct StoriesTray: View {
     @EnvironmentObject private var model: AppModel
     var onOpen: (String) -> Void
     @State private var photoItem: PhotosPickerItem?
-    @State private var videoItem: PhotosPickerItem?
 
     var body: some View {
         let selfId = model.state.profile?.directId
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: 16) {
                 if let selfId {
                     ForEach(storyOwners(model.state, selfId: selfId), id: \.self) { ownerId in
                         let stories = liveStories(model.state, ownerId: ownerId)
                         let selfStory = ownerId == selfId
-                        let name = selfStory ? "Your story" : model.state.contacts.first { $0.directId == ownerId }?.name ?? ownerId
+                        let name = selfStory ? "You" : model.state.contacts.first { $0.directId == ownerId }?.name ?? ownerId
                         let jpeg = selfStory ? model.state.profile?.avatarJpegBase64 : model.state.contacts.first { $0.directId == ownerId }?.avatarJpegBase64
                         let unseen = stories.contains { !$0.seen }
                         VStack(spacing: 6) {
@@ -253,68 +262,52 @@ struct StoriesTray: View {
                                 Button {
                                     if !stories.isEmpty { onOpen(ownerId) }
                                 } label: {
-                                    Avatar(name: name, jpeg: jpeg, size: 56)
-                                        .padding(4)
-                                        .overlay(Circle().stroke(stories.isEmpty ? Ink.line : (unseen ? Ink.accent : Ink.muted), lineWidth: 2.5))
+                                    Avatar(name: name, jpeg: jpeg, size: 58)
+                                        .padding(3)
+                                        .overlay {
+                                            Circle().strokeBorder(
+                                                stories.isEmpty ? Color(uiColor: .tertiarySystemFill) : (unseen ? Color.accentColor : Color(uiColor: .tertiaryLabel)),
+                                                lineWidth: 2
+                                            )
+                                        }
                                 }
                                 .buttonStyle(.plain)
                                 if selfStory {
                                     PhotosPicker(selection: $photoItem, matching: .any(of: [.images, .videos])) {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 11, weight: .bold))
-                                            .foregroundStyle(.white)
-                                            .frame(width: 20, height: 20)
-                                            .background(Ink.accent, in: Circle())
+                                        Image(systemName: "plus.circle.fill")
+                                            .symbolRenderingMode(.palette)
+                                            .foregroundStyle(.white, Color.accentColor)
+                                            .font(.system(size: 20))
+                                            .background(Circle().fill(Color(uiColor: .systemGroupedBackground)).padding(2))
                                     }
                                 }
                             }
                             Text(name)
                                 .font(.caption2)
-                                .foregroundStyle(Ink.text)
+                                .foregroundStyle(.primary)
                                 .lineLimit(1)
                                 .frame(width: 72)
                         }
                     }
-                    PhotosPicker(selection: $videoItem, matching: .videos) {
-                        VStack(spacing: 6) {
-                            Image(systemName: "video.fill")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(Ink.accent)
-                                .frame(width: 56, height: 56)
-                                .background(Ink.surface, in: Circle())
-                                .overlay(Circle().stroke(Ink.line))
-                            Text("Video")
-                                .font(.caption2)
-                                .foregroundStyle(Ink.muted)
-                                .frame(width: 72)
-                        }
-                    }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
         }
         .onChange(of: photoItem) { item in
-            Task { await publish(item, fallbackKind: "image") }
-        }
-        .onChange(of: videoItem) { item in
-            Task { await publish(item, fallbackKind: "video") }
+            Task { await publish(item) }
         }
     }
 
-    private func publish(_ item: PhotosPickerItem?, fallbackKind: String) async {
+    private func publish(_ item: PhotosPickerItem?) async {
         guard let item else { return }
         do {
-            let prepared = try await loadFeedMedia(item, fallbackKind: fallbackKind)
+            let prepared = try await loadFeedMedia(item, fallbackKind: "image")
             model.publishFeed(channel: FeedNotes.story, kind: prepared.kind, mime: prepared.mime, name: prepared.name, bytes: prepared.bytes)
         } catch {
             await MainActor.run { model.toast = (error as? PrepError)?.message ?? "That story was not added." }
         }
-        await MainActor.run {
-            photoItem = nil
-            videoItem = nil
-        }
+        await MainActor.run { photoItem = nil }
     }
 }
 
@@ -356,8 +349,12 @@ struct StoryViewer: View {
                     Text(name).font(.headline).foregroundStyle(.white)
                     Spacer()
                     Button(action: onClose) {
-                        Image(systemName: "xmark").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, Color.black.opacity(0.35))
                     }
+                    .accessibilityLabel("Close")
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -421,12 +418,15 @@ struct ProfilePosts: View {
             if showsHeading || canAdd {
                 HStack {
                     if showsHeading {
-                        Text("Photos and videos").font(.headline)
+                        Text("Photos & Videos").font(.title3.weight(.semibold))
                     }
                     Spacer()
                     if canAdd {
                         PhotosPicker(selection: $item, matching: .any(of: [.images, .videos])) {
-                            Image(systemName: "plus.app").foregroundStyle(Ink.accent)
+                            Image(systemName: "plus.circle.fill")
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(Color.accentColor)
+                                .font(.title3)
                         }
                     }
                 }
@@ -467,8 +467,9 @@ struct ProfilePosts: View {
                 await MainActor.run { item = nil }
             }
         }
-        .fullScreenCover(item: $viewing) { post in
+        .sheet(item: $viewing) { post in
             FeedLightbox(id: post.id, canDelete: canAdd)
+                .environmentObject(model)
         }
     }
 }
@@ -487,28 +488,32 @@ struct ContactProfileView: View {
         let about = selfProfile ? (model.state.profile?.status ?? "") : (contact?.about ?? "")
         let stories = liveStories(model.state, ownerId: peerId)
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 16) {
                     Button { if !stories.isEmpty { storyOpen = true } } label: {
                         Avatar(name: name, jpeg: jpeg, size: 72)
-                            .overlay(Circle().stroke(stories.isEmpty ? Color.clear : Ink.accent, lineWidth: 2.5))
+                            .overlay {
+                                Circle().strokeBorder(stories.isEmpty ? Color.clear : Color.accentColor, lineWidth: 2)
+                            }
                     }
                     .buttonStyle(.plain)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(name).font(.title3.bold())
-                        if !about.isEmpty { Text(about).foregroundStyle(Ink.muted) }
-                        Text("\(profilePosts(model.state, ownerId: peerId).count) posts").font(.subheadline).foregroundStyle(Ink.muted)
+                        Text(name).font(.title2.weight(.semibold))
+                        if !about.isEmpty { Text(about).foregroundStyle(.secondary) }
+                        Text(profilePosts(model.state, ownerId: peerId).count == 1 ? "1 Photo" : "\(profilePosts(model.state, ownerId: peerId).count) Photos")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 ProfilePosts(ownerId: peerId, canAdd: selfProfile)
             }
             .padding()
         }
-        .background(Ink.background)
+        .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .cancellationAction) {
                 Button("Close") { dismiss() }
             }
         }
@@ -529,14 +534,13 @@ struct FeedThumb: View {
             if let bytes, let image = UIImage(data: bytes) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
-                Ink.surface
+                Color(uiColor: .tertiarySystemFill)
             }
             if item.kind == "video" {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 40))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.black.opacity(0.45), in: Circle())
             }
         }
         .frame(maxWidth: .infinity)
@@ -554,70 +558,57 @@ struct FeedLightbox: View {
     @Environment(\.dismiss) private var dismiss
     @State private var bytes: Data?
     @State private var draft = ""
+    @State private var confirmDelete = false
 
     var body: some View {
         let item = model.state.feed.first { $0.id == id }
-        VStack(spacing: 0) {
-            ZStack(alignment: .top) {
-                Color.black
-                if let item, let bytes, item.kind != "video", let image = UIImage(data: bytes) {
-                    Image(uiImage: image).resizable().scaledToFit()
-                } else if let item, let bytes, item.kind == "video" {
-                    StoryVideo(data: bytes, name: item.name)
-                } else {
-                    ProgressView().tint(.white)
-                }
-                HStack {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark").foregroundStyle(.white).padding()
-                    }
-                    Spacer()
-                    if canDelete, item != nil {
-                        Button {
-                            model.deleteFeed(id)
-                            dismiss()
-                        } label: {
-                            Image(systemName: "trash").foregroundStyle(.white).padding()
-                        }
+        let name = item.map { feedOwnerName(model.state, $0.ownerId) } ?? "Post"
+        NavigationStack {
+            VStack(spacing: 0) {
+                ZStack {
+                    Color(uiColor: .secondarySystemFill)
+                    if let item, let bytes, item.kind != "video", let image = UIImage(data: bytes) {
+                        Image(uiImage: image).resizable().scaledToFit()
+                    } else if let item, let bytes, item.kind == "video" {
+                        StoryVideo(data: bytes, name: item.name)
+                    } else {
+                        ProgressView()
                     }
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 240)
-            .clipped()
-            if let item {
-                let name = feedOwnerName(model.state, item.ownerId)
-                VStack(alignment: .leading, spacing: 0) {
-                    Capsule().fill(Ink.line).frame(width: 36, height: 4).frame(maxWidth: .infinity).padding(.top, 8)
-                    HStack(spacing: 10) {
-                        Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 36)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(name).font(.subheadline.weight(.semibold))
-                            Text(formatFeedTime(item.createdAt)).font(.caption).foregroundStyle(Ink.muted)
+                .frame(maxWidth: .infinity)
+                .frame(height: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                if let item {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 36)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(name).font(.headline)
+                                Text(formatFeedTime(item.createdAt)).font(.footnote).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
                         }
-                        Spacer()
+                        FeedActions(item: item)
+                        if let summary = likeSummary(model.state, item) {
+                            Text(summary).font(.subheadline.weight(.semibold))
+                        }
+                        if !item.caption.isEmpty {
+                            Text(item.caption).font(.body)
+                        }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 12)
-                    FeedActions(item: item)
-                        .padding(.horizontal, 10)
-                    if let summary = likeSummary(model.state, item) {
-                        Text(summary).font(.subheadline.weight(.semibold)).padding(.horizontal, 14)
-                    }
-                    if !item.caption.isEmpty {
-                        (Text(name).fontWeight(.semibold) + Text("  ") + Text(item.caption))
-                            .font(.subheadline)
-                            .padding(.horizontal, 14)
-                            .padding(.top, 4)
-                    }
-                    Divider().padding(.top, 10)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
+                    Divider()
                     ScrollViewReader { proxy in
                         ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 12) {
+                            LazyVStack(alignment: .leading, spacing: 14) {
                                 if item.comments.isEmpty {
-                                    Text("No comments yet. Say something.")
+                                    Text("No Comments")
                                         .font(.subheadline)
-                                        .foregroundStyle(Ink.muted)
+                                        .foregroundStyle(.secondary)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 } else {
                                     ForEach(item.comments) { comment in
@@ -626,8 +617,8 @@ struct FeedLightbox: View {
                                     }
                                 }
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
@@ -637,39 +628,71 @@ struct FeedLightbox: View {
                             }
                         }
                     }
+                } else {
+                    Spacer()
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .background(Ink.surface)
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    VStack(spacing: 0) {
-                        Divider()
-                        HStack(alignment: .bottom, spacing: 10) {
-                            Avatar(name: model.state.profile?.name ?? "You", jpeg: model.state.profile?.avatarJpegBase64, size: 32)
-                            TextField("Add a comment…", text: $draft, axis: .vertical)
-                                .lineLimit(1...4)
-                                .textInputAutocapitalization(.sentences)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
-                                .background(Ink.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Ink.line))
-                            Button("Post") {
-                                let body = draft
-                                draft = ""
-                                model.commentFeed(item.id, body)
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            .tint(Ink.accent)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
+            }
+            .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+            .navigationTitle(name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                if canDelete, item != nil {
+                    ToolbarItem(placement: .destructiveAction) {
+                        Button("Delete", role: .destructive) { confirmDelete = true }
                     }
-                    .background(Ink.surface)
+                }
+            }
+            .confirmationDialog("Delete this post?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete Post", role: .destructive) {
+                    model.deleteFeed(id)
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("It will be removed from your profile and from people who already received it.")
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let item {
+                    commentComposer(item.id)
                 }
             }
         }
-        .background(Color.black.ignoresSafeArea())
+        .presentationDragIndicator(.visible)
         .onAppear { model.loadFeed(id) { bytes = $0 } }
+    }
+
+    @ViewBuilder
+    private func commentComposer(_ postId: String) -> some View {
+        let ready = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        VStack(spacing: 0) {
+            Divider()
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Add a comment", text: $draft, axis: .vertical)
+                    .lineLimit(1...4)
+                    .textInputAutocapitalization(.sentences)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                Button {
+                    let body = draft
+                    draft = ""
+                    model.commentFeed(postId, body)
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 32))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, ready ? Color.accentColor : Color(uiColor: .tertiaryLabel))
+                }
+                .disabled(!ready)
+                .accessibilityLabel("Send")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(.bar)
     }
 }
 
