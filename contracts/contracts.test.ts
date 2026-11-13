@@ -370,7 +370,7 @@ describe('signaling contract', () => {
     };
 
     function call(method: string, url: string, body?: object, headers: Record<string, string> = {}) {
-      return new Promise<{ status: number; type: string; body: string }>((resolve) => {
+      return new Promise<{ status: number; type: string; body: string; headers: Record<string, string> }>((resolve) => {
         let status = 0;
         const outHeaders: Record<string, string> = {};
         const request = { method, url, headers, body: body === undefined ? '' : JSON.stringify(body) };
@@ -383,7 +383,12 @@ describe('signaling contract', () => {
             for (const [name, value] of Object.entries(next || {})) outHeaders[name.toLowerCase()] = value;
           },
           end(payload?: string) {
-            resolve({ status, type: outHeaders['content-type'] || '', body: String(payload || '') });
+            resolve({
+              status,
+              type: outHeaders['content-type'] || '',
+              body: String(payload || ''),
+              headers: outHeaders,
+            });
           },
         };
         void handler(request, response);
@@ -403,6 +408,61 @@ describe('signaling contract', () => {
 
     const forwarded = await call('GET', '/api', undefined, { 'x-forwarded-uri': '/health' });
     expect(JSON.parse(forwarded.body)).toEqual({ ok: true, service: 'direct-signaling', contract: 1 });
+
+    const created = JSON.parse(posted.body) as { token?: string; session?: string };
+    expect(created.token).toEqual(expect.any(String));
+    expect(posted.headers['access-control-allow-origin']).toBeUndefined();
+    const stolen = await call('POST', '/api', { session: created.session, frames: [], waitMs: 0 });
+    expect(stolen.status).toBe(401);
+
+    const cors = await call('OPTIONS', '/api', undefined, { origin: 'https://app.example' });
+    expect(cors.status).toBe(204);
+    expect(cors.headers['access-control-allow-origin']).toBe('https://app.example');
+    const corsPost = await call('POST', '/signal', { frames: [], waitMs: 0 }, { origin: 'https://app.example' });
+    expect(JSON.parse(corsPost.body).frames[0].kind).toBe('challenge');
+    expect(corsPost.headers['access-control-allow-origin']).toBe('https://app.example');
+    expect(corsPost.headers['access-control-allow-origin']).not.toBe('*');
+  });
+
+  test('the HTTP signaling route rate-limits new sessions from one address', async () => {
+    const { handler } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/httpHandler.cjs'),
+    ) as {
+      handler: (
+        request: { method?: string; url?: string; headers?: Record<string, string>; body?: string },
+        response: {
+          setHeader(name: string, value: string): void;
+          writeHead(status: number, headers?: Record<string, string>): void;
+          end(body?: string): void;
+        },
+      ) => Promise<void>;
+    };
+    function call() {
+      return new Promise<number>((resolve) => {
+        const response = {
+          setHeader() {},
+          writeHead(status: number) {
+            this.status = status;
+          },
+          status: 0,
+          end() {
+            resolve(this.status);
+          },
+        };
+        void handler(
+          {
+            method: 'POST',
+            url: '/api',
+            headers: { 'x-forwarded-for': '198.51.100.88' },
+            body: JSON.stringify({ frames: [], waitMs: 0 }),
+          },
+          response,
+        );
+      });
+    }
+    let last = 200;
+    for (let i = 0; i < 12; i += 1) last = await call();
+    expect(last).toBe(429);
   });
 
   test('HTTP long-poll signaling finds another phone by DIRECT ID', async () => {
@@ -411,19 +471,21 @@ describe('signaling contract', () => {
     ) as {
       createMemoryStore: () => object;
       exchange: (
-        body: { session?: string; frames?: unknown[]; waitMs?: number },
+        body: { session?: string; token?: string; frames?: unknown[]; waitMs?: number },
         options?: { store?: object },
-      ) => Promise<{ session: string; nonce: string; frames: { kind?: string; nonce?: string; present?: boolean; bundle?: string | null }[] }>;
+      ) => Promise<{ session: string; token?: string; nonce: string; frames: { kind?: string; nonce?: string; present?: boolean; bundle?: string | null }[] }>;
     };
     const store = createMemoryStore();
     const adaSession = await exchange({ frames: [], waitMs: 0 }, { store });
     const boSession = await exchange({ frames: [], waitMs: 0 }, { store });
     expect(adaSession.frames[0]?.kind).toBe('challenge');
     expect(boSession.frames[0]?.kind).toBe('challenge');
-    await exchange({ session: adaSession.session, frames: [signedHello('ada', adaSession.nonce)], waitMs: 0 }, { store });
-    await exchange({ session: boSession.session, frames: [signedHello('bo', boSession.nonce)], waitMs: 0 }, { store });
+    expect(adaSession.token).toEqual(expect.any(String));
+    await exchange({ session: adaSession.session, token: adaSession.token, frames: [signedHello('ada', adaSession.nonce)], waitMs: 0 }, { store });
+    await exchange({ session: boSession.session, token: boSession.token, frames: [signedHello('bo', boSession.nonce)], waitMs: 0 }, { store });
     const lookup = await exchange({
       session: adaSession.session,
+      token: adaSession.token,
       frames: [{ kind: 'lookup', requestId: 'req-http', directId: bo }],
       waitMs: 0,
     }, { store });
@@ -438,23 +500,25 @@ describe('signaling contract', () => {
     ) as {
       createMemoryStore: () => object;
       exchange: (
-        body: { session?: string; frames?: unknown[]; waitMs?: number },
+        body: { session?: string; token?: string; frames?: unknown[]; waitMs?: number },
         options?: { store?: object },
-      ) => Promise<{ session: string; nonce: string; frames: { kind?: string; people?: { directId: string }[] }[] }>;
+      ) => Promise<{ session: string; token?: string; nonce: string; frames: { kind?: string; people?: { directId: string }[] }[] }>;
     };
     const store = createMemoryStore();
     const adaSession = await exchange({ frames: [], waitMs: 0 }, { store });
     const boSession = await exchange({ frames: [], waitMs: 0 }, { store });
-    await exchange({ session: adaSession.session, frames: [signedHello('ada', adaSession.nonce, true)], waitMs: 0 }, { store });
-    await exchange({ session: boSession.session, frames: [signedHello('bo', boSession.nonce)], waitMs: 0 }, { store });
+    await exchange({ session: adaSession.session, token: adaSession.token, frames: [signedHello('ada', adaSession.nonce, true)], waitMs: 0 }, { store });
+    await exchange({ session: boSession.session, token: boSession.token, frames: [signedHello('bo', boSession.nonce)], waitMs: 0 }, { store });
     const hidden = await exchange({
       session: adaSession.session,
+      token: adaSession.token,
       frames: [{ kind: 'suggest', requestId: 'sug-http-1' }],
       waitMs: 0,
     }, { store });
     expect(hidden.frames.find((frame) => frame.kind === 'suggestions')?.people).toEqual([]);
     const listed = await exchange({
       session: boSession.session,
+      token: boSession.token,
       frames: [{ kind: 'suggest', requestId: 'sug-http-2' }],
       waitMs: 0,
     }, { store });
@@ -464,6 +528,26 @@ describe('signaling contract', () => {
       bundle: identityVectors.ada.bundle,
       online: true,
     }]);
+  });
+
+  test('an HTTP session id cannot read another phone\'s inbox without the creation token', async () => {
+    const { exchange, createMemoryStore, SignalingAuthError } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/httpHub.cjs'),
+    ) as {
+      createMemoryStore: () => object;
+      SignalingAuthError: new () => Error;
+      exchange: (
+        body: { session?: string; token?: string; frames?: unknown[]; waitMs?: number },
+        options?: { store?: object },
+      ) => Promise<{ session: string; token?: string; nonce: string; frames: { kind?: string }[] }>;
+    };
+    const store = createMemoryStore();
+    const adaSession = await exchange({ frames: [], waitMs: 0 }, { store });
+    await exchange({ session: adaSession.session, token: adaSession.token, frames: [signedHello('ada', adaSession.nonce)], waitMs: 0 }, { store });
+    const again = await exchange({ session: adaSession.session, token: adaSession.token, frames: [], waitMs: 0 }, { store });
+    expect(again.token).toBeUndefined();
+    await expect(exchange({ session: adaSession.session, frames: [], waitMs: 0 }, { store })).rejects.toBeInstanceOf(SignalingAuthError);
+    await expect(exchange({ session: adaSession.session, token: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', frames: [], waitMs: 0 }, { store })).rejects.toBeInstanceOf(SignalingAuthError);
   });
 
   test('suggested contacts list only live phones that opted in', () => {

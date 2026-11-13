@@ -64,6 +64,7 @@ private class HttpSignalConnection(
 ) : WebSocketConnection {
     private val closed = AtomicBoolean(false)
     private val session = AtomicReference<String?>(null)
+    private val token = AtomicReference<String?>(null)
     private val outgoing = ConcurrentLinkedQueue<String>()
     private val wake = Semaphore(0)
 
@@ -80,10 +81,14 @@ private class HttpSignalConnection(
                             for (frame in frames) array.put(JSONObject(frame))
                         })
                     session.get()?.let { body.put("session", it) }
+                    token.get()?.let { body.put("token", it) }
                     val request = Request.Builder()
                         .url(endpoint)
                         .post(body.toString().toRequestBody(JSON))
-                        .apply { session.get()?.let { header("X-Direct-Session", it) } }
+                        .apply {
+                            session.get()?.let { header("X-Direct-Session", it) }
+                            token.get()?.let { header("X-Direct-Token", it) }
+                        }
                         .build()
                     client.newCall(request).execute().use { response ->
                         if (!response.isSuccessful) {
@@ -92,6 +97,7 @@ private class HttpSignalConnection(
                         }
                         val parsed = JSONObject(response.body?.string().orEmpty())
                         session.set(parsed.optString("session").ifEmpty { session.get() })
+                        parsed.optString("token").takeIf { it.isNotEmpty() }?.let { token.set(it) }
                         val inbound = parsed.optJSONArray("frames") ?: JSONArray()
                         for (i in 0 until inbound.length()) {
                             events.onMessage(inbound.getJSONObject(i).toString())

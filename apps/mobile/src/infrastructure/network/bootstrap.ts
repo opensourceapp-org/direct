@@ -231,6 +231,7 @@ export class DirectBootstrap implements SignalingClient {
 class HttpSignalSocket implements SignalSocket {
   readyState = 0;
   private session = '';
+  private token = '';
   private outgoing: string[] = [];
   private stopped = false;
 
@@ -261,16 +262,19 @@ class HttpSignalSocket implements SignalSocket {
           headers: {
             'content-type': 'application/json',
             ...(this.session ? { 'x-direct-session': this.session } : {}),
+            ...(this.token ? { 'x-direct-token': this.token } : {}),
           },
           body: JSON.stringify({
             session: this.session || undefined,
+            token: this.token || undefined,
             waitMs: frames.length === 0 ? 2_000 : 0,
             frames: frames.map((frame) => JSON.parse(frame) as unknown),
           }),
         });
         if (!response.ok) throw new Error('The bootstrap closed the connection.');
-        const body = await response.json() as { session?: string; frames?: unknown[] };
+        const body = await response.json() as { session?: string; token?: string; frames?: unknown[] };
         if (typeof body.session === 'string') this.session = body.session;
+        if (typeof body.token === 'string' && body.token) this.token = body.token;
         for (const frame of body.frames ?? []) this.events.onMessage(JSON.stringify(frame));
       } catch {
         this.readyState = 3;

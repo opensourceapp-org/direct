@@ -1,9 +1,15 @@
 const { readFileSync, existsSync } = require('node:fs');
+const { isIP } = require('node:net');
 const { join } = require('node:path');
-const { exchange } = require('./httpHub.cjs');
+const { exchange, SignalingAuthError } = require('./httpHub.cjs');
 
 const PAGE = join(__dirname, 'index.html');
 const MAX_BODY = 80 * 1024;
+const POST_WINDOW_MS = 10_000;
+const MAX_POSTS_PER_WINDOW = 40;
+const MAX_NEW_SESSIONS_PER_WINDOW = 10;
+
+const postHits = new Map();
 
 function readBody(request) {
   if (typeof request.body === 'string') return Promise.resolve(request.body);
@@ -28,26 +34,86 @@ function readBody(request) {
   });
 }
 
-function sendJson(response, status, body) {
+function corsHeaders(request) {
+  const headers = {
+    'access-control-allow-headers': 'content-type, x-direct-session, x-direct-token',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    vary: 'origin',
+  };
+  const origin = headerValue(request, 'origin');
+  if (!origin) return headers;
+  try {
+    const parsed = new URL(origin);
+    const host = parsed.hostname.toLowerCase();
+    const localHttp = parsed.protocol === 'http:' && (host === 'localhost' || host === '127.0.0.1');
+    if (parsed.protocol === 'https:' || localHttp) headers['access-control-allow-origin'] = origin;
+  } catch {
+    // Ignore malformed Origin. Native phones send none.
+  }
+  return headers;
+}
+
+function sendJson(request, response, status, body) {
   const payload = JSON.stringify(body);
   response.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
-    'access-control-allow-origin': '*',
-    'access-control-allow-headers': 'content-type, x-direct-session',
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    ...corsHeaders(request),
   });
   response.end(payload);
 }
 
-function handleOptions(response) {
+function handleOptions(request, response) {
   response.writeHead(204, {
-    'access-control-allow-origin': '*',
-    'access-control-allow-headers': 'content-type, x-direct-session',
-    'access-control-allow-methods': 'GET, POST, OPTIONS',
     'cache-control': 'no-store',
+    ...corsHeaders(request),
   });
   response.end();
+}
+
+function normalizeIp(address) {
+  let host = String(address || '').trim().toLowerCase();
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  if (host.startsWith('::ffff:') && isIP(host.slice(7)) === 4) return host.slice(7);
+  return host;
+}
+
+function isLoopback(address) {
+  const host = normalizeIp(address);
+  if (host === '::1') return true;
+  if (isIP(host) === 4) return host.split('.')[0] === '127';
+  return false;
+}
+
+function requestIp(request) {
+  const peer = normalizeIp(request.socket && request.socket.remoteAddress);
+  const forwarded = String(headerValue(request, 'x-forwarded-for') || '')
+    .split(',')
+    .map((part) => normalizeIp(part))
+    .filter((part) => isIP(part) === 4 || isIP(part) === 6);
+  if (peer && !isLoopback(peer)) return peer;
+  for (let i = forwarded.length - 1; i >= 0; i -= 1) {
+    if (!isLoopback(forwarded[i])) return forwarded[i];
+  }
+  if (forwarded[0]) return forwarded[0];
+  return peer || 'unknown';
+}
+
+function tooManyPosts(ip, isNewSession) {
+  const at = Date.now();
+  let row = postHits.get(ip);
+  if (!row || at - row.start >= POST_WINDOW_MS) {
+    row = { start: at, posts: 0, created: 0 };
+    postHits.set(ip, row);
+  }
+  row.posts += 1;
+  if (isNewSession) row.created += 1;
+  if (postHits.size > 10_000) {
+    for (const [key, value] of postHits) {
+      if (at - value.start >= POST_WINDOW_MS) postHits.delete(key);
+    }
+  }
+  return row.posts > MAX_POSTS_PER_WINDOW || row.created > MAX_NEW_SESSIONS_PER_WINDOW;
 }
 
 function headerValue(request, name) {
@@ -100,12 +166,12 @@ async function handleHttp(request, response) {
   const method = String(request.method || 'GET').toUpperCase();
 
   if (method === 'OPTIONS') {
-    handleOptions(response);
+    handleOptions(request, response);
     return true;
   }
 
   if (method === 'GET' && isHealthPath(url)) {
-    sendJson(response, 200, { ok: true, service: 'direct-signaling', contract: 1 });
+    sendJson(request, response, 200, { ok: true, service: 'direct-signaling', contract: 1 });
     return true;
   }
 
@@ -116,19 +182,32 @@ async function handleHttp(request, response) {
       const raw = await readBody(request);
       parsed = raw ? JSON.parse(raw) : {};
     } catch {
-      sendJson(response, 400, { error: 'Expected a JSON signaling body.' });
+      sendJson(request, response, 400, { error: 'Expected a JSON signaling body.' });
       return true;
     }
     const headers = request.headers || {};
     if (parsed.session == null && (headers['x-direct-session'] || headers['X-Direct-Session'])) {
       parsed.session = String(headers['x-direct-session'] || headers['X-Direct-Session']);
     }
+    if (parsed.token == null && (headers['x-direct-token'] || headers['X-Direct-Token'])) {
+      parsed.token = String(headers['x-direct-token'] || headers['X-Direct-Token']);
+    }
+    const ip = requestIp(request);
+    const isNewSession = !parsed.session;
+    if (tooManyPosts(ip, isNewSession)) {
+      sendJson(request, response, 429, { error: 'Too many signaling requests. Try again shortly.' });
+      return true;
+    }
     try {
       const result = await exchange(parsed);
       response.setHeader('x-direct-session', result.session);
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
-      sendJson(response, 500, { error: 'Signaling is temporarily unavailable.' });
+      if (error instanceof SignalingAuthError || error.status === 401) {
+        sendJson(request, response, 401, { error: 'That signaling session is not valid.' });
+        return true;
+      }
+      sendJson(request, response, 500, { error: 'Signaling is temporarily unavailable.' });
       console.error(error && error.message ? error.message : error);
     }
     return true;
@@ -145,7 +224,7 @@ async function handleHttp(request, response) {
   }
 
   if (method === 'GET') {
-    sendJson(response, 200, { ok: true, service: 'direct-signaling', contract: 1 });
+    sendJson(request, response, 200, { ok: true, service: 'direct-signaling', contract: 1 });
     return true;
   }
 

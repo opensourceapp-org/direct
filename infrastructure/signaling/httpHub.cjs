@@ -1,4 +1,4 @@
-const { DIRECT_ID, MAX_BUNDLE, verifyHello, newNonce } = require('./verify.cjs');
+const { DIRECT_ID, MAX_BUNDLE, verifyHello, newNonce, tokenMatches } = require('./verify.cjs');
 const { getStore, createMemoryStore } = require('./store.cjs');
 
 const MAX_SIGNAL = 64 * 1024;
@@ -6,6 +6,14 @@ const MAX_WATCH = 256;
 const MAX_HELLOS = 8;
 const MAX_SUGGEST = 24;
 const MAX_WAIT_MS = 8_000;
+const MAX_FRAMES = 40;
+
+class SignalingAuthError extends Error {
+  constructor() {
+    super('unauthorized');
+    this.status = 401;
+  }
+}
 
 function displayName(bundle) {
   try {
@@ -36,6 +44,8 @@ async function announce(store, directId, online) {
 }
 
 async function handleFrames(store, session, frames) {
+  // lookup, watch, suggest, and WebRTC forwarding require a verified hello
+  // on this session. The session token is checked in exchange() before this.
   const replies = [];
   if (!session.nonce) {
     session.nonce = newNonce();
@@ -66,6 +76,7 @@ async function handleFrames(store, session, frames) {
     }
 
     if (message.kind === 'lookup') {
+      if (!session.directId) continue;
       const requestId = message.requestId;
       const directId = message.directId;
       if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 80) continue;
@@ -82,6 +93,7 @@ async function handleFrames(store, session, frames) {
     }
 
     if (message.kind === 'watch') {
+      if (!session.directId) continue;
       if (!Array.isArray(message.ids)) continue;
       session.watch = message.ids.filter((id) => typeof id === 'string' && DIRECT_ID.test(id)).slice(0, MAX_WATCH);
       for (const id of session.watch) {
@@ -92,6 +104,7 @@ async function handleFrames(store, session, frames) {
     }
 
     if (message.kind === 'suggest') {
+      if (!session.directId) continue;
       const requestId = message.requestId;
       if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 80) continue;
       const people = [];
@@ -131,19 +144,33 @@ async function handleFrames(store, session, frames) {
 async function exchange(body, options = {}) {
   const store = options.store || (await getStore());
   await store.sweep();
-  const frames = Array.isArray(body.frames) ? body.frames : [];
-  let session = typeof body.session === 'string' ? await store.loadSession(body.session) : null;
-  if (!session) session = await store.createSession();
+  const frames = Array.isArray(body.frames) ? body.frames.slice(0, MAX_FRAMES) : [];
+  let session;
+  let issuedToken;
+  if (typeof body.session === 'string' && body.session) {
+    session = await store.loadSession(body.session);
+    // The public session id is a locator, not a credential. Inbox frames
+    // (offers, answers, ICE) are only released when the creation token matches.
+    if (!session || !tokenMatches(session.tokenHash, body.token)) {
+      throw new SignalingAuthError();
+    }
+  } else {
+    const created = await store.createSession();
+    session = created.session;
+    issuedToken = created.token;
+  }
   const immediate = await handleFrames(store, session, frames);
   for (const frame of immediate) await enqueue(store, session.id, frame);
-  const waitMs = Math.max(0, Math.min(MAX_WAIT_MS, Number(body.waitMs) || 0));
+  const waitMs = session.directId
+    ? Math.max(0, Math.min(MAX_WAIT_MS, Number(body.waitMs) || 0))
+    : 0;
   let outbound = await store.pull(session.id);
   const deadline = Date.now() + waitMs;
   while (outbound.length === 0 && Date.now() < deadline) {
     await sleep(Math.min(250, deadline - Date.now()));
     outbound = await store.pull(session.id);
   }
-  return {
+  const result = {
     session: session.id,
     nonce: session.nonce,
     frames: outbound.map((raw) => {
@@ -154,12 +181,16 @@ async function exchange(body, options = {}) {
       }
     }).filter(Boolean),
   };
+  if (issuedToken) result.token = issuedToken;
+  return result;
 }
 
 module.exports = {
   exchange,
   getStore,
   createMemoryStore,
+  SignalingAuthError,
   MAX_BUNDLE,
   MAX_WAIT_MS,
+  MAX_FRAMES,
 };
