@@ -74,7 +74,7 @@ private val CallGreen = Color(0xFF1E8E3E)
 private val CallRed = Color(0xFFD93025)
 
 @Composable
-fun CallActions(node: DirectNode, peerId: String, onError: (String) -> Unit) {
+internal fun rememberPlaceCall(node: DirectNode, peerId: String, onError: (String) -> Unit): (Boolean) -> Unit {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val context = LocalContext.current
     val wantVideo = remember { booleanArrayOf(false) }
@@ -102,7 +102,7 @@ fun CallActions(node: DirectNode, peerId: String, onError: (String) -> Unit) {
             }
         }
     }
-    fun start(video: Boolean) {
+    return { video: Boolean ->
         wantVideo[0] = video
         val needed = buildList {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -124,6 +124,11 @@ fun CallActions(node: DirectNode, peerId: String, onError: (String) -> Unit) {
             permissions.launch(needed.toTypedArray())
         }
     }
+}
+
+@Composable
+fun CallActions(node: DirectNode, peerId: String, onError: (String) -> Unit) {
+    val start = rememberPlaceCall(node, peerId, onError)
     Row {
         CallHeaderButton(Icons.Filled.Call, "Audio call") { start(false) }
         CallHeaderButton(Icons.Filled.Videocam, "Video call") { start(true) }

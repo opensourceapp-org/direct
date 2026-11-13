@@ -658,6 +658,7 @@ struct ContactsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var input = ""
     @State private var scanning = false
+    @State private var profilePeer: String?
 
     var body: some View {
         List {
@@ -793,21 +794,26 @@ struct ContactsView: View {
             .listRowBackground(Ink.surface)
             Section("Contacts") {
                 ForEach(model.state.contacts) { contact in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Avatar(name: contact.name, jpeg: contact.avatarJpegBase64)
-                            StatusDot(color: model.state.online.contains(contact.directId) ? Ink.success : Ink.muted)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(contact.name).font(.headline)
-                                if !contact.about.isEmpty { Text(contact.about).font(.caption).foregroundStyle(Ink.muted) }
+                    Button { profilePeer = contact.directId } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Avatar(name: contact.name, jpeg: contact.avatarJpegBase64)
+                                StatusDot(color: model.state.online.contains(contact.directId) ? Ink.success : Ink.muted)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(contact.name).font(.headline).foregroundStyle(Ink.text)
+                                    if !contact.about.isEmpty { Text(contact.about).font(.caption).foregroundStyle(Ink.muted) }
+                                }
+                                if contact.verified { Image(systemName: "checkmark.seal.fill").foregroundStyle(Ink.success) }
+                                if contact.blocked { Text("Blocked").font(.caption).foregroundStyle(Ink.danger) }
+                                if !contact.accepted { Text("Request").font(.caption).foregroundStyle(Ink.warning) }
                             }
-                            if contact.verified { Image(systemName: "checkmark.seal.fill").foregroundStyle(Ink.success) }
-                            if contact.blocked { Text("Blocked").font(.caption).foregroundStyle(Ink.danger) }
-                            if !contact.accepted { Text("Request").font(.caption).foregroundStyle(Ink.warning) }
+                            Text(contact.directId).font(.system(.caption, design: .monospaced)).foregroundStyle(Ink.muted)
+                            Text("Safety number \(contact.fingerprint)").font(.system(.caption2, design: .monospaced)).foregroundStyle(Ink.muted)
                         }
-                        Text(contact.directId).font(.system(.caption, design: .monospaced)).foregroundStyle(Ink.muted)
-                        Text("Safety number \(contact.fingerprint)").font(.system(.caption2, design: .monospaced)).foregroundStyle(Ink.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .swipeActions {
                         Button("Remove", role: .destructive) { model.remove(contact.directId) }
                         Button(contact.verified ? "Unverify" : "Verified") { model.setVerified(contact.directId, !contact.verified) }.tint(Ink.success)
@@ -832,6 +838,17 @@ struct ContactsView: View {
                 .navigationTitle("Scan QR")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { scanning = false } } }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { profilePeer != nil },
+            set: { if !$0 { profilePeer = nil } }
+        )) {
+            if let profilePeer {
+                NavigationStack {
+                    ContactProfileView(peerId: profilePeer)
+                        .environmentObject(model)
+                }
             }
         }
     }

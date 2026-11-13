@@ -37,10 +37,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DynamicFeed
@@ -71,6 +74,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -503,6 +507,7 @@ internal fun ContactProfileScreen(
     state: NodeState,
     peerId: String,
     back: () -> Unit,
+    onMessage: () -> Unit = {},
     onOpenMedia: (String) -> Unit,
 ) {
     val contact = state.contacts.firstOrNull { it.directId == peerId }
@@ -511,8 +516,10 @@ internal fun ContactProfileScreen(
     val jpeg = if (self) state.profile?.avatarJpegBase64 else contact?.avatarJpegBase64
     val about = if (self) state.profile?.status.orEmpty() else contact?.about.orEmpty()
     val stories = liveStories(state, peerId)
+    val canCall = !self && contact?.accepted == true && contact.blocked != true
     var storyOpen by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val placeCall = rememberPlaceCall(node, peerId) { error = it }
     BackHandler(onBack = back)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -536,10 +543,43 @@ internal fun ContactProfileScreen(
                 Text("${profilePosts(state, peerId).size} posts", color = Ink.muted, fontSize = 13.sp)
             }
         }
+        if (!self) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.Top,
+            ) {
+                ProfileAction(Icons.Outlined.Chat, "Message", onMessage)
+                if (canCall) {
+                    ProfileAction(Icons.Filled.Call, "Call") { placeCall(false) }
+                    ProfileAction(Icons.Filled.Videocam, "Video") { placeCall(true) }
+                }
+            }
+        }
         error?.let { Text(it, color = Ink.danger, modifier = Modifier.padding(horizontal = 20.dp)) }
         ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenMedia = onOpenMedia)
     }
     if (storyOpen) StoryViewer(node, state, peerId) { storyOpen = false }
+}
+
+@Composable
+private fun ProfileAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            Modifier.size(52.dp).clip(CircleShape).background(Ink.accentSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, label, tint = Ink.accent, modifier = Modifier.size(22.dp))
+        }
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
 }
 
 @Composable

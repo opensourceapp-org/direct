@@ -744,6 +744,25 @@ struct ContactProfileView: View {
                     Text(postCount == 1 ? "1 post" : "\(postCount) posts")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    if !selfProfile {
+                        HStack(spacing: 12) {
+                            profileAction("Message", "bubble.left.fill") {
+                                dismiss()
+                                model.openChat(peerId)
+                            }
+                            if contact?.accepted == true, contact?.blocked != true {
+                                profileAction("Call", "phone.fill") {
+                                    dismiss()
+                                    model.placeCall(peerId, video: false)
+                                }
+                                profileAction("Video", "video.fill") {
+                                    dismiss()
+                                    model.placeCall(peerId, video: true)
+                                }
+                            }
+                        }
+                        .padding(.top, 10)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
@@ -764,6 +783,25 @@ struct ContactProfileView: View {
             StoryViewer(ownerId: peerId) { storyOpen = false }
                 .environmentObject(model)
         }
+    }
+
+    private func profileAction(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Ink.accent)
+                    .frame(width: 52, height: 52)
+                    .background(Ink.accent.opacity(0.14), in: Circle())
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Ink.text)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 
