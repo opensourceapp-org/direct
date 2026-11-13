@@ -492,6 +492,15 @@ public final class DeliveryEngine {
         try store.save()
     }
 
+    /// Keeps a post on this phone. Nothing is sent to contacts.
+    public func saveFeed(_ id: String) throws {
+        guard identity()?.0 != nil else { throw DeliveryRejected(message: "Create an identity first.") }
+        guard let item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }
+        guard item.channel == FeedNotes.post else { throw DeliveryRejected(message: "Only posts can be saved.") }
+        store.toggleSaved(id)
+        try store.save()
+    }
+
     public func likeFeed(_ id: String) throws {
         guard let keys = identity()?.0 else { throw DeliveryRejected(message: "Create an identity first.") }
         guard let item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }

@@ -87,6 +87,7 @@ data class NodeState(
     val storageError: String? = null,
     val call: CallSnapshot? = null,
     val feed: List<FeedItem> = emptyList(),
+    val savedPosts: List<String> = emptyList(),
 )
 
 /**
@@ -462,6 +463,15 @@ class DirectNode(
         item?.mediaFile?.let { name -> mediaDir?.let { File(it, name).delete() } }
         publish()
         wake.trySend(Unit)
+    }
+
+    suspend fun saveFeed(id: String) = onNode {
+        try {
+            requireEngine().saveFeed(id)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "That post was not saved.")
+        }
+        publish()
     }
 
     suspend fun likeFeed(id: String) = onNode {
@@ -849,6 +859,7 @@ class DirectNode(
             networkAvailable = networkAvailable,
             call = board.snapshot,
             feed = store.feed().sortedByDescending { it.createdAt },
+            savedPosts = store.savedPosts(),
         )
     }
 

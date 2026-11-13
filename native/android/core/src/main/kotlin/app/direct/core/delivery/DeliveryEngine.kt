@@ -442,6 +442,15 @@ class DeliveryEngine(
         store.save()
     }
 
+    /** Keeps a post on this phone. Nothing is sent to contacts. */
+    fun saveFeed(id: String) {
+        identity()?.first ?: throw DeliveryRejected("Create an identity first.")
+        val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")
+        if (item.channel != FeedNotes.POST) throw DeliveryRejected("Only posts can be saved.")
+        store.toggleSaved(id)
+        store.save()
+    }
+
     fun likeFeed(id: String) {
         val keys = identity()?.first ?: throw DeliveryRejected("Create an identity first.")
         val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")

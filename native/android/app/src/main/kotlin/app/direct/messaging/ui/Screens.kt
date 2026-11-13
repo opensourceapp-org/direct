@@ -307,7 +307,7 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
                 )
                 Tab.PROFILE -> IdentityScreen(node, state, onHowItWorks) { id ->
                     mediaId = id
-                    mediaCanDelete = true
+                    mediaCanDelete = state.feed.firstOrNull { it.id == id }?.ownerId == state.profile?.directId
                 }
             }
         }
@@ -866,6 +866,7 @@ private fun ProfileHomeScreen(
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
         ProfilePosts(node, state, profile.directId, canAdd = true, showHeading = false, onError = { error = it }, onOpenMedia = onOpenMedia)
+        SavedPosts(node, state, onOpenMedia)
     }
 }
 

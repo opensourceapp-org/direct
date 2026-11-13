@@ -832,6 +832,7 @@ struct IdentityView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 8)
                     ProfilePosts(ownerId: profile.directId, canAdd: true, showsHeading: true)
+                    SavedPosts()
                 }
             }
             .padding(.horizontal, 16)

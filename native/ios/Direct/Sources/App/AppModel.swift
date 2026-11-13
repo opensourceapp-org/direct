@@ -193,6 +193,7 @@ final class AppModel: ObservableObject {
     }
 
     func deleteFeed(_ id: String) { run { try $0.deleteFeed(id) } }
+    func saveFeed(_ id: String) { run { try $0.saveFeed(id) } }
     func likeFeed(_ id: String) { run { try $0.likeFeed(id) } }
     func commentFeed(_ id: String, _ body: String) { run { try $0.commentFeed(id, body) } }
     func markStoriesSeen(_ ownerId: String) { run { try $0.markStoriesSeen(ownerId) } }

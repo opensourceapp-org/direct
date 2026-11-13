@@ -36,10 +36,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DynamicFeed
@@ -102,6 +104,11 @@ internal fun storyOwners(state: NodeState, selfId: String): List<String> {
     val contacts = state.contacts.filter { it.accepted && !it.blocked && owners.containsKey(it.directId) }
         .sortedBy { contact -> owners[contact.directId]?.all { it.seen } == true }
     return listOf(selfId) + contacts.map { it.directId }
+}
+
+internal fun savedFeed(state: NodeState): List<FeedItem> {
+    val byId = state.feed.associateBy { it.id }
+    return state.savedPosts.mapNotNull { byId[it] }.filter { it.channel == FeedNotes.POST }
 }
 
 internal fun othersPosts(state: NodeState): List<FeedItem> {
@@ -480,6 +487,36 @@ internal fun ProfilePosts(
 }
 
 @Composable
+internal fun SavedPosts(
+    node: DirectNode,
+    state: NodeState,
+    onOpenMedia: (String) -> Unit,
+) {
+    val posts = savedFeed(state)
+    Column(Modifier.fillMaxWidth()) {
+        Label("Saved")
+        if (posts.isEmpty()) {
+            Muted("Save a post and it stays here.", Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+        } else {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 1.dp)) {
+                posts.chunked(3).forEach { row ->
+                    Row(Modifier.fillMaxWidth()) {
+                        row.forEach { item ->
+                            FeedThumb(
+                                node,
+                                item,
+                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable(onClickLabel = "View full size") { onOpenMedia(item.id) },
+                            )
+                        }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun ContactProfileScreen(
     node: DirectNode,
     state: NodeState,
@@ -601,9 +638,18 @@ private fun FeedActions(
         IconButton(onClick = onOpenComments) {
             Icon(Icons.Outlined.ChatBubbleOutline, "Comments", tint = Ink.foreground, modifier = Modifier.size(24.dp))
         }
-        Spacer(Modifier.weight(1f))
         if (item.comments.isNotEmpty()) {
             Text("${item.comments.size}", color = Ink.muted, fontSize = 13.sp)
+        }
+        Spacer(Modifier.weight(1f))
+        val saved = item.id in state.savedPosts
+        IconButton(onClick = { scope.launch { runCatching { node.saveFeed(item.id) } } }) {
+            Icon(
+                if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                if (saved) "Saved" else "Save",
+                tint = if (saved) Ink.accent else Ink.foreground,
+                modifier = Modifier.size(24.dp),
+            )
         }
     }
 }

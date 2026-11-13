@@ -25,6 +25,11 @@ func storyOwners(_ state: NodeState, selfId: String) -> [String] {
     return [selfId] + contacts.map(\.directId)
 }
 
+func savedFeed(_ state: NodeState) -> [FeedItem] {
+    let byId = Dictionary(state.feed.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+    return state.savedPosts.compactMap { byId[$0] }.filter { $0.channel == FeedNotes.post }
+}
+
 func othersPosts(_ state: NodeState) -> [FeedItem] {
     guard let selfId = state.profile?.directId else { return [] }
     return state.feed.filter { $0.channel == FeedNotes.post && $0.ownerId != selfId }
@@ -231,6 +236,17 @@ struct FeedActions: View {
             .tint(Ink.accent)
             .controlSize(.small)
             Spacer(minLength: 0)
+            let saved = model.state.savedPosts.contains(item.id)
+            Button { model.saveFeed(item.id) } label: {
+                Image(systemName: saved ? "bookmark.fill" : "bookmark")
+                    .font(.footnote.weight(.semibold))
+                    .frame(minWidth: 28, minHeight: 28)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .tint(saved ? Ink.accent : .primary)
+            .controlSize(.small)
+            .accessibilityLabel(saved ? "Saved" : "Save")
         }
     }
 }
@@ -546,6 +562,59 @@ private enum ProfileTile: Identifiable {
         switch self {
         case .add: return "add"
         case .post(let item): return item.id
+        }
+    }
+}
+
+struct SavedPosts: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var mediaId: String?
+
+    var body: some View {
+        let posts = savedFeed(model.state)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Saved").font(.headline)
+            if posts.isEmpty {
+                Text("Save a post and it stays here.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(Array(stride(from: 0, to: posts.count, by: 2)), id: \.self) { start in
+                        savedRow(Array(posts[start..<min(start + 2, posts.count)]))
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { mediaId != nil },
+            set: { if !$0 { mediaId = nil } }
+        )) {
+            if let mediaId {
+                FeedMediaViewer(
+                    id: mediaId,
+                    canDelete: model.state.feed.first { $0.id == mediaId }?.ownerId == model.state.profile?.directId
+                ) { self.mediaId = nil }
+                    .id(mediaId)
+                    .environmentObject(model)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func savedRow(_ row: [FeedItem]) -> some View {
+        HStack(spacing: 10) {
+            ForEach(row, id: \.id) { post in
+                Button { mediaId = post.id } label: {
+                    FeedThumb(item: post)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel(post.kind == "video" ? "View video" : "View photo")
+            }
+            if row.count == 1 {
+                Color.clear.aspectRatio(1, contentMode: .fit).frame(maxWidth: .infinity)
+            }
         }
     }
 }
@@ -959,6 +1028,9 @@ struct FeedMediaViewer: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack(spacing: 8) {
+                Color.clear.frame(width: 36, height: 36)
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
                 ViewerIconButton(systemName: "minus.magnifyingglass", label: "Zoom out", disabled: scale <= 1.01) {
                     command = ZoomCommand(generation: command.generation + 1, factor: 1 / 1.4)
                 }
@@ -979,7 +1051,16 @@ struct FeedMediaViewer: View {
             }
             .padding(.horizontal, 6)
             .background(.black.opacity(0.45), in: Capsule())
-            .frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
+                if let item {
+                    ViewerIconButton(
+                        systemName: model.state.savedPosts.contains(item.id) ? "bookmark.fill" : "bookmark",
+                        label: model.state.savedPosts.contains(item.id) ? "Saved" : "Save"
+                    ) {
+                        model.saveFeed(item.id)
+                    }
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 12)

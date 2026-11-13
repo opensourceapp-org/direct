@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -26,7 +27,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ZoomIn
@@ -210,6 +213,13 @@ internal fun FeedMediaViewer(
                 error?.let {
                     Text(it, color = Color(0xFFFF8A80), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                 }
+                val saved = item.id in state.savedPosts
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Spacer(Modifier.width(48.dp))
+                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center) {
                 Row(
                     Modifier.clip(RoundedCornerShape(28.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -235,6 +245,14 @@ internal fun FeedMediaViewer(
                             val ok = runCatching { if (next) media.start() else media.pause() }.isSuccess
                             if (ok) playing = next
                         }
+                    }
+                }
+                    }
+                    ViewerIcon(
+                        if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                        if (saved) "Saved" else "Save",
+                    ) {
+                        scope.launch { runCatching { node.saveFeed(item.id) } }
                     }
                 }
             }
