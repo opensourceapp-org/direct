@@ -963,8 +963,34 @@ private fun ProfileHomeScreen(
             SecondaryButton("Edit profile") { onEdit() }
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
-        ProfilePosts(node, state, profile.directId, canAdd = true, showHeading = false, onError = { error = it }, onOpenMedia = onOpenMedia)
-        SavedPosts(node, state, onOpenMedia)
+        var library by rememberSaveable { mutableStateOf("posts") }
+        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
+            listOf("posts" to "Posts", "saved" to "Saved").forEach { (id, label) ->
+                val selected = library == id
+                Column(
+                    Modifier.weight(1f).clickable { library = id }.padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        label,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (selected) Ink.foreground else Ink.muted,
+                    )
+                    Box(
+                        Modifier
+                            .padding(top = 8.dp)
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(if (selected) Ink.accent else Color.Transparent),
+                    )
+                }
+            }
+        }
+        if (library == "saved") {
+            SavedPosts(node, state, onOpenMedia, showHeading = false)
+        } else {
+            ProfilePosts(node, state, profile.directId, canAdd = true, showHeading = false, onError = { error = it }, onOpenMedia = onOpenMedia)
+        }
     }
 }
 

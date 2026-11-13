@@ -196,8 +196,8 @@ final class AppModel: ObservableObject {
         run { try $0.sendMedia(peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption) }
     }
 
-    func publishFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String = "") {
-        run { try $0.publishFeed(channel: channel, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption) }
+    func publishFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String = "", tags: [String] = []) {
+        run { try $0.publishFeed(channel: channel, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption, tags: tags) }
     }
 
     func deleteFeed(_ id: String) { run { try $0.deleteFeed(id) } }
@@ -233,6 +233,8 @@ final class AppModel: ObservableObject {
     func retry(_ messageId: String) { run { try $0.retry(messageId) } }
     func accept(_ peerId: String) { run { try $0.acceptRequest(peerId) } }
     func decline(_ peerId: String) { run { try $0.declineRequest(peerId) } }
+    func block(_ peerId: String) { run { try $0.block(peerId) } }
+    func unblock(_ peerId: String) { run { try $0.unblock(peerId) } }
     func remove(_ peerId: String) { run { try $0.removeContact(peerId) } }
     func setVerified(_ peerId: String, _ verified: Bool) { run { try $0.setVerified(peerId, verified) } }
     func reconnect() { run { $0.onNetworkAvailable() } }

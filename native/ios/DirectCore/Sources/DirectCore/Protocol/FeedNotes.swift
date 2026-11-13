@@ -11,6 +11,7 @@ public enum FeedNotes {
     public static let maxStories = 20
     public static let maxPosts = 60
     public static let maxCaption = 200
+    public static let maxTags = 12
     public static let maxComment = 500
     public static let maxComments = 100
     public static let channels: Set<String> = [story, post]
@@ -25,18 +26,20 @@ public enum FeedNotes {
         public var mime: String
         public var name: String
         public var caption: String
+        public var tags: [String]
         public var createdAt: Int64
         public var expiresAt: Int64?
         public var part: Int
         public var parts: Int
 
-        public init(id: String, channel: String, kind: String, mime: String, name: String, caption: String, createdAt: Int64, expiresAt: Int64?, part: Int, parts: Int) {
+        public init(id: String, channel: String, kind: String, mime: String, name: String, caption: String, createdAt: Int64, expiresAt: Int64?, part: Int, parts: Int, tags: [String] = []) {
             self.id = id
             self.channel = channel
             self.kind = kind
             self.mime = mime
             self.name = name
             self.caption = caption
+            self.tags = FeedNotes.sanitizeTags(tags)
             self.createdAt = createdAt
             self.expiresAt = expiresAt
             self.part = part
@@ -72,11 +75,27 @@ public enum FeedNotes {
         public var mime: String
         public var name: String
         public var caption: String
+        public var tags: [String]
         public var createdAt: Int64
         public var expiresAt: Int64?
         public var parts: Int
         public var nextPart: Int
         public var fileName: String
+
+        public init(id: String, channel: String, kind: String, mime: String, name: String, caption: String, createdAt: Int64, expiresAt: Int64?, parts: Int, nextPart: Int, fileName: String, tags: [String] = []) {
+            self.id = id
+            self.channel = channel
+            self.kind = kind
+            self.mime = mime
+            self.name = name
+            self.caption = caption
+            self.tags = FeedNotes.sanitizeTags(tags)
+            self.createdAt = createdAt
+            self.expiresAt = expiresAt
+            self.parts = parts
+            self.nextPart = nextPart
+            self.fileName = fileName
+        }
     }
 
     public static func encodePart(_ part: Part, _ chunk: Data) -> Data {
@@ -93,6 +112,7 @@ public enum FeedNotes {
             ("part", .int(Int64(part.part))),
             ("parts", .int(Int64(part.parts))),
         ]
+        if !part.tags.isEmpty { pairs.append(("tags", .array(part.tags.map(JSON.string)))) }
         if let expiresAt = part.expiresAt { pairs.append(("expiresAt", .int(expiresAt))) }
         return Encoding.utf8(partPrefix + JSON.object(pairs).serialized() + "\n") + chunk
     }
@@ -122,7 +142,8 @@ public enum FeedNotes {
             createdAt: createdAt,
             expiresAt: json["expiresAt"]?.int64,
             part: Int(part),
-            parts: Int(parts)
+            parts: Int(parts),
+            tags: parseTags(json["tags"])
         )
         guard channels.contains(decoded.channel), kinds.contains(decoded.kind),
               decoded.part >= 0, decoded.parts > 0, decoded.part < decoded.parts,
@@ -214,6 +235,7 @@ public enum FeedNotes {
             ("nextPart", .int(Int64(job.nextPart))),
             ("fileName", .string(job.fileName)),
         ]
+        if !job.tags.isEmpty { pairs.append(("tags", .array(job.tags.map(JSON.string)))) }
         if let expiresAt = job.expiresAt { pairs.append(("expiresAt", .int(expiresAt))) }
         return jobPrefix + JSON.object(pairs).serialized()
     }
@@ -240,7 +262,8 @@ public enum FeedNotes {
             expiresAt: json["expiresAt"]?.int64,
             parts: Int(parts),
             nextPart: Int(nextPart),
-            fileName: fileName
+            fileName: fileName,
+            tags: parseTags(json["tags"])
         )
     }
 
@@ -250,5 +273,27 @@ public enum FeedNotes {
         guard var job = parseJob(payload) else { return payload }
         job.nextPart = 0
         return encodeJob(job)
+    }
+
+    public static func sanitizeTags(_ raw: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for id in raw {
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard (4...80).contains(trimmed.count), seen.insert(trimmed).inserted else { continue }
+            out.append(trimmed)
+            if out.count == maxTags { break }
+        }
+        return out
+    }
+
+    public static func parseTags(_ json: JSON?) -> [String] {
+        if let array = json?.array {
+            return sanitizeTags(array.compactMap(\.string))
+        }
+        if let text = json?.string {
+            return sanitizeTags(text.split(separator: ",").map { String($0) })
+        }
+        return []
     }
 }

@@ -988,8 +988,14 @@ private struct ServerHelp: View {
     }
 }
 
+private enum ProfileLibrary: String, CaseIterable {
+    case posts = "Posts"
+    case saved = "Saved"
+}
+
 struct IdentityView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var library: ProfileLibrary = .posts
 
     var body: some View {
         let profile = model.state.profile
@@ -1005,8 +1011,18 @@ struct IdentityView: View {
                         posts: posts,
                         contacts: people
                     )
-                    ProfilePosts(ownerId: profile.directId, canAdd: true, showsHeading: true)
-                    SavedPosts()
+                    Picker("Library", selection: $library) {
+                        ForEach(ProfileLibrary.allCases, id: \.self) { pane in
+                            Text(pane.rawValue).tag(pane)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("Posts or saved")
+                    if library == .posts {
+                        ProfilePosts(ownerId: profile.directId, canAdd: true, showsHeading: false)
+                    } else {
+                        SavedPosts(showsHeading: false)
+                    }
                 }
             }
             .padding(.horizontal, 16)

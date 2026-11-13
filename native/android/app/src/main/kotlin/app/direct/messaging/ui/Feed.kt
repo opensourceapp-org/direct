@@ -1,6 +1,8 @@
 package app.direct.messaging.ui
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -14,9 +16,12 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -52,6 +57,7 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -61,6 +67,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,14 +99,18 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.Image
 import app.direct.core.node.DirectNode
 import app.direct.core.node.NodeState
 import app.direct.core.protocol.ChatNotes
 import app.direct.core.protocol.FeedNotes
 import app.direct.core.store.FeedItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 internal fun liveStories(state: NodeState, ownerId: String): List<FeedItem> =
@@ -122,8 +133,10 @@ internal fun savedFeed(state: NodeState): List<FeedItem> {
 
 internal fun othersPosts(state: NodeState): List<FeedItem> {
     val selfId = state.profile?.directId ?: return emptyList()
-    return state.feed.filter { it.channel == FeedNotes.POST && it.ownerId != selfId }
-        .sortedByDescending { it.createdAt }
+    return state.feed.filter { item ->
+        item.channel == FeedNotes.POST && item.ownerId != selfId
+            && state.contacts.firstOrNull { it.directId == item.ownerId }?.blocked != true
+    }.sortedByDescending { it.createdAt }
 }
 
 internal fun feedOwnerName(state: NodeState, ownerId: String): String {
@@ -134,6 +147,33 @@ internal fun feedOwnerName(state: NodeState, ownerId: String): String {
 internal fun feedOwnerJpeg(state: NodeState, ownerId: String): String? {
     if (ownerId == state.profile?.directId) return state.profile?.avatarJpegBase64
     return state.contacts.firstOrNull { it.directId == ownerId }?.avatarJpegBase64
+}
+
+internal fun feedTaggedLine(state: NodeState, ids: List<String>): String {
+    val names = ids.map { feedOwnerName(state, it) }
+    if (names.isEmpty()) return ""
+    if (names.size == 1) return "with ${names[0]}"
+    if (names.size == 2) return "with ${names[0]} and ${names[1]}"
+    return "with ${names.dropLast(1).joinToString(", ")} and ${names.last()}"
+}
+
+internal fun feedPoster(bytes: ByteArray, kind: String): Bitmap? =
+    if (kind == "video") videoPoster(bytes) else BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+
+internal fun videoPoster(bytes: ByteArray): Bitmap? {
+    val file = File.createTempFile("direct-thumb", ".mp4")
+    val retriever = MediaMetadataRetriever()
+    return try {
+        file.writeBytes(bytes)
+        retriever.setDataSource(file.absolutePath)
+        retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            ?: retriever.frameAtTime
+    } catch (_: Exception) {
+        null
+    } finally {
+        retriever.release()
+        file.delete()
+    }
 }
 
 private fun formatFeedTime(ms: Long): String {
@@ -233,6 +273,14 @@ private fun FeedPostCard(
                 item.caption,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp),
                 fontSize = 14.sp,
+            )
+        }
+        if (item.tags.isNotEmpty()) {
+            Text(
+                feedTaggedLine(state, item.tags),
+                color = Ink.muted,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = if (item.caption.isNotBlank()) 2.dp else 10.dp),
             )
         }
         FeedActions(node, state, item, onOpenComments)
@@ -415,6 +463,7 @@ internal fun ProfilePosts(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val posts = profilePosts(state, ownerId)
+    var draft by remember { mutableStateOf<FeedDraft?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -428,7 +477,7 @@ internal fun ProfilePosts(
                         return@launch
                     }
                 }
-                node.publishFeed(FeedNotes.POST, kind, prepared.mime, prepared.name, prepared.bytes, "")
+                draft = FeedDraft(kind, prepared.mime, prepared.name, prepared.bytes)
                 onError(null)
             } catch (error: Exception) {
                 onError(error.message ?: "That post was not added.")
@@ -473,6 +522,9 @@ internal fun ProfilePosts(
             }
         }
     }
+    draft?.let { next ->
+        FeedComposer(node, state, next, onDismiss = { draft = null }, onError = onError)
+    }
 }
 
 @Composable
@@ -480,10 +532,11 @@ internal fun SavedPosts(
     node: DirectNode,
     state: NodeState,
     onOpenMedia: (String) -> Unit,
+    showHeading: Boolean = true,
 ) {
     val posts = savedFeed(state)
     Column(Modifier.fillMaxWidth()) {
-        Label("Saved")
+        if (showHeading) Label("Saved")
         if (posts.isEmpty()) {
             Muted("Save a post and it stays here.", Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
         } else {
@@ -523,6 +576,8 @@ internal fun ContactProfileScreen(
     val canCall = !self && contact?.accepted == true && contact.blocked != true
     var storyOpen by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var confirmBlock by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val placeCall = rememberPlaceCall(node, peerId) { error = it }
     BackHandler(onBack = back)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -543,7 +598,7 @@ internal fun ContactProfileScreen(
         )
         if (!self) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -562,9 +617,54 @@ internal fun ContactProfileScreen(
                     ProfileIconButton(Icons.Filled.Videocam, "Video") { placeCall(true) }
                 }
             }
+            if (contact != null) {
+                if (contact.blocked) {
+                    Muted(
+                        "You blocked this person. Messages from them are dropped.",
+                        Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                    )
+                    OutlinedButton(
+                        onClick = { scope.launch { runCatching { node.unblock(peerId) }.onFailure { error = it.message } } },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Ink.border),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.accent),
+                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp).height(40.dp),
+                    ) {
+                        Text("Unblock", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { confirmBlock = true },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Ink.danger),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.danger),
+                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp).height(40.dp),
+                    ) {
+                        Text("Block", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
+                }
+            }
         }
         error?.let { Text(it, color = Ink.danger, modifier = Modifier.padding(horizontal = 20.dp)) }
-        ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenMedia = onOpenMedia)
+        if (contact?.blocked != true) {
+            ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenMedia = onOpenMedia)
+        }
+    }
+    if (confirmBlock) {
+        AlertDialog(
+            onDismissRequest = { confirmBlock = false },
+            title = { Text("Block $name?") },
+            text = { Text("They won’t be able to message you. Existing chats stay on this phone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmBlock = false
+                        scope.launch { runCatching { node.block(peerId) }.onFailure { error = it.message } }
+                    },
+                ) { Text("Block", color = Ink.danger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmBlock = false }) { Text("Cancel") } },
+        )
     }
     if (storyOpen) StoryViewer(node, state, peerId) { storyOpen = false }
 }
@@ -634,12 +734,16 @@ private fun ProfileIconButton(icon: ImageVector, label: String, onClick: () -> U
 
 @Composable
 private fun FeedThumb(node: DirectNode, item: FeedItem, modifier: Modifier) {
-    var bytes by remember(item.id, item.mediaFile) { mutableStateOf<ByteArray?>(null) }
-    LaunchedEffect(item.id, item.mediaFile) { bytes = node.readFeed(item.id) }
+    var bitmap by remember(item.id, item.mediaFile) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(item.id, item.mediaFile) {
+        val bytes = node.readFeed(item.id) ?: return@LaunchedEffect
+        bitmap = withContext(Dispatchers.Default) {
+            feedPoster(bytes, item.kind)?.asImageBitmap()
+        }
+    }
     Box(modifier.background(Ink.accentSoft), contentAlignment = Alignment.Center) {
-        val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap()
         if (bitmap != null) {
-            Image(bitmap, item.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Image(bitmap!!, item.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
             Box(Modifier.fillMaxSize().background(Ink.accentSoft))
         }
@@ -929,6 +1033,14 @@ internal fun FeedLightbox(
                     fontSize = 14.sp,
                 )
             }
+            if (item.tags.isNotEmpty()) {
+                Text(
+                    feedTaggedLine(state, item.tags),
+                    color = Ink.muted,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+                )
+            }
             HorizontalDivider(color = Ink.border, modifier = Modifier.padding(top = 8.dp))
             if (item.comments.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth().padding(14.dp), contentAlignment = Alignment.TopStart) {
@@ -1004,3 +1116,139 @@ private fun FeedMedia(node: DirectNode, item: FeedItem, modifier: Modifier) {
 
 private fun jpegBytes(encoded: String?): ByteArray? =
     encoded?.let { runCatching { app.direct.core.Encoding.fromBase64Url(it) }.getOrNull() }
+
+private class FeedDraft(val kind: String, val mime: String, val name: String, val bytes: ByteArray)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FeedComposer(
+    node: DirectNode,
+    state: NodeState,
+    draft: FeedDraft,
+    onDismiss: () -> Unit,
+    onError: (String?) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var caption by remember { mutableStateOf("") }
+    var tagged by remember { mutableStateOf(setOf<String>()) }
+    var poster by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    val contacts = state.contacts.filter { it.accepted && !it.blocked }.sortedBy { it.name.lowercase() }
+    LaunchedEffect(draft) {
+        poster = withContext(Dispatchers.Default) {
+            feedPoster(draft.bytes, draft.kind)?.asImageBitmap()
+        }
+    }
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.94f)
+                .padding(12.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Ink.background)
+                .imePadding(),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                Text(
+                    "New post",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                )
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            try {
+                                node.publishFeed(
+                                    FeedNotes.POST,
+                                    draft.kind,
+                                    draft.mime,
+                                    draft.name,
+                                    draft.bytes,
+                                    caption,
+                                    tagged.toList(),
+                                )
+                                onError(null)
+                                onDismiss()
+                            } catch (error: Exception) {
+                                onError(error.message ?: "That post was not added.")
+                            }
+                        }
+                    },
+                ) { Text("Share") }
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Ink.accentSoft),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    poster?.let {
+                        Image(it, draft.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    }
+                    if (draft.kind == "video") {
+                        Box(
+                            Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = caption,
+                    onValueChange = { caption = it.take(FeedNotes.MAX_CAPTION) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Quote or description") },
+                    placeholder = { Text("Add a quote or description") },
+                    minLines = 3,
+                    maxLines = 6,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Ink.accent,
+                        unfocusedBorderColor = Ink.border,
+                    ),
+                    supportingText = { Text("${caption.length}/${FeedNotes.MAX_CAPTION}") },
+                )
+                if (contacts.isNotEmpty()) {
+                    Text("Tag contacts", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Text("Tagged people show up on the post.", color = Ink.muted, fontSize = 13.sp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        contacts.forEach { contact ->
+                            val on = contact.directId in tagged
+                            Text(
+                                contact.name,
+                                color = if (on) Color.White else Ink.foreground,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(if (on) Ink.accent else Ink.accentSoft)
+                                    .clickable {
+                                        tagged = if (on) tagged - contact.directId
+                                        else if (tagged.size < FeedNotes.MAX_TAGS) tagged + contact.directId
+                                        else tagged
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

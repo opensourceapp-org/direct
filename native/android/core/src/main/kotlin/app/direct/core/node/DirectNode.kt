@@ -463,9 +463,9 @@ class DirectNode(
         if (!file.exists()) null else file.readBytes()
     }
 
-    suspend fun publishFeed(channel: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String = ""): FeedItem = onNode {
+    suspend fun publishFeed(channel: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String = "", tags: List<String> = emptyList()): FeedItem = onNode {
         val item = try {
-            requireEngine().queueFeed(channel, kind, mime, name, bytes, caption)
+            requireEngine().queueFeed(channel, kind, mime, name, bytes, caption, tags)
         } catch (error: DeliveryRejected) {
             throw DirectException(DirectException.Reason.REJECTED, error.message ?: "That post was not saved.")
         }
@@ -611,6 +611,20 @@ class DirectNode(
         transport?.close(peerId)
         refreshWatch()
         publish()
+    }
+
+    suspend fun unblock(peerId: String) = onNode {
+        val contact = store.contact(peerId) ?: return@onNode
+        val updated = contact.copy(blocked = false)
+        store.putContact(updated)
+        store.save()
+        refreshWatch()
+        if (updated.accepted) {
+            engine?.shareProfile(peerId)
+            engine?.shareFeed(peerId)
+        }
+        publish()
+        wake.trySend(Unit)
     }
 
     suspend fun removeContact(peerId: String) = onNode {

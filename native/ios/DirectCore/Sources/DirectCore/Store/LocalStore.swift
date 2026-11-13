@@ -332,12 +332,13 @@ public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
     public var seen: Bool
     public var likes: [FeedLike]
     public var comments: [FeedComment]
+    public var tags: [String]
 
     private enum CodingKeys: String, CodingKey {
-        case id, ownerId, channel, kind, mime, name, caption, createdAt, expiresAt, mediaFile, seen, likes, comments
+        case id, ownerId, channel, kind, mime, name, caption, createdAt, expiresAt, mediaFile, seen, likes, comments, tags
     }
 
-    public init(id: String, ownerId: String, channel: String, kind: String, mime: String, name: String, caption: String = "", createdAt: Int64, expiresAt: Int64? = nil, mediaFile: String, seen: Bool = false, likes: [FeedLike] = [], comments: [FeedComment] = []) {
+    public init(id: String, ownerId: String, channel: String, kind: String, mime: String, name: String, caption: String = "", createdAt: Int64, expiresAt: Int64? = nil, mediaFile: String, seen: Bool = false, likes: [FeedLike] = [], comments: [FeedComment] = [], tags: [String] = []) {
         self.id = id
         self.ownerId = ownerId
         self.channel = channel
@@ -351,6 +352,7 @@ public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
         self.seen = seen
         self.likes = likes
         self.comments = comments
+        self.tags = tags
     }
 
     public init(from decoder: Decoder) throws {
@@ -368,6 +370,7 @@ public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
         seen = try container.decodeIfPresent(Bool.self, forKey: .seen) ?? false
         likes = try container.decodeIfPresent([FeedLike].self, forKey: .likes) ?? []
         comments = try container.decodeIfPresent([FeedComment].self, forKey: .comments) ?? []
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -385,6 +388,7 @@ public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
         try container.encode(seen, forKey: .seen)
         try container.encode(likes, forKey: .likes)
         try container.encode(comments, forKey: .comments)
+        try container.encode(tags, forKey: .tags)
     }
 
     public func togglingLike(_ fromId: String) -> FeedItem {

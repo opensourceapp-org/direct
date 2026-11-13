@@ -2,6 +2,7 @@ package app.direct.core.protocol
 
 import app.direct.core.Encoding
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -22,6 +23,7 @@ object FeedNotes {
     const val MAX_STORIES = 20
     const val MAX_POSTS = 60
     const val MAX_CAPTION = 200
+    const val MAX_TAGS = 12
     const val MAX_COMMENT = 500
     const val MAX_COMMENTS = 100
     val CHANNELS = setOf(STORY, POST)
@@ -40,6 +42,7 @@ object FeedNotes {
         val expiresAt: Long?,
         val part: Int,
         val parts: Int,
+        val tags: List<String> = emptyList(),
     )
 
     data class Delete(val channel: String, val id: String)
@@ -64,6 +67,7 @@ object FeedNotes {
         val parts: Int,
         val nextPart: Int,
         val fileName: String,
+        val tags: List<String> = emptyList(),
     )
 
     fun encodePart(part: Part, chunk: ByteArray): ByteArray {
@@ -85,7 +89,8 @@ object FeedNotes {
             fields += "expiresAt" to part.expiresAt.toString()
             numbers += "expiresAt"
         }
-        return Encoding.utf8(PART_PREFIX + json(*fields.toTypedArray(), numbers = numbers) + "\n") + chunk
+        val arrays = if (part.tags.isNotEmpty()) mapOf("tags" to sanitizeTags(part.tags)) else emptyMap()
+        return Encoding.utf8(PART_PREFIX + json(*fields.toTypedArray(), numbers = numbers, arrays = arrays) + "\n") + chunk
     }
 
     fun decodePart(plaintext: ByteArray): Pair<Part, ByteArray>? {
@@ -107,6 +112,7 @@ object FeedNotes {
             expiresAt = json.long("expiresAt"),
             part = json.int("part") ?: return null,
             parts = json.int("parts") ?: return null,
+            tags = json.tags(),
         )
         if (part.channel !in CHANNELS || part.kind !in KINDS) return null
         if (part.part < 0 || part.parts <= 0 || part.part >= part.parts) return null
@@ -197,7 +203,8 @@ object FeedNotes {
             fields += "expiresAt" to job.expiresAt.toString()
             numbers += "expiresAt"
         }
-        return JOB_PREFIX + json(*fields.toTypedArray(), numbers = numbers)
+        val arrays = if (job.tags.isNotEmpty()) mapOf("tags" to sanitizeTags(job.tags)) else emptyMap()
+        return JOB_PREFIX + json(*fields.toTypedArray(), numbers = numbers, arrays = arrays)
     }
 
     fun parseJob(payload: String): Job? {
@@ -215,17 +222,46 @@ object FeedNotes {
             parts = json.int("parts") ?: return null,
             nextPart = json.int("nextPart") ?: return null,
             fileName = json.text("fileName") ?: return null,
+            tags = json.tags(),
         )
     }
 
     fun isJob(payload: String): Boolean = payload.startsWith(JOB_PREFIX)
 
-    private fun json(vararg pairs: Pair<String, String>, numbers: Set<String>): String = buildString {
+    fun sanitizeTags(raw: List<String>): List<String> {
+        val out = LinkedHashSet<String>()
+        for (id in raw) {
+            val trimmed = id.trim()
+            if (trimmed.length in 4..80) out.add(trimmed)
+            if (out.size >= MAX_TAGS) break
+        }
+        return out.toList()
+    }
+
+    private fun json(
+        vararg pairs: Pair<String, String>,
+        numbers: Set<String> = emptySet(),
+        arrays: Map<String, List<String>> = emptyMap(),
+    ): String = buildString {
         append('{')
-        pairs.forEachIndexed { index, (key, value) ->
-            if (index > 0) append(',')
+        var first = true
+        fun sep() {
+            if (!first) append(',')
+            first = false
+        }
+        pairs.forEach { (key, value) ->
+            sep()
             append('"').append(key).append("\":")
             if (key in numbers) append(value) else append(quote(value))
+        }
+        arrays.forEach { (key, values) ->
+            sep()
+            append('"').append(key).append("\":[")
+            values.forEachIndexed { index, value ->
+                if (index > 0) append(',')
+                append(quote(value))
+            }
+            append(']')
         }
         append('}')
     }
@@ -257,5 +293,15 @@ object FeedNotes {
         if (value is JsonNull) return null
         val primitive = value as? JsonPrimitive ?: return null
         return primitive.longOrNull ?: primitive.contentOrNull?.toLongOrNull()
+    }
+
+    private fun JsonObject.tags(): List<String> {
+        val el = this["tags"] ?: return emptyList()
+        val raw = when (el) {
+            is JsonArray -> el.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            is JsonPrimitive -> el.contentOrNull?.split(",") ?: emptyList()
+            else -> emptyList()
+        }
+        return sanitizeTags(raw)
     }
 }

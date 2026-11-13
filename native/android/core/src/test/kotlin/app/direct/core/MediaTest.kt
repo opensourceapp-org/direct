@@ -86,6 +86,20 @@ class MediaTest {
         val shared = assertNotNull(MediaNotes.decodePart(MediaNotes.encodePart(posted, bytes)))
         assertEquals("fed_abc", shared.first.feedId)
         assertEquals("dir_X", shared.first.feedOwnerId)
+
+        val tagged = FeedNotes.Part(
+            "fed_abc", FeedNotes.POST, "image", "image/jpeg", "a.jpg", "lake", 1, null, 0, 1,
+            listOf("dir_Bo12", "x", "dir_Bo12"),
+        )
+        val feed = assertNotNull(FeedNotes.decodePart(FeedNotes.encodePart(tagged, bytes)))
+        assertEquals(listOf("dir_Bo12"), feed.first.tags)
+        assertEquals("lake", feed.first.caption)
+        val legacy = Encoding.utf8(
+            "DIRECT-FEED/1\n{\"v\":1,\"op\":\"put\",\"id\":\"fed_abc\",\"channel\":\"post\",\"kind\":\"image\",\"mime\":\"image/jpeg\",\"name\":\"a.jpg\",\"caption\":\"hi\",\"createdAt\":1,\"part\":0,\"parts\":1}\n",
+        ) + bytes
+        val older = assertNotNull(FeedNotes.decodePart(legacy))
+        assertEquals(emptyList<String>(), older.first.tags)
+        assertEquals("hi", older.first.caption)
     }
 
     @Test
@@ -235,10 +249,15 @@ class MediaTest {
         val bo = Device("Bo", { now }, boLinks, chunk = 8)
         ada.know(bo)
         bo.know(ada)
-        val post = ada.engine.queueFeed(FeedNotes.POST, "image", "image/jpeg", "pic.jpg", byteArrayOf(1, 2, 3, 4, 5), "lake")
+        val post = ada.engine.queueFeed(
+            FeedNotes.POST, "image", "image/jpeg", "pic.jpg", byteArrayOf(1, 2, 3, 4, 5), "lake",
+            listOf(bo.keys.directId, "nope", bo.keys.directId),
+        )
+        assertEquals(listOf(bo.keys.directId), ada.store.feed(post.id)?.tags)
         ada.engine.flush()
         for (bytes in adaLinks.sent) bo.engine.receive(ada.keys.directId, bytes)
         assertEquals("lake", bo.store.feed(post.id)?.caption)
+        assertEquals(listOf(bo.keys.directId), bo.store.feed(post.id)?.tags)
 
         adaLinks.sent.clear()
         boLinks.sent.clear()

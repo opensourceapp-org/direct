@@ -122,6 +122,7 @@ data class FeedItem(
     val seen: Boolean = false,
     val likes: List<FeedLike> = emptyList(),
     val comments: List<FeedComment> = emptyList(),
+    val tags: List<String> = emptyList(),
 )
 
 @Serializable
