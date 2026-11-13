@@ -25,14 +25,19 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
@@ -41,6 +46,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Call
@@ -83,6 +89,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
@@ -96,6 +103,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -931,13 +939,11 @@ private fun CommentRow(
 
 @Composable
 private fun CommentComposer(
-    state: NodeState,
     draft: String,
     onDraft: (String) -> Unit,
     onSend: () -> Unit,
 ) {
     val focus = LocalFocusManager.current
-    val self = state.profile
     val ready = draft.isNotBlank()
     fun send() {
         if (!ready) return
@@ -946,40 +952,52 @@ private fun CommentComposer(
     }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Avatar(self?.name ?: "You", jpegBytes(self?.avatarJpegBase64), 32.dp)
-        OutlinedTextField(
+        BasicTextField(
             value = draft,
             onValueChange = { onDraft(it.take(FeedNotes.MAX_COMMENT)) },
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("Add a comment…", color = Ink.muted, fontSize = 15.sp) },
-            singleLine = true,
-            shape = RoundedCornerShape(24.dp),
-            textStyle = TextStyle(fontSize = 15.sp, color = Ink.foreground),
+            textStyle = TextStyle(color = Ink.foreground, fontSize = 15.sp),
+            cursorBrush = SolidColor(Ink.accent),
+            maxLines = 4,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { send() }),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Ink.accent,
-                unfocusedBorderColor = Ink.border,
-                focusedContainerColor = Ink.background,
-                unfocusedContainerColor = Ink.background,
-            ),
+            modifier = Modifier.weight(1f),
+            decorationBox = { inner ->
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 40.dp)
+                        .background(Ink.background, RoundedCornerShape(20.dp))
+                        .border(BorderStroke(1.dp, Ink.border), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    if (draft.isEmpty()) Text("Add a comment…", color = Ink.muted, fontSize = 15.sp)
+                    inner()
+                }
+            },
         )
-        Text(
-            "Post",
-            color = if (ready) Ink.accent else Ink.muted,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 16.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(enabled = ready, onClick = { send() })
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-        )
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(if (ready) Ink.accent else Ink.border)
+                .clickable(enabled = ready, onClick = { send() }),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.Send,
+                "Post",
+                tint = if (ready) Color.White else Ink.muted,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun FeedLightbox(
     node: DirectNode,
@@ -996,12 +1014,13 @@ internal fun FeedLightbox(
     var localError by remember { mutableStateOf<String?>(null) }
     val name = feedOwnerName(state, item.ownerId)
     val comments = rememberLazyListState()
+    val imeOpen = WindowInsets.isImeVisible
     LaunchedEffect(item.comments.size) {
         if (item.comments.isNotEmpty()) comments.scrollToItem(item.comments.lastIndex)
     }
     BackHandler(onBack = onClose)
     Column(Modifier.fillMaxSize().background(Color.Black).imePadding()) {
-        Box(Modifier.fillMaxWidth().height(240.dp).background(Color.Black)) {
+        Box(Modifier.fillMaxWidth().height(if (imeOpen) 120.dp else 240.dp).background(Color.Black)) {
             FeedMedia(node, item, Modifier.fillMaxSize())
             if (item.kind != "video") {
                 Box(Modifier.matchParentSize().clickable(onClickLabel = "View full size", onClick = onOpenMedia))
@@ -1025,8 +1044,7 @@ internal fun FeedLightbox(
             Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                .background(Ink.surface),
+                .background(Ink.surface, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)),
         ) {
             Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Ink.border))
@@ -1052,6 +1070,8 @@ internal fun FeedLightbox(
                     },
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
                     fontSize = 14.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (item.tags.isNotEmpty()) {
@@ -1081,7 +1101,7 @@ internal fun FeedLightbox(
             }
             localError?.let { Text(it, color = Ink.danger, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) }
             HorizontalDivider(color = Ink.border)
-            CommentComposer(state, draft, { draft = it }) {
+            CommentComposer(draft, { draft = it }) {
                 val body = draft
                 scope.launch {
                     try {
