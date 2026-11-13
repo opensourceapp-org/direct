@@ -485,11 +485,13 @@ struct StoryViewer: View {
     var onClose: () -> Void
     @State private var index = 0
     @State private var bytes: Data?
+    @State private var confirmDelete = false
 
     var body: some View {
         let stories = liveStories(model.state, ownerId: ownerId)
         let current = stories.indices.contains(index) ? stories[index] : stories.last
-        let name = ownerId == model.state.profile?.directId ? (model.state.profile?.name ?? "You") : (model.state.contacts.first { $0.directId == ownerId }?.name ?? ownerId)
+        let mine = ownerId == model.state.profile?.directId
+        let name = mine ? (model.state.profile?.name ?? "You") : (model.state.contacts.first { $0.directId == ownerId }?.name ?? ownerId)
         ZStack {
             Color.black.ignoresSafeArea()
             if let current, let bytes, current.kind != "video", let image = UIImage(data: bytes) {
@@ -516,6 +518,15 @@ struct StoryViewer: View {
                 HStack {
                     Text(name).font(.headline).foregroundStyle(.white)
                     Spacer()
+                    if mine, current != nil {
+                        Button { confirmDelete = true } label: {
+                            Image(systemName: "trash.circle.fill")
+                                .font(.title)
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, Color.black.opacity(0.35))
+                        }
+                        .accessibilityLabel("Delete story")
+                    }
                     Button(action: onClose) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.title)
@@ -534,8 +545,21 @@ struct StoryViewer: View {
             load()
         }
         .onChange(of: index) { _ in load() }
-        .task(id: current?.id) {
-            guard let current, current.kind != "video" else { return }
+        .onChange(of: current?.id) { _ in load() }
+        .onChange(of: stories.count) { count in
+            if count == 0 { onClose(); return }
+            if index >= count { index = count - 1 }
+        }
+        .confirmationDialog("Delete this story?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete Story", role: .destructive) {
+                if let current { model.deleteFeed(current.id) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It will be removed from your stories and from people who already received it.")
+        }
+        .task(id: "\(current?.id ?? "")-\(confirmDelete)") {
+            guard let current, current.kind != "video", !confirmDelete else { return }
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             if index + 1 < liveStories(model.state, ownerId: ownerId).count { index += 1 } else { onClose() }
         }
