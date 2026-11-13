@@ -964,7 +964,7 @@ private fun ProfileHomeScreen(
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
         var library by rememberSaveable { mutableStateOf("posts") }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, top = 12.dp)) {
+        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
             listOf("posts" to "Posts", "saved" to "Saved").forEach { (id, label) ->
                 val selected = library == id
                 Column(
