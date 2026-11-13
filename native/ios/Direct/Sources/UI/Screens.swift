@@ -662,17 +662,66 @@ struct ContactsView: View {
     var body: some View {
         List {
             Section {
-                Button("Scan a QR code") { scanning = true }.tint(Ink.accent)
-                Field(placeholder: "dir_… or a pasted identity bundle", text: $input, monospaced: true)
-                PrimaryButton(title: "Add contact", enabled: !input.isEmpty) {
-                    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if trimmed.hasPrefix("{") {
-                        model.addFromShare(trimmed) { input = "" }
-                    } else {
-                        model.addContact(trimmed) { input = "" }
+                Button {
+                    scanning = true
+                } label: {
+                    HStack(spacing: 12) {
+                        addGlyph("qrcode.viewfinder", tint: Ink.accent)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Scan QR code")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(Ink.text)
+                            Text("Adds their ID and this server")
+                                .font(.footnote)
+                                .foregroundStyle(Ink.muted)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Ink.muted)
+                    }
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Scan a QR code")
+
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        addGlyph("person.badge.plus", tint: Ink.accent)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Add by ID")
+                                .font(.body.weight(.semibold))
+                            Text("Paste a DIRECT ID or identity card")
+                                .font(.footnote)
+                                .foregroundStyle(Ink.muted)
+                        }
+                    }
+                    HStack(alignment: .center, spacing: 10) {
+                        TextField("dir_… or a pasted card", text: $input, axis: .vertical)
+                            .font(.system(.subheadline, design: .monospaced))
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .lineLimit(1...4)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(Ink.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Ink.line))
+                        Button("Add", action: addContactFromInput)
+                            .font(.subheadline.weight(.semibold))
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
+                            .tint(Ink.accent)
+                            .foregroundStyle(Color.white)
+                            .disabled(!canAdd)
+                            .fixedSize()
                     }
                 }
-                Muted("Looking up a DIRECT ID only works if that person turned on public listing on this server. A QR code or pasted card works either way, and scanning it saves that address on this phone.")
+                .padding(.vertical, 4)
+            } header: {
+                Text("Add")
+            } footer: {
+                Text("Lookup by ID needs public listing on this server. A QR code or pasted card works either way, and scanning it saves that address on this phone.")
             }
             .listRowBackground(Ink.surface)
             Section {
@@ -785,6 +834,29 @@ struct ContactsView: View {
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { scanning = false } } }
             }
         }
+    }
+
+    private var canAdd: Bool {
+        !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func addContactFromInput() {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if trimmed.hasPrefix("{") {
+            model.addFromShare(trimmed) { input = "" }
+        } else {
+            model.addContact(trimmed) { input = "" }
+        }
+    }
+
+    private func addGlyph(_ name: String, tint: Color) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 40, height: 40)
+            .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 
