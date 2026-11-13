@@ -608,7 +608,7 @@ internal fun ContactProfileScreen(
     val scope = rememberCoroutineScope()
     val placeCall = rememberPlaceCall(node, peerId) { error = it }
     BackHandler(onBack = back)
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxSize().background(Ink.background).verticalScroll(rememberScrollState())) {
         Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground) }
             Title(name)
