@@ -80,9 +80,17 @@ class FakeHub : WebSocketFactory {
         }
     }
 
+    private fun canSeePresence(watcher: String?, id: String): Boolean {
+        if (watcher == null) return false
+        if (discoverable[id] == true) return true
+        return intros["$id\n$watcher"] == true
+    }
+
     private fun notify(id: String, online: Boolean) {
         val frame = SignalCodec.encode(SignalFrame.Presence(id, online))
-        for ((socket, ids) in watching) if (id in ids && socket.open) socket.events.onMessage(frame)
+        for ((socket, ids) in watching) {
+            if (id in ids && socket.open && canSeePresence(socket.selfId, id)) socket.events.onMessage(frame)
+        }
     }
 
     private fun handle(socket: Socket, text: String) {
@@ -105,11 +113,15 @@ class FakeHub : WebSocketFactory {
             }
             is SignalFrame.Watch -> {
                 watching[socket] = frame.ids.toSet()
-                for (id in frame.ids) socket.events.onMessage(SignalCodec.encode(SignalFrame.Presence(id, isOnline(id))))
+                for (id in frame.ids) {
+                    val online = canSeePresence(socket.selfId, id) && isOnline(id)
+                    socket.events.onMessage(SignalCodec.encode(SignalFrame.Presence(id, online)))
+                }
             }
             is SignalFrame.Negotiation -> {
                 if (frame.from != socket.selfId) return
                 intros["${frame.from}\n${frame.to}"] = true
+                notify(frame.from, isOnline(frame.from))
                 val target = live[frame.to]
                 if (target != null && target.open) target.events.onMessage(text)
                 else if (frame is SignalFrame.Offer) socket.events.onMessage(SignalCodec.encode(SignalFrame.Unreachable(frame.to)))

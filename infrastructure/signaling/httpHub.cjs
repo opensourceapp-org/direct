@@ -39,14 +39,23 @@ async function enqueue(store, sessionId, frame) {
 /** A stored bundle is only returned to phones that already have a reason to see it. */
 async function revealPeer(store, requesterId, peer) {
   if (!peer || !store.visible(peer) || !requesterId) return null;
-  if (peer.discoverable) return peer;
-  if (await store.wasIntroduced(peer.directId, requesterId)) return peer;
+  if (await maySeePresence(store, requesterId, peer.directId, peer)) return peer;
   return null;
 }
 
+async function maySeePresence(store, watcherId, targetId, peer) {
+  if (!watcherId || !targetId) return false;
+  if (peer && peer.discoverable) return true;
+  return store.wasIntroduced(targetId, watcherId);
+}
+
 async function announce(store, directId, online) {
+  const peer = await store.loadPeer(directId);
   const watchers = await store.sessionsWatching(directId);
   for (const id of watchers) {
+    const session = await store.loadSession(id);
+    if (!session || !session.directId) continue;
+    if (!(await maySeePresence(store, session.directId, directId, peer))) continue;
     await enqueue(store, id, { kind: 'presence', directId, online });
   }
 }
@@ -106,7 +115,8 @@ async function handleFrames(store, session, frames) {
       session.watch = message.ids.filter((id) => typeof id === 'string' && DIRECT_ID.test(id)).slice(0, MAX_WATCH);
       for (const id of session.watch) {
         const peer = await store.loadPeer(id);
-        replies.push({ kind: 'presence', directId: id, online: Boolean(peer && peer.sessionId) });
+        const allowed = await maySeePresence(store, session.directId, id, peer);
+        replies.push({ kind: 'presence', directId: id, online: allowed && Boolean(peer && peer.sessionId) });
       }
       continue;
     }
@@ -140,6 +150,7 @@ async function handleFrames(store, session, frames) {
     const target = await store.loadPeer(message.to);
     if (target && target.sessionId) {
       await store.noteIntro(message.from, message.to);
+      await announce(store, message.from, true);
       await enqueue(store, target.sessionId, message);
       continue;
     }

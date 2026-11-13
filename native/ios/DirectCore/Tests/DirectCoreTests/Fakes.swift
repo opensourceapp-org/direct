@@ -100,9 +100,15 @@ final class FakeHub: WebSocketFactory {
         if let wentOffline { notify(wentOffline, false) }
     }
 
+    private func canSeePresence(_ watcher: String?, _ id: String) -> Bool {
+        guard let watcher else { return false }
+        if discoverable[id] == true { return true }
+        return intros["\(id)\n\(watcher)"] == true
+    }
+
     private func notify(_ id: String, _ online: Bool) {
         lock.lock()
-        let targets = watching.values.filter { $0.1.contains(id) && $0.0.open }.map(\.0)
+        let targets = watching.values.filter { $0.1.contains(id) && $0.0.open && canSeePresence($0.0.selfId, id) }.map(\.0)
         lock.unlock()
         let frame = SignalCodec.encode(.presence(directId: id, online: online))
         targets.forEach { $0.events.onMessage(frame) }
@@ -135,14 +141,20 @@ final class FakeHub: WebSocketFactory {
         case let .watch(ids):
             lock.lock()
             watching[ObjectIdentifier(socket)] = (socket, Set(ids))
+            let watcher = socket.selfId
+            let presence = ids.map { id in (id, canSeePresence(watcher, id) && isOnline(id)) }
             lock.unlock()
-            for id in ids { socket.events.onMessage(SignalCodec.encode(.presence(directId: id, online: isOnline(id)))) }
+            for (id, online) in presence {
+                socket.events.onMessage(SignalCodec.encode(.presence(directId: id, online: online)))
+            }
         case .offer, .answer, .ice:
             guard let route = frame.route, route.from == socket.selfId else { return }
             lock.lock()
             intros["\(route.from)\n\(route.to)"] = true
             let target = live[route.to]
+            let fromOnline = isOnline(route.from)
             lock.unlock()
+            notify(route.from, fromOnline)
             if let target, target.open {
                 target.events.onMessage(text)
             } else if case .offer = frame {

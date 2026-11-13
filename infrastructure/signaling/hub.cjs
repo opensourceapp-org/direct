@@ -63,17 +63,27 @@ function createSignalHub(options = {}) {
     return typeof seen === 'number' && at - seen < GRACE_MS;
   }
 
+  function maySeePresence(watcherId, targetId, peer, at) {
+    if (!watcherId || !targetId) return false;
+    if (peer && peer.discoverable) return true;
+    return wasIntroduced(targetId, watcherId, at);
+  }
+
   function reveal(selfId, directId, peer, at) {
     if (!selfId || !visible(peer, at)) return false;
-    if (peer.discoverable) return true;
-    return wasIntroduced(directId, selfId, at);
+    return maySeePresence(selfId, directId, peer, at);
   }
 
   function announce(id, online) {
     const listeners = watchers.get(id);
     if (!listeners) return;
+    const peer = peers.get(id);
+    const at = now();
     const frame = JSON.stringify({ kind: 'presence', directId: id, online });
-    for (const listener of listeners) listener(frame);
+    for (const [listener, watcherId] of listeners) {
+      if (!maySeePresence(watcherId, id, peer, at)) continue;
+      listener(frame);
+    }
   }
 
   /** Record a public bundle with no live socket, or refresh one that already has a socket. */
@@ -193,15 +203,19 @@ function createSignalHub(options = {}) {
       }
 
       if (message.kind === 'watch') {
+        if (!selfId) return;
         if (!Array.isArray(message.ids)) return;
         const ids = message.ids.filter((id) => typeof id === 'string' && DIRECT_ID.test(id)).slice(0, MAX_WATCH);
         unwatch();
         watching = new Set(ids);
+        const at = now();
         for (const id of watching) {
-          const listeners = watchers.get(id) ?? new Set();
-          listeners.add(send);
+          const listeners = watchers.get(id) ?? new Map();
+          listeners.set(send, selfId);
           watchers.set(id, listeners);
-          send(JSON.stringify({ kind: 'presence', directId: id, online: Boolean(peers.get(id)?.send) }));
+          const peer = peers.get(id);
+          const allowed = maySeePresence(selfId, id, peer, at);
+          send(JSON.stringify({ kind: 'presence', directId: id, online: allowed && Boolean(peer && peer.send) }));
         }
         return;
       }
@@ -222,6 +236,7 @@ function createSignalHub(options = {}) {
       const target = peers.get(message.to);
       if (target && target.send) {
         noteIntro(message.from, message.to);
+        announce(message.from, true);
         target.send(encoded);
         return;
       }

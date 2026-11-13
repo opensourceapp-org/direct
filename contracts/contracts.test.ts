@@ -417,11 +417,18 @@ describe('signaling contract', () => {
 
     const cors = await call('OPTIONS', '/api', undefined, { origin: 'https://app.example' });
     expect(cors.status).toBe(204);
-    expect(cors.headers['access-control-allow-origin']).toBe('https://app.example');
-    const corsPost = await call('POST', '/signal', { frames: [], waitMs: 0 }, { origin: 'https://app.example' });
+    expect(cors.headers['access-control-allow-origin']).toBeUndefined();
+    const corsPost = await call('POST', '/signal', { frames: [], waitMs: 0 }, { origin: 'https://evil.example' });
     expect(JSON.parse(corsPost.body).frames[0].kind).toBe('challenge');
-    expect(corsPost.headers['access-control-allow-origin']).toBe('https://app.example');
-    expect(corsPost.headers['access-control-allow-origin']).not.toBe('*');
+    expect(JSON.parse(corsPost.body).token).toEqual(expect.any(String));
+    expect(corsPost.headers['access-control-allow-origin']).toBeUndefined();
+    const sameOrigin = await call('POST', '/signal', { frames: [], waitMs: 0 }, {
+      origin: 'https://direct.example',
+      host: 'direct.example',
+    });
+    expect(sameOrigin.headers['access-control-allow-origin']).toBe('https://direct.example');
+    const local = await call('OPTIONS', '/api', undefined, { origin: 'http://127.0.0.1:8787' });
+    expect(local.headers['access-control-allow-origin']).toBe('http://127.0.0.1:8787');
   });
 
   test('the HTTP signaling route rate-limits new sessions from one address', async () => {
@@ -480,6 +487,27 @@ describe('signaling contract', () => {
     }
     expect(blocked).toBe(true);
     expect(await store.hitRate('198.51.100.100', true, 10_000, 40, 10)).toBe(false);
+  });
+
+  test('inbox payloads are sealed so WebRTC SDP is not stored in plaintext', () => {
+    const { sealInboxPayload, openInboxPayload } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/store.cjs'),
+    ) as {
+      sealInboxPayload: (plain: string, key: Buffer) => string;
+      openInboxPayload: (stored: string, key: Buffer) => string | null;
+    };
+    const key = Buffer.alloc(32, 7);
+    const plain = JSON.stringify({
+      kind: 'ice',
+      candidate: { candidate: 'candidate:1 1 udp 2122260223 192.168.1.20 54321 typ host' },
+    });
+    const sealed = sealInboxPayload(plain, key);
+    expect(sealed.startsWith('enc1.')).toBe(true);
+    expect(sealed).not.toContain('192.168.1.20');
+    expect(sealed).not.toContain('candidate:1');
+    expect(openInboxPayload(sealed, key)).toBe(plain);
+    expect(openInboxPayload(plain, key)).toBe(plain);
+    expect(openInboxPayload(sealed, Buffer.alloc(32, 9))).toBeNull();
   });
 
   test('HTTP long-poll signaling finds another phone by DIRECT ID', async () => {
@@ -615,6 +643,23 @@ describe('signaling contract', () => {
     expect(hub.roster()).toEqual([{ directId: ada, name: identityVectors.ada.name }]);
     phone.close();
     expect(hub.roster()).toEqual([]);
+  });
+
+  test('watch hides presence of a private phone until they opt in or send a signal', () => {
+    const hub = createSignalHub();
+    const a = socket();
+    const b = socket();
+    hub.attach(a);
+    hub.attach(b);
+    announce(a, 'ada');
+    announce(b, 'bo');
+    a.receive({ kind: 'watch', ids: [bo] });
+    expect(a.sent.at(-1)).toEqual({ kind: 'presence', directId: bo, online: false });
+    const before = a.sent.length;
+    announce(b, 'bo');
+    expect(a.sent.length).toBe(before);
+    b.receive({ ...signaling.clientToHub.offer, from: bo, to: ada });
+    expect(a.sent.some((frame) => frame.kind === 'presence' && frame.directId === bo && frame.online === true)).toBe(true);
   });
 
   test('lookup hides a private phone until they opt in or send a signal', () => {
