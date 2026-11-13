@@ -675,10 +675,48 @@ struct ContactsView: View {
                 Muted("Looking up a DIRECT ID only works if that person turned on public listing on this server. A QR code or pasted card works either way, and scanning it saves that address on this phone.")
             }
             .listRowBackground(Ink.surface)
-            if model.state.bootstrap.phase == .open {
-                Section {
+            Section {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: model.state.discoverable ? "person.2.fill" : "person.2")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(model.state.discoverable ? Ink.success : Ink.accent)
+                        .frame(width: 40, height: 40)
+                        .background(
+                            (model.state.discoverable ? Ink.success : Ink.accent).opacity(0.14),
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        )
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Let others find you")
+                            .font(.body.weight(.semibold))
+                        Text(model.state.discoverable ? "Visible on this server" : "Hidden until you share a QR or ID")
+                            .font(.footnote)
+                            .foregroundStyle(model.state.discoverable ? Ink.success : Ink.muted)
+                    }
+                    Spacer(minLength: 8)
+                    Toggle("Let others find you", isOn: Binding(
+                        get: { model.state.discoverable },
+                        set: { model.setDiscoverable($0) }
+                    ))
+                    .labelsHidden()
+                    .tint(Ink.accent)
+                }
+                .padding(.vertical, 4)
+                .accessibilityElement(children: .combine)
+                if model.state.bootstrap.phase == .open {
                     if model.state.suggestions.isEmpty {
-                        Muted("No one on this server has chosen to be listed right now.")
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Ink.muted)
+                                .frame(width: 40, height: 40)
+                                .background(Ink.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("No one else is listed")
+                                    .font(.body.weight(.medium))
+                                Muted("When someone turns this on, they show up here to add.")
+                            }
+                        }
+                        .padding(.vertical, 4)
                     }
                     ForEach(model.state.suggestions, id: \.directId) { person in
                         HStack(spacing: 12) {
@@ -687,18 +725,23 @@ struct ContactsView: View {
                                 Text(person.name.isEmpty ? person.directId : person.name).font(.headline)
                                 Text(person.directId).font(.system(.caption, design: .monospaced)).foregroundStyle(Ink.muted)
                             }
-                            Spacer()
+                            Spacer(minLength: 8)
                             Button("Add") { model.addContact(person.bundle) {} }
+                                .font(.subheadline.weight(.semibold))
+                                .buttonStyle(.bordered)
                                 .tint(Ink.accent)
                         }
+                        .padding(.vertical, 2)
                     }
-                } header: {
-                    Text("Suggested")
-                } footer: {
-                    Text("These people turned on public suggestions on this server. Adding them still uses their signed identity.")
                 }
-                .listRowBackground(Ink.surface)
+            } header: {
+                Text("Discovery")
+            } footer: {
+                Text(model.state.discoverable
+                    ? "Other DIRECT phones on this server can look you up and see you here. They still cannot read your messages."
+                    : "Off by default. Turn this on to appear in suggestions. A QR code or pasted card still works either way.")
             }
+            .listRowBackground(Ink.surface)
             Section("Contacts") {
                 ForEach(model.state.contacts) { contact in
                     VStack(alignment: .leading, spacing: 6) {
@@ -1041,20 +1084,6 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Ink.surface)
                 }
-                Section {
-                    Toggle(isOn: Binding(
-                        get: { model.state.discoverable },
-                        set: { model.setDiscoverable($0) }
-                    )) {
-                        Text("Let others find me on this server")
-                    }
-                    .tint(Ink.accent)
-                } header: {
-                    Text("Discovery")
-                } footer: {
-                    Text("Off by default. When this is on, other DIRECT phones on this server can look you up by ID and see you in suggested contacts. They still cannot read your messages.")
-                }
-                .listRowBackground(Ink.surface)
                 Section {
                     NavigationLink {
                         NetworkView()
