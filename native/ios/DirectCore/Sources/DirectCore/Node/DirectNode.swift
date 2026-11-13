@@ -900,6 +900,10 @@ public final class DirectNode {
 
     private static func previewBody(_ message: MessageRecord) -> String? {
         if message.deleted { return "This message was deleted" }
+        if message.feedPostId != nil {
+            let caption = message.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            return caption.isEmpty ? "Post" : "Post · \(caption)"
+        }
         let body = message.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if !body.isEmpty { return message.body }
         return MediaNotes.label(message.mediaKind)

@@ -810,6 +810,10 @@ class DirectNode(
 
     private fun previewBody(message: MessageRecord): String? = when {
         message.deleted -> "This message was deleted"
+        message.feedPostId != null -> {
+            val caption = message.body.trim()
+            if (caption.isEmpty()) "Post" else "Post · $caption"
+        }
         message.body.isNotBlank() -> message.body
         else -> MediaNotes.label(message.mediaKind)
     }

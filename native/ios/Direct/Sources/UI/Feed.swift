@@ -87,7 +87,7 @@ struct FeedView: View {
                 ForEach(posts) { item in
                     Section {
                         FeedPostCard(item: item, onOpen: { viewingId = item.id }, onProfile: { profilePeer = item.ownerId })
-                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 14, trailing: 16))
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                             .listRowBackground(Ink.surface)
                             .listRowSeparator(.hidden)
                     }
@@ -136,30 +136,32 @@ struct FeedPostCard: View {
 
     var body: some View {
         let name = feedOwnerName(model.state, item.ownerId)
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             Button(action: onProfile) {
                 HStack(spacing: 10) {
-                    Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 34)
+                    Avatar(name: name, jpeg: feedOwnerJpeg(model.state, item.ownerId), size: 32)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(name).font(.subheadline.weight(.semibold))
                         Text(formatFeedTime(item.createdAt)).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
-                    Image(systemName: "chevron.forward")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
                 }
             }
             .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             Button(action: onOpen) {
-                FeedThumb(item: item)
+                FeedThumb(item: item, cornerRadius: 18)
             }
             .buttonStyle(.plain)
+            .padding(.horizontal, 16)
             VStack(alignment: .leading, spacing: 8) {
-                FeedActions(item: item, onComments: onOpen)
                 if !item.caption.isEmpty {
-                    Text(item.caption).font(.subheadline)
+                    Text(item.caption)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                FeedActions(item: item, onComments: onOpen)
                 if !item.comments.isEmpty {
                     Button(action: onOpen) {
                         Text(item.comments.count == 1 ? "1 Comment" : "\(item.comments.count) Comments")
@@ -169,6 +171,9 @@ struct FeedPostCard: View {
                     .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 14)
         }
     }
 }
@@ -747,10 +752,10 @@ struct FeedLightbox: View {
                         }
                         Spacer(minLength: 0)
                     }
-                    FeedActions(item: item) { commenting = true }
                     if !item.caption.isEmpty {
                         Text(item.caption).font(.subheadline)
                     }
+                    FeedActions(item: item) { commenting = true }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)

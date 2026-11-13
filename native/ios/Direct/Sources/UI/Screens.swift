@@ -216,6 +216,7 @@ struct ChatView: View {
     @State private var deleting: MessageRecord?
     @State private var actionMessageId: String?
     @State private var showProfile = false
+    @State private var viewingPostId: String?
 
     private var contact: ContactRecord? { model.state.contacts.first { $0.directId == peerId } }
     private var group: GroupRecord? { model.state.groups.first { $0.id == peerId } }
@@ -268,6 +269,14 @@ struct ChatView: View {
                                     onDelete: {
                                         actionMessageId = nil
                                         deleting = message
+                                    },
+                                    onOpenPost: { id in
+                                        actionMessageId = nil
+                                        if model.state.feed.contains(where: { $0.id == id }) {
+                                            viewingPostId = id
+                                        } else {
+                                            model.toast = "That post isn't on this phone."
+                                        }
                                     }
                                 )
                             }
@@ -319,6 +328,20 @@ struct ChatView: View {
                 model.forwardMessage(message.id, to: target)
                 forwarding = nil
             }
+        }
+        .sheet(isPresented: Binding(
+            get: { viewingPostId != nil },
+            set: { if !$0 { viewingPostId = nil } }
+        )) {
+            NavigationStack {
+                FeedLightbox(id: viewingPostId ?? "", canDelete: false)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { viewingPostId = nil }
+                        }
+                    }
+            }
+            .environmentObject(model)
         }
         .sheet(isPresented: $showProfile) {
             NavigationStack {

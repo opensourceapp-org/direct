@@ -30,6 +30,8 @@ object MediaNotes {
         val parts: Int,
         val caption: String,
         val groupId: String? = null,
+        val feedId: String? = null,
+        val feedOwnerId: String? = null,
     )
 
     data class Job(
@@ -40,6 +42,8 @@ object MediaNotes {
         val parts: Int,
         val nextPart: Int,
         val fileName: String,
+        val feedId: String? = null,
+        val feedOwnerId: String? = null,
     )
 
     fun label(kind: String?): String? = when (kind) {
@@ -75,6 +79,8 @@ object MediaNotes {
             "caption" to part.caption,
         )
         part.groupId?.let { fields += "groupId" to it }
+        part.feedId?.let { fields += "feedId" to it }
+        part.feedOwnerId?.let { fields += "feedOwnerId" to it }
         val header = json(*fields.toTypedArray(), numbers = setOf("part", "parts"))
         return Encoding.utf8(PART_PREFIX + header + "\n") + chunk
     }
@@ -95,22 +101,28 @@ object MediaNotes {
             parts = json.int("parts") ?: return null,
             caption = json.text("caption") ?: "",
             groupId = json.text("groupId")?.takeIf { GroupNotes.isGroupId(it) },
+            feedId = json.text("feedId").validFeedId(),
+            feedOwnerId = json.text("feedOwnerId").validFeedId(),
         )
         if (part.part < 0 || part.parts <= 0 || part.part >= part.parts) return null
         if (part.kind !in KINDS) return null
         return part to rest.copyOfRange(newline + 1, rest.size)
     }
 
-    fun encodeJob(job: Job): String = JOB_PREFIX + json(
-        "kind" to job.kind,
-        "mime" to job.mime,
-        "name" to job.name,
-        "caption" to job.caption,
-        "parts" to job.parts.toString(),
-        "nextPart" to job.nextPart.toString(),
-        "fileName" to job.fileName,
-        numbers = setOf("parts", "nextPart"),
-    )
+    fun encodeJob(job: Job): String {
+        val fields = mutableListOf(
+            "kind" to job.kind,
+            "mime" to job.mime,
+            "name" to job.name,
+            "caption" to job.caption,
+            "parts" to job.parts.toString(),
+            "nextPart" to job.nextPart.toString(),
+            "fileName" to job.fileName,
+        )
+        job.feedId?.let { fields += "feedId" to it }
+        job.feedOwnerId?.let { fields += "feedOwnerId" to it }
+        return JOB_PREFIX + json(*fields.toTypedArray(), numbers = setOf("parts", "nextPart"))
+    }
 
     fun parseJob(payload: String): Job? {
         if (!payload.startsWith(JOB_PREFIX)) return null
@@ -123,8 +135,12 @@ object MediaNotes {
             parts = json.int("parts") ?: return null,
             nextPart = json.int("nextPart") ?: return null,
             fileName = json.text("fileName") ?: return null,
+            feedId = json.text("feedId").validFeedId(),
+            feedOwnerId = json.text("feedOwnerId").validFeedId(),
         )
     }
+
+    fun String?.validFeedId(): String? = this?.takeIf { it.length in 4..80 }
 
     fun isJob(payload: String): Boolean = payload.startsWith(JOB_PREFIX)
 

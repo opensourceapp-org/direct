@@ -85,6 +85,9 @@ data class MessageRecord(
     val deleted: Boolean = false,
     val forwarded: Boolean = false,
     val reactions: List<MessageReaction> = emptyList(),
+    /** When set, this bubble is a shared feed post. Tap opens that post. */
+    val feedPostId: String? = null,
+    val feedOwnerId: String? = null,
 )
 
 @Serializable

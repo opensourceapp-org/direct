@@ -793,6 +793,7 @@ struct MediaBubble: View {
     var onEdit: (() -> Void)?
     var onForward: (() -> Void)?
     var onDelete: (() -> Void)?
+    var onOpenPost: ((String) -> Void)?
     @EnvironmentObject private var model: AppModel
     @State private var bytes: Data?
     @State private var videoOpen = false
@@ -807,7 +808,8 @@ struct MediaBubble: View {
         onCloseMenu: (() -> Void)? = nil,
         onEdit: (() -> Void)? = nil,
         onForward: (() -> Void)? = nil,
-        onDelete: (() -> Void)? = nil
+        onDelete: (() -> Void)? = nil,
+        onOpenPost: ((String) -> Void)? = nil
     ) {
         self.message = message
         self.tail = tail
@@ -818,6 +820,7 @@ struct MediaBubble: View {
         self.onEdit = onEdit
         self.onForward = onForward
         self.onDelete = onDelete
+        self.onOpenPost = onOpenPost
         let age = Date().timeIntervalSince1970 * 1000 - Double(message.createdAt)
         let justSent = message.direction == .outgoing && age > -2_000 && age < 1_500
         _bytes = State(initialValue: nil)
@@ -833,7 +836,12 @@ struct MediaBubble: View {
                 if menuOpen, canReact {
                     reactionBar
                 }
-                if message.forwarded, !message.deleted {
+                if message.feedPostId != nil, !message.deleted {
+                    Text("Shared post")
+                        .font(.caption2)
+                        .foregroundStyle(Ink.muted)
+                        .padding(.horizontal, 4)
+                } else if message.forwarded, !message.deleted {
                     Text("Forwarded")
                         .font(.caption2)
                         .foregroundStyle(Ink.muted)
@@ -1026,6 +1034,10 @@ struct MediaBubble: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(fill, in: shape)
+        } else if let postId = message.feedPostId {
+            SharedPostCard(message: message, bytes: bytes) {
+                onOpenPost?(postId)
+            }
         } else if let bytes, let image = UIImage(data: bytes), let kind, ["image", "sticker", "gif"].contains(kind) {
             VStack(alignment: outgoing ? .trailing : .leading, spacing: 2) {
                 let caption = !message.body.isEmpty && message.body != label
@@ -1071,6 +1083,66 @@ struct MediaBubble: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(fill, in: messageBubble(outgoing, tail: tail))
+    }
+}
+
+struct SharedPostCard: View {
+    @EnvironmentObject private var model: AppModel
+    let message: MessageRecord
+    let bytes: Data?
+    var onOpen: () -> Void
+
+    var body: some View {
+        let owner = message.feedOwnerId.map { feedOwnerName(model.state, $0) } ?? "Post"
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack {
+                    Color(uiColor: .tertiarySystemFill)
+                    if let bytes, let image = UIImage(data: bytes) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    }
+                    if message.mediaKind == "video" {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 36))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.white)
+                    }
+                }
+                .frame(width: 220, height: 220)
+                .clipped()
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "newspaper")
+                            .font(.caption.weight(.semibold))
+                        Text("Post")
+                            .font(.caption.weight(.semibold))
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.forward")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.secondary)
+                    Text(owner)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Ink.text)
+                        .lineLimit(1)
+                    if !message.body.isEmpty {
+                        Text(message.body)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(10)
+            }
+            .frame(width: 220)
+            .background(Ink.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Ink.line, lineWidth: 0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open post")
     }
 }
 

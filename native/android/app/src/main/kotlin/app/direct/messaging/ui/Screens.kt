@@ -453,6 +453,10 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                     onForward = { forwarding = message },
                     onDelete = { deleting = message },
                     onReact = { emoji -> scope.attempt({ error = it }) { node.react(message.id, emoji) } },
+                    onOpenPost = { id ->
+                        if (state.feed.any { it.id == id }) viewingId = id
+                        else error = "That post isn't on this phone."
+                    },
                 )
             }
         }
@@ -1307,6 +1311,7 @@ private fun MessageBubble(
     onForward: () -> Unit,
     onDelete: () -> Unit,
     onReact: (String) -> Unit,
+    onOpenPost: (String) -> Unit,
 ) {
     val outgoing = message.direction == Direction.OUTGOING
     val context = LocalContext.current
@@ -1330,19 +1335,25 @@ private fun MessageBubble(
                 Modifier
                     .widthIn(min = if (kind == "audio") 220.dp else 0.dp, max = 280.dp)
                     .then(
-                        if (sticker && !message.deleted) Modifier else Modifier
+                        if ((sticker && !message.deleted) || (message.feedPostId != null && !message.deleted)) Modifier
+                        else Modifier
                             .background(if (outgoing) Ink.accent else Ink.surface, RoundedCornerShape(20.dp))
                             .border(androidx.compose.foundation.BorderStroke(1.dp, if (outgoing) Ink.accent else Ink.border), RoundedCornerShape(20.dp))
                             .padding(8.dp),
                     )
                     .padding(bottom = if (hasReactions) 14.dp else 0.dp)
                     .combinedClickable(
-                        onClick = { if (outgoing && message.state == MessageState.FAILED) onRetry() },
+                        onClick = {
+                            message.feedPostId?.let(onOpenPost)
+                                ?: run { if (outgoing && message.state == MessageState.FAILED) onRetry() }
+                        },
                         onLongClick = { if (actionable) menu = true },
                     ),
             ) {
                 if (message.deleted) {
                     Text("This message was deleted", color = ink.copy(alpha = 0.8f), fontStyle = FontStyle.Italic, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                } else if (message.feedPostId != null) {
+                    SharedPostCard(state, message, bytes)
                 } else {
                     if (message.forwarded) {
                         Text("Forwarded", fontSize = 12.sp, color = ink.copy(alpha = 0.72f), modifier = Modifier.padding(horizontal = 4.dp))
@@ -1440,6 +1451,60 @@ private fun MessageBubble(
                 color = if (state0 == MessageState.FAILED) Ink.danger else Ink.muted,
                 modifier = Modifier.padding(top = 2.dp).clickable(enabled = state0 == MessageState.FAILED, onClick = onRetry),
             )
+        }
+    }
+}
+
+@Composable
+private fun SharedPostCard(
+    state: NodeState,
+    message: MessageRecord,
+    bytes: ByteArray?,
+) {
+    val owner = message.feedOwnerId?.let { feedOwnerName(state, it) } ?: "Post"
+    val picture = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+    Column(horizontalAlignment = if (message.direction == Direction.OUTGOING) Alignment.End else Alignment.Start) {
+        Text("Shared post", fontSize = 12.sp, color = Ink.muted, modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp))
+        Column(
+            Modifier
+                .width(220.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Ink.surface)
+                .border(androidx.compose.foundation.BorderStroke(1.dp, Ink.border), RoundedCornerShape(16.dp)),
+        ) {
+            Box(
+                Modifier.fillMaxWidth().height(220.dp).background(Ink.background),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (picture != null) {
+                    Image(
+                        picture.asImageBitmap(),
+                        "Post",
+                        Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+                if (message.mediaKind == "video") {
+                    Box(
+                        Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                }
+            }
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Outlined.DynamicFeed, null, tint = Ink.muted, modifier = Modifier.size(14.dp))
+                    Text("Post", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Ink.muted)
+                    Spacer(Modifier.weight(1f))
+                    Text("Open", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Ink.accent)
+                }
+                Text(owner, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (message.body.isNotBlank()) {
+                    Text(message.body, fontSize = 13.sp, color = Ink.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
         }
     }
 }

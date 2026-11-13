@@ -188,42 +188,44 @@ private fun FeedPostCard(
     onOpen: () -> Unit,
 ) {
     val name = feedOwnerName(state, item.ownerId)
-    Column(Modifier.fillMaxWidth().background(Ink.surface)) {
+    Column(Modifier.fillMaxWidth().background(Ink.surface).padding(bottom = 10.dp)) {
         Row(
-            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 14.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 38.dp)
+            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 34.dp)
             Column(Modifier.weight(1f)) {
                 Text(name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
             }
         }
-        FeedThumb(node, item, Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onOpen))
-        FeedActions(node, state, item, onOpen)
+        FeedThumb(
+            node,
+            item,
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(18.dp))
+                .clickable(onClick = onOpen),
+        )
         if (item.caption.isNotBlank()) {
             Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
-                    append("  ")
-                    append(item.caption)
-                },
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                item.caption,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp),
                 fontSize = 14.sp,
             )
         }
+        FeedActions(node, state, item, onOpen)
         if (item.comments.isNotEmpty()) {
             Text(
-                if (item.comments.size == 1) "View 1 comment" else "View all ${item.comments.size} comments",
+                if (item.comments.size == 1) "1 comment" else "${item.comments.size} comments",
                 color = Ink.muted,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp).clickable(onClick = onOpen),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp).clickable(onClick = onOpen),
             )
-            val latest = item.comments.last()
-            CommentRow(state, latest.fromId, latest.body, latest.createdAt, compact = true, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp).clickable(onClick = onOpen))
         }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -504,7 +506,7 @@ internal fun ContactProfileScreen(
 private fun FeedThumb(node: DirectNode, item: FeedItem, modifier: Modifier) {
     var bytes by remember(item.id, item.mediaFile) { mutableStateOf<ByteArray?>(null) }
     LaunchedEffect(item.id, item.mediaFile) { bytes = node.readFeed(item.id) }
-    Box(modifier.background(Ink.surface), contentAlignment = Alignment.Center) {
+    Box(modifier.background(Ink.accentSoft), contentAlignment = Alignment.Center) {
         val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap()
         if (bitmap != null) {
             Image(bitmap, item.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -601,9 +603,6 @@ private fun FeedActions(
                 Icon(Icons.Outlined.Share, "Forward", tint = Ink.foreground, modifier = Modifier.size(24.dp))
             }
             Spacer(Modifier.weight(1f))
-            if (item.comments.isNotEmpty()) {
-                Text("${item.comments.size}", color = Ink.muted, fontSize = 13.sp)
-            }
         }
         if (item.likes.isNotEmpty()) {
             Row(
