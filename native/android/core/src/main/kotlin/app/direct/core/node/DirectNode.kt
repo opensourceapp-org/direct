@@ -464,14 +464,35 @@ class DirectNode(
         wake.trySend(Unit)
     }
 
-    suspend fun likeFeed(id: String) = onNode {
+    suspend fun likeFeed(id: String) = reactFeed(id, "❤️")
+
+    suspend fun reactFeed(id: String, emoji: String) = onNode {
         try {
-            requireEngine().likeFeed(id)
+            requireEngine().reactFeed(id, emoji)
         } catch (error: DeliveryRejected) {
-            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "That like was not saved.")
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "That reaction was not saved.")
         }
         publish()
         wake.trySend(Unit)
+    }
+
+    suspend fun forwardFeed(id: String, toPeerId: String): MessageRecord = onNode {
+        keys ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
+        if (GroupNotes.isGroupId(toPeerId)) {
+            store.group(toPeerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That group is not on this phone.")
+        } else {
+            val contact = store.contact(toPeerId) ?: throw DirectException(DirectException.Reason.NOT_FOUND, "That contact is not on this phone.")
+            if (contact.blocked) throw DirectException(DirectException.Reason.BLOCKED, "This contact is blocked.")
+            if (!contact.accepted) throw DirectException(DirectException.Reason.NOT_ACCEPTED, "Accept the message request before forwarding.")
+        }
+        val message = try {
+            requireEngine().forwardFeed(id, toPeerId)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "That post was not forwarded.")
+        }
+        publish()
+        wake.trySend(Unit)
+        message
     }
 
     suspend fun commentFeed(id: String, body: String) = onNode {
@@ -789,6 +810,10 @@ class DirectNode(
 
     private fun previewBody(message: MessageRecord): String? = when {
         message.deleted -> "This message was deleted"
+        message.feedPostId != null -> {
+            val caption = message.body.trim()
+            if (caption.isEmpty()) "Post" else "Post · $caption"
+        }
         message.body.isNotBlank() -> message.body
         else -> MediaNotes.label(message.mediaKind)
     }

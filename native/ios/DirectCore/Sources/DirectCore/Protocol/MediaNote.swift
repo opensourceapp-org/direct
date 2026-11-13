@@ -20,8 +20,10 @@ public enum MediaNotes {
         public var parts: Int
         public var caption: String
         public var groupId: String?
+        public var feedId: String?
+        public var feedOwnerId: String?
 
-        public init(mediaId: String, kind: String, mime: String, name: String, part: Int, parts: Int, caption: String, groupId: String? = nil) {
+        public init(mediaId: String, kind: String, mime: String, name: String, part: Int, parts: Int, caption: String, groupId: String? = nil, feedId: String? = nil, feedOwnerId: String? = nil) {
             self.mediaId = mediaId
             self.kind = kind
             self.mime = mime
@@ -30,6 +32,8 @@ public enum MediaNotes {
             self.parts = parts
             self.caption = caption
             self.groupId = groupId
+            self.feedId = feedId
+            self.feedOwnerId = feedOwnerId
         }
     }
 
@@ -41,8 +45,10 @@ public enum MediaNotes {
         public var parts: Int
         public var nextPart: Int
         public var fileName: String
+        public var feedId: String?
+        public var feedOwnerId: String?
 
-        public init(kind: String, mime: String, name: String, caption: String, parts: Int, nextPart: Int, fileName: String) {
+        public init(kind: String, mime: String, name: String, caption: String, parts: Int, nextPart: Int, fileName: String, feedId: String? = nil, feedOwnerId: String? = nil) {
             self.kind = kind
             self.mime = mime
             self.name = name
@@ -50,6 +56,8 @@ public enum MediaNotes {
             self.parts = parts
             self.nextPart = nextPart
             self.fileName = fileName
+            self.feedId = feedId
+            self.feedOwnerId = feedOwnerId
         }
     }
 
@@ -88,6 +96,8 @@ public enum MediaNotes {
             ("caption", .string(part.caption)),
         ]
         if let groupId = part.groupId { pairs.append(("groupId", .string(groupId))) }
+        if let feedId = part.feedId { pairs.append(("feedId", .string(feedId))) }
+        if let feedOwnerId = part.feedOwnerId { pairs.append(("feedOwnerId", .string(feedOwnerId))) }
         let header = JSON.object(pairs).serialized()
         return Encoding.utf8(partPrefix + header + "\n") + chunk
     }
@@ -112,14 +122,16 @@ public enum MediaNotes {
             part: Int(part),
             parts: Int(parts),
             caption: json["caption"]?.string ?? "",
-            groupId: json["groupId"]?.string.flatMap { GroupNotes.isGroupId($0) ? $0 : nil }
+            groupId: json["groupId"]?.string.flatMap { GroupNotes.isGroupId($0) ? $0 : nil },
+            feedId: json["feedId"]?.string.flatMap(validFeedId),
+            feedOwnerId: json["feedOwnerId"]?.string.flatMap(validFeedId)
         )
         guard decoded.part >= 0, decoded.parts > 0, decoded.part < decoded.parts, kinds.contains(decoded.kind) else { return nil }
         return (decoded, Data(rest[(rest.index(after: newline))...]))
     }
 
     public static func encodeJob(_ job: Job) -> String {
-        jobPrefix + JSON.object([
+        var pairs: [(String, JSON)] = [
             ("kind", .string(job.kind)),
             ("mime", .string(job.mime)),
             ("name", .string(job.name)),
@@ -127,7 +139,10 @@ public enum MediaNotes {
             ("parts", .int(Int64(job.parts))),
             ("nextPart", .int(Int64(job.nextPart))),
             ("fileName", .string(job.fileName)),
-        ]).serialized()
+        ]
+        if let feedId = job.feedId { pairs.append(("feedId", .string(feedId))) }
+        if let feedOwnerId = job.feedOwnerId { pairs.append(("feedOwnerId", .string(feedOwnerId))) }
+        return jobPrefix + JSON.object(pairs).serialized()
     }
 
     public static func parseJob(_ payload: String) -> Job? {
@@ -145,8 +160,14 @@ public enum MediaNotes {
             caption: json["caption"]?.string ?? "",
             parts: Int(parts),
             nextPart: Int(nextPart),
-            fileName: fileName
+            fileName: fileName,
+            feedId: json["feedId"]?.string.flatMap(validFeedId),
+            feedOwnerId: json["feedOwnerId"]?.string.flatMap(validFeedId)
         )
+    }
+
+    public static func validFeedId(_ value: String) -> String? {
+        (4...80).contains(value.count) ? value : nil
     }
 
     public static func isJob(_ payload: String) -> Bool { payload.hasPrefix(jobPrefix) }

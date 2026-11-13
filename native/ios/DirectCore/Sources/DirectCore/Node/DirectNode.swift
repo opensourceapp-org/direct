@@ -519,13 +519,38 @@ public final class DirectNode {
     }
 
     public func likeFeed(_ id: String) throws {
+        try reactFeed(id, "❤️")
+    }
+
+    public func reactFeed(_ id: String, _ emoji: String) throws {
         do {
-            try requireEngine().likeFeed(id)
+            try requireEngine().reactFeed(id, emoji)
         } catch let error as DeliveryRejected {
             throw DirectError(.rejected, error.message)
         }
         publish()
         wake.fire()
+    }
+
+    @discardableResult
+    public func forwardFeed(_ id: String, to toPeerId: String) throws -> MessageRecord {
+        guard keys?.directId != nil else { throw DirectError(.noIdentity, "Create your identity first.") }
+        if GroupNotes.isGroupId(toPeerId) {
+            guard store.group(toPeerId) != nil else { throw DirectError(.notFound, "That group is not on this phone.") }
+        } else {
+            guard let contact = store.contact(toPeerId) else { throw DirectError(.notFound, "That contact is not on this phone.") }
+            guard !contact.blocked else { throw DirectError(.blocked, "This contact is blocked.") }
+            guard contact.accepted else { throw DirectError(.notAccepted, "Accept the message request before forwarding.") }
+        }
+        let message: MessageRecord
+        do {
+            message = try requireEngine().forwardFeed(id, to: toPeerId)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+        return message
     }
 
     public func commentFeed(_ id: String, _ body: String) throws {
@@ -875,6 +900,10 @@ public final class DirectNode {
 
     private static func previewBody(_ message: MessageRecord) -> String? {
         if message.deleted { return "This message was deleted" }
+        if message.feedPostId != nil {
+            let caption = message.body.trimmingCharacters(in: .whitespacesAndNewlines)
+            return caption.isEmpty ? "Post" : "Post · \(caption)"
+        }
         let body = message.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if !body.isEmpty { return message.body }
         return MediaNotes.label(message.mediaKind)

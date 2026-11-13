@@ -37,12 +37,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.HorizontalDivider
@@ -84,6 +84,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.Image
 import app.direct.core.node.DirectNode
 import app.direct.core.node.NodeState
+import app.direct.core.protocol.ChatNotes
 import app.direct.core.protocol.FeedNotes
 import app.direct.core.store.FeedItem
 import kotlinx.coroutines.delay
@@ -117,21 +118,6 @@ internal fun feedOwnerName(state: NodeState, ownerId: String): String {
 internal fun feedOwnerJpeg(state: NodeState, ownerId: String): String? {
     if (ownerId == state.profile?.directId) return state.profile?.avatarJpegBase64
     return state.contacts.firstOrNull { it.directId == ownerId }?.avatarJpegBase64
-}
-
-private val HeartPink = Color(0xFFE0245E)
-
-private fun likedByMe(item: FeedItem, selfId: String?): Boolean =
-    selfId != null && item.likes.any { it.fromId == selfId }
-
-private fun likeSummary(state: NodeState, item: FeedItem): String? {
-    if (item.likes.isEmpty()) return null
-    val names = item.likes.map { feedOwnerName(state, it.fromId) }
-    return when (names.size) {
-        1 -> "Liked by ${names[0]}"
-        2 -> "Liked by ${names[0]} and ${names[1]}"
-        else -> "Liked by ${names[0]} and ${names.size - 1} others"
-    }
 }
 
 private fun formatFeedTime(ms: Long): String {
@@ -202,45 +188,44 @@ private fun FeedPostCard(
     onOpen: () -> Unit,
 ) {
     val name = feedOwnerName(state, item.ownerId)
-    Column(Modifier.fillMaxWidth().background(Ink.surface)) {
+    Column(Modifier.fillMaxWidth().background(Ink.surface).padding(bottom = 10.dp)) {
         Row(
-            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 14.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 38.dp)
+            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 34.dp)
             Column(Modifier.weight(1f)) {
                 Text(name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
             }
         }
-        FeedThumb(node, item, Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onOpen))
-        FeedActions(node, state, item, onOpen)
-        likeSummary(state, item)?.let { summary ->
-            Text(summary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
-        }
+        FeedThumb(
+            node,
+            item,
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(18.dp))
+                .clickable(onClick = onOpen),
+        )
         if (item.caption.isNotBlank()) {
             Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
-                    append("  ")
-                    append(item.caption)
-                },
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                item.caption,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp),
                 fontSize = 14.sp,
             )
         }
+        FeedActions(node, state, item, onOpen)
         if (item.comments.isNotEmpty()) {
             Text(
-                if (item.comments.size == 1) "View 1 comment" else "View all ${item.comments.size} comments",
+                if (item.comments.size == 1) "1 comment" else "${item.comments.size} comments",
                 color = Ink.muted,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp).clickable(onClick = onOpen),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp).clickable(onClick = onOpen),
             )
-            val latest = item.comments.last()
-            CommentRow(state, latest.fromId, latest.body, latest.createdAt, compact = true, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp).clickable(onClick = onOpen))
         }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -521,7 +506,7 @@ internal fun ContactProfileScreen(
 private fun FeedThumb(node: DirectNode, item: FeedItem, modifier: Modifier) {
     var bytes by remember(item.id, item.mediaFile) { mutableStateOf<ByteArray?>(null) }
     LaunchedEffect(item.id, item.mediaFile) { bytes = node.readFeed(item.id) }
-    Box(modifier.background(Ink.surface), contentAlignment = Alignment.Center) {
+    Box(modifier.background(Ink.accentSoft), contentAlignment = Alignment.Center) {
         val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap()
         if (bitmap != null) {
             Image(bitmap, item.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -576,25 +561,77 @@ private fun FeedActions(
     onOpenComments: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val liked = likedByMe(item, state.profile?.directId)
-    Row(
-        Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, top = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = { scope.launch { runCatching { node.likeFeed(item.id) } } }) {
-            Icon(
-                if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                "Like",
-                tint = if (liked) HeartPink else Ink.foreground,
-                modifier = Modifier.size(26.dp),
-            )
+    val selfId = state.profile?.directId
+    val mine = item.likes.firstOrNull { it.fromId == selfId }?.emoji
+    var picking by remember { mutableStateOf(false) }
+    var forwarding by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, top = 2.dp)) {
+        if (picking) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ChatNotes.EMOJIS.forEach { emoji ->
+                    Text(
+                        emoji,
+                        fontSize = 22.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (mine == emoji) Ink.accent.copy(alpha = 0.16f) else Color.Transparent)
+                            .clickable {
+                                picking = false
+                                scope.launch { runCatching { node.reactFeed(item.id, emoji) } }
+                            }
+                            .padding(horizontal = 6.dp, vertical = 8.dp),
+                    )
+                }
+            }
         }
-        IconButton(onClick = onOpenComments) {
-            Icon(Icons.Outlined.ChatBubbleOutline, "Comments", tint = Ink.foreground, modifier = Modifier.size(24.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { picking = !picking }) {
+                if (mine != null) {
+                    Text(mine, fontSize = 20.sp)
+                } else {
+                    Icon(Icons.Outlined.FavoriteBorder, "React", tint = Ink.foreground, modifier = Modifier.size(24.dp))
+                }
+            }
+            IconButton(onClick = onOpenComments) {
+                Icon(Icons.Outlined.ChatBubbleOutline, "Comments", tint = Ink.foreground, modifier = Modifier.size(24.dp))
+            }
+            IconButton(onClick = { forwarding = true }) {
+                Icon(Icons.Outlined.Share, "Forward", tint = Ink.foreground, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.weight(1f))
         }
-        Spacer(Modifier.weight(1f))
-        if (item.comments.isNotEmpty()) {
-            Text("${item.comments.size}", color = Ink.muted, fontSize = 13.sp)
+        if (item.likes.isNotEmpty()) {
+            Row(
+                Modifier.padding(start = 8.dp, end = 8.dp, bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                item.likes.groupBy { it.emoji }.forEach { (emoji, people) ->
+                    val selected = people.any { it.fromId == selfId }
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (selected) Ink.accent.copy(alpha = 0.16f) else Ink.background)
+                            .clickable { scope.launch { runCatching { node.reactFeed(item.id, emoji) } } }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(emoji, fontSize = 14.sp)
+                        if (people.size > 1) Text("${people.size}", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+    }
+    if (forwarding) {
+        ForwardSheet(state, onDismiss = { forwarding = false }) { target ->
+            forwarding = false
+            scope.launch { runCatching { node.forwardFeed(item.id, target) } }
         }
     }
 }
@@ -728,9 +765,6 @@ private fun FeedLightbox(
                 }
             }
             FeedActions(node, state, item, onOpenComments = {})
-            likeSummary(state, item)?.let { summary ->
-                Text(summary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp))
-            }
             if (item.caption.isNotBlank()) {
                 Text(
                     buildAnnotatedString {

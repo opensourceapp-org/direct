@@ -79,6 +79,11 @@ class MediaTest {
         val opened = assertNotNull(MediaNotes.decodePart(MediaNotes.encodePart(grouped, bytes)))
         assertEquals(grouped, opened.first)
         assertEquals(groupId, opened.first.groupId)
+
+        val posted = MediaNotes.Part("med_1", "image", "image/jpeg", "a.jpg", 0, 1, "lake", feedId = "fed_abc", feedOwnerId = "dir_X")
+        val shared = assertNotNull(MediaNotes.decodePart(MediaNotes.encodePart(posted, bytes)))
+        assertEquals("fed_abc", shared.first.feedId)
+        assertEquals("dir_X", shared.first.feedOwnerId)
     }
 
     @Test
@@ -260,5 +265,35 @@ class MediaTest {
         assertEquals(local.id, remote.id)
         assertEquals("looks great", remote.body)
         assertEquals(bo.keys.directId, remote.fromId)
+
+        boLinks.sent.clear()
+        bo.engine.reactFeed(post.id, "🔥")
+        assertEquals("🔥", bo.store.feed(post.id)?.likes?.first()?.emoji)
+        bo.engine.flush()
+        for (bytes in boLinks.sent) ada.engine.receive(bo.keys.directId, bytes)
+        assertEquals("🔥", ada.store.feed(post.id)?.likes?.first()?.emoji)
+
+        val fire = assertNotNull(FeedNotes.decodeSocial(FeedNotes.encodeReact("fed_abc", "🔥")))
+        assertEquals("react", fire.op)
+        assertEquals("🔥", fire.body)
+        assertNull(FeedNotes.decodeSocial(FeedNotes.encodeReact("fed_abc", "not-an-emoji")))
+
+        adaLinks.sent.clear()
+        boLinks.sent.clear()
+        val forwarded = bo.engine.forwardFeed(post.id, ada.keys.directId)
+        assertTrue(forwarded.forwarded)
+        assertEquals("lake", forwarded.body)
+        assertEquals("image", forwarded.mediaKind)
+        assertEquals(post.id, forwarded.feedPostId)
+        assertEquals(ada.keys.directId, forwarded.feedOwnerId)
+        assertEquals(ada.keys.directId, forwarded.peerId)
+        bo.engine.flush()
+        assertTrue(boLinks.sent.isNotEmpty())
+        for (bytes in boLinks.sent) ada.engine.receive(bo.keys.directId, bytes)
+        val copy = assertNotNull(ada.store.message(forwarded.id))
+        assertEquals("lake", copy.body)
+        assertEquals("image", copy.mediaKind)
+        assertEquals(post.id, copy.feedPostId)
+        assertEquals(ada.keys.directId, copy.feedOwnerId)
     }
 }

@@ -21,6 +21,7 @@ import app.direct.core.store.MessageRecord
 import app.direct.core.store.QueueItem
 import app.direct.core.store.QueueKind
 import app.direct.core.store.toggling
+import app.direct.core.store.togglingReaction
 import java.io.File
 
 /** Moves envelope bytes to a peer. Implemented by the WebRTC data channel on each platform. */
@@ -127,7 +128,7 @@ class DeliveryEngine(
      * Seals [bytes] into chunked envelopes and queues them. The file stays on this device
      * so the bubble can show it, and so a restart can send whatever has not been written yet.
      */
-    fun queueMedia(peerId: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String): MessageRecord {
+    fun queueMedia(peerId: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String, feedPostId: String? = null, feedOwnerId: String? = null): MessageRecord {
         if (identity() == null) throw DeliveryRejected("Create an identity before sending.")
         if (kind !in MediaNotes.KINDS) throw DeliveryRejected("That attachment is not supported.")
         if (bytes.isEmpty()) throw DeliveryRejected("That file is empty.")
@@ -142,10 +143,11 @@ class DeliveryEngine(
         File(directory, fileName).writeBytes(bytes)
         val parts = MediaNotes.split(bytes, mediaChunkBytes).size
         val cleanCaption = caption.trim()
-        val job = MediaNotes.Job(kind, mime, name, cleanCaption, parts, 0, fileName)
+        val job = MediaNotes.Job(kind, mime, name, cleanCaption, parts, 0, fileName, feedPostId, feedOwnerId)
         val message = MessageRecord(
             id, peerId, Direction.OUTGOING, cleanCaption, now, MessageState.QUEUED,
             mediaKind = kind, mediaMime = mime, mediaName = name, mediaFile = fileName,
+            forwarded = feedPostId != null, feedPostId = feedPostId, feedOwnerId = feedOwnerId,
         )
         store.putMessage(message)
         store.putQueued(QueueItem(id, peerId, QueueKind.MESSAGE, MediaNotes.encodeJob(job), 0, now, now + ttlMs))
@@ -162,6 +164,8 @@ class DeliveryEngine(
         name: String,
         bytes: ByteArray,
         caption: String,
+        feedPostId: String? = null,
+        feedOwnerId: String? = null,
     ): MessageRecord {
         if (identity() == null) throw DeliveryRejected("Create an identity before sending.")
         if (kind !in MediaNotes.KINDS) throw DeliveryRejected("That attachment is not supported.")
@@ -177,10 +181,11 @@ class DeliveryEngine(
         File(directory, fileName).writeBytes(bytes)
         val parts = MediaNotes.split(bytes, mediaChunkBytes).size
         val cleanCaption = caption.trim()
-        val job = MediaNotes.Job(kind, mime, name, cleanCaption, parts, 0, fileName)
+        val job = MediaNotes.Job(kind, mime, name, cleanCaption, parts, 0, fileName, feedPostId, feedOwnerId)
         val message = MessageRecord(
             id, group.id, Direction.OUTGOING, cleanCaption, now, MessageState.QUEUED,
             mediaKind = kind, mediaMime = mime, mediaName = name, mediaFile = fileName, senderId = selfId,
+            forwarded = feedPostId != null, feedPostId = feedPostId, feedOwnerId = feedOwnerId,
         )
         store.putMessage(message)
         if (!enqueueGroupMedia(group, selfId, id, job, now)) throw DeliveryRejected("No reachable members in this group.")
@@ -257,9 +262,9 @@ class DeliveryEngine(
             val name = message.mediaName ?: "attachment"
             if (GroupNotes.isGroupId(toPeerId)) {
                 val group = store.group(toPeerId) ?: throw DeliveryRejected("That group is not on this device.")
-                queueGroupMedia(group, selfId, kind, mime, name, bytes, message.body)
+                queueGroupMedia(group, selfId, kind, mime, name, bytes, message.body, message.feedPostId, message.feedOwnerId)
             } else {
-                queueMedia(toPeerId, kind, mime, name, bytes, message.body)
+                queueMedia(toPeerId, kind, mime, name, bytes, message.body, message.feedPostId, message.feedOwnerId)
             }
         } else if (GroupNotes.isGroupId(toPeerId)) {
             val group = store.group(toPeerId) ?: throw DeliveryRejected("That group is not on this device.")
@@ -312,7 +317,7 @@ class DeliveryEngine(
                 val parts = MediaNotes.split(File(directory, mediaFile).readBytes(), mediaChunkBytes).size
                 val job = MediaNotes.Job(
                     message.mediaKind, message.mediaMime ?: "application/octet-stream", message.mediaName ?: "",
-                    message.body, parts, 0, mediaFile,
+                    message.body, parts, 0, mediaFile, message.feedPostId, message.feedOwnerId,
                 )
                 if (!enqueueGroupMedia(group, selfId, message.id, job, now)) return false
                 store.save()
@@ -342,7 +347,7 @@ class DeliveryEngine(
             val directory = mediaDirectory ?: return false
             if (!File(directory, mediaFile).exists()) return false
             val parts = MediaNotes.split(File(directory, mediaFile).readBytes(), mediaChunkBytes).size
-            val job = MediaNotes.Job(message.mediaKind, message.mediaMime ?: "application/octet-stream", message.mediaName ?: "", message.body, parts, 0, mediaFile)
+            val job = MediaNotes.Job(message.mediaKind, message.mediaMime ?: "application/octet-stream", message.mediaName ?: "", message.body, parts, 0, mediaFile, message.feedPostId, message.feedOwnerId)
             store.putMessage(message.copy(state = next, lastError = null, updatedAt = now))
             store.putQueued(QueueItem(message.id, message.peerId, QueueKind.MESSAGE, MediaNotes.encodeJob(job), 0, now, now + ttlMs))
             store.save()
@@ -443,12 +448,37 @@ class DeliveryEngine(
     }
 
     fun likeFeed(id: String) {
+        reactFeed(id, "❤️")
+    }
+
+    fun reactFeed(id: String, emoji: String) {
+        val keys = identity()?.first ?: throw DeliveryRejected("Create an identity first.")
+        if (emoji !in FeedNotes.EMOJIS) throw DeliveryRejected("That reaction is not supported.")
+        val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")
+        if (item.channel != FeedNotes.POST) throw DeliveryRejected("Only posts can be reacted to.")
+        store.putFeed(item.copy(likes = item.likes.togglingReaction(keys.directId, emoji)))
+        val note = if (emoji == "❤️") FeedNotes.encodeLike(id) else FeedNotes.encodeReact(id, emoji)
+        fanFeedPlain(Encoding.utf8(note))
+        store.save()
+    }
+
+    fun forwardFeed(id: String, toPeerId: String): MessageRecord {
         val keys = identity()?.first ?: throw DeliveryRejected("Create an identity first.")
         val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")
-        if (item.channel != FeedNotes.POST) throw DeliveryRejected("Only posts can be liked.")
-        store.putFeed(item.copy(likes = item.likes.toggling(keys.directId)))
-        fanFeedPlain(Encoding.utf8(FeedNotes.encodeLike(id)))
+        if (item.channel != FeedNotes.POST) throw DeliveryRejected("Only posts can be forwarded.")
+        val directory = mediaDirectory ?: throw DeliveryRejected("Attachments need local storage.")
+        val bytes = File(directory, item.mediaFile).let { if (it.exists()) it.readBytes() else ByteArray(0) }
+        if (bytes.isEmpty()) throw DeliveryRejected("That photo is still loading.")
+        val created = if (GroupNotes.isGroupId(toPeerId)) {
+            val group = store.group(toPeerId) ?: throw DeliveryRejected("That group is not on this device.")
+            queueGroupMedia(group, keys.directId, item.kind, item.mime, item.name, bytes, item.caption, item.id, item.ownerId)
+        } else {
+            queueMedia(toPeerId, item.kind, item.mime, item.name, bytes, item.caption, item.id, item.ownerId)
+        }
+        val marked = created.copy(forwarded = true, feedPostId = item.id, feedOwnerId = item.ownerId)
+        store.putMessage(marked)
         store.save()
+        return marked
     }
 
     fun commentFeed(id: String, body: String) {
@@ -918,7 +948,7 @@ class DeliveryEngine(
         var job = initial
         while (part < parts.size) {
             val plain = MediaNotes.encodePart(
-                MediaNotes.Part(logicalId, job.kind, job.mime, job.name, part, parts.size, job.caption, groupId),
+                MediaNotes.Part(logicalId, job.kind, job.mime, job.name, part, parts.size, job.caption, groupId, job.feedId, job.feedOwnerId),
                 parts[part],
             )
             val envelope = Envelopes.seal(
@@ -1033,7 +1063,11 @@ class DeliveryEngine(
         val item = store.feed(social.id) ?: return ReceiveOutcome.IGNORED
         if (item.channel != FeedNotes.POST) return ReceiveOutcome.IGNORED
         val updated = when (social.op) {
-            "like" -> item.copy(likes = item.likes.toggling(peerId))
+            "like" -> item.copy(likes = item.likes.togglingReaction(peerId, "❤️"))
+            "react" -> {
+                val emoji = social.body ?: return ReceiveOutcome.IGNORED
+                item.copy(likes = item.likes.togglingReaction(peerId, emoji))
+            }
             "comment" -> {
                 val commentId = social.commentId ?: return ReceiveOutcome.IGNORED
                 val body = social.body?.trim()?.take(FeedNotes.MAX_COMMENT) ?: return ReceiveOutcome.IGNORED
@@ -1081,10 +1115,16 @@ class DeliveryEngine(
             val body = "Receiving $label ($have/${header.parts})"
             val existing = store.message(header.mediaId)
             store.putMessage(
-                existing?.copy(body = body, updatedAt = clock())
+                existing?.copy(
+                    body = body,
+                    updatedAt = clock(),
+                    feedPostId = existing.feedPostId ?: header.feedId,
+                    feedOwnerId = existing.feedOwnerId ?: header.feedOwnerId,
+                )
                     ?: MessageRecord(
                         header.mediaId, threadId, Direction.INCOMING, body, createdAt,
                         mediaKind = header.kind, mediaMime = header.mime, mediaName = header.name, senderId = senderId,
+                        forwarded = header.feedId != null, feedPostId = header.feedId, feedOwnerId = header.feedOwnerId,
                     ),
             )
             store.save()
@@ -1099,7 +1139,7 @@ class DeliveryEngine(
         val stored = MessageRecord(
             header.mediaId, threadId, Direction.INCOMING, caption, createdAt,
             mediaKind = header.kind, mediaMime = header.mime, mediaName = header.name, mediaFile = fileName,
-            senderId = senderId,
+            senderId = senderId, forwarded = header.feedId != null, feedPostId = header.feedId, feedOwnerId = header.feedOwnerId,
         )
         store.putMessage(stored)
         queueReceipt(contact, EnvelopeType.ACK, header.mediaId)
