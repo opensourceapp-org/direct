@@ -57,6 +57,7 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -132,8 +133,10 @@ internal fun savedFeed(state: NodeState): List<FeedItem> {
 
 internal fun othersPosts(state: NodeState): List<FeedItem> {
     val selfId = state.profile?.directId ?: return emptyList()
-    return state.feed.filter { it.channel == FeedNotes.POST && it.ownerId != selfId }
-        .sortedByDescending { it.createdAt }
+    return state.feed.filter { item ->
+        item.channel == FeedNotes.POST && item.ownerId != selfId
+            && state.contacts.firstOrNull { it.directId == item.ownerId }?.blocked != true
+    }.sortedByDescending { it.createdAt }
 }
 
 internal fun feedOwnerName(state: NodeState, ownerId: String): String {
@@ -573,6 +576,8 @@ internal fun ContactProfileScreen(
     val canCall = !self && contact?.accepted == true && contact.blocked != true
     var storyOpen by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var confirmBlock by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val placeCall = rememberPlaceCall(node, peerId) { error = it }
     BackHandler(onBack = back)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -593,7 +598,7 @@ internal fun ContactProfileScreen(
         )
         if (!self) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -612,9 +617,54 @@ internal fun ContactProfileScreen(
                     ProfileIconButton(Icons.Filled.Videocam, "Video") { placeCall(true) }
                 }
             }
+            if (contact != null) {
+                if (contact.blocked) {
+                    Muted(
+                        "You blocked this person. Messages from them are dropped.",
+                        Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                    )
+                    OutlinedButton(
+                        onClick = { scope.launch { runCatching { node.unblock(peerId) }.onFailure { error = it.message } } },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Ink.border),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.accent),
+                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp).height(40.dp),
+                    ) {
+                        Text("Unblock", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { confirmBlock = true },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Ink.danger),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.danger),
+                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp).height(40.dp),
+                    ) {
+                        Text("Block", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
+                }
+            }
         }
         error?.let { Text(it, color = Ink.danger, modifier = Modifier.padding(horizontal = 20.dp)) }
-        ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenMedia = onOpenMedia)
+        if (contact?.blocked != true) {
+            ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenMedia = onOpenMedia)
+        }
+    }
+    if (confirmBlock) {
+        AlertDialog(
+            onDismissRequest = { confirmBlock = false },
+            title = { Text("Block $name?") },
+            text = { Text("They won’t be able to message you. Existing chats stay on this phone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmBlock = false
+                        scope.launch { runCatching { node.block(peerId) }.onFailure { error = it.message } }
+                    },
+                ) { Text("Block", color = Ink.danger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmBlock = false }) { Text("Cancel") } },
+        )
     }
     if (storyOpen) StoryViewer(node, state, peerId) { storyOpen = false }
 }

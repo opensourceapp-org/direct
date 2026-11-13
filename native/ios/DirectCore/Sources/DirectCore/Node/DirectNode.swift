@@ -680,6 +680,20 @@ public final class DirectNode {
         publish()
     }
 
+    public func unblock(_ peerId: String) throws {
+        guard var contact = store.contact(peerId) else { return }
+        contact.blocked = false
+        store.putContact(contact)
+        try store.save()
+        refreshWatch()
+        if contact.accepted {
+            try? engine?.shareProfile(peerId: peerId)
+            try? engine?.shareFeed(peerId: peerId)
+        }
+        publish()
+        wake.fire()
+    }
+
     public func removeContact(_ peerId: String) throws {
         try engine?.rejectPeer(peerId)
         for item in store.feed() where item.ownerId == peerId {

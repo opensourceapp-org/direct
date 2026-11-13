@@ -613,6 +613,20 @@ class DirectNode(
         publish()
     }
 
+    suspend fun unblock(peerId: String) = onNode {
+        val contact = store.contact(peerId) ?: return@onNode
+        val updated = contact.copy(blocked = false)
+        store.putContact(updated)
+        store.save()
+        refreshWatch()
+        if (updated.accepted) {
+            engine?.shareProfile(peerId)
+            engine?.shareFeed(peerId)
+        }
+        publish()
+        wake.trySend(Unit)
+    }
+
     suspend fun removeContact(peerId: String) = onNode {
         engine?.rejectPeer(peerId)
         store.feed().filter { it.ownerId == peerId }.forEach { item ->

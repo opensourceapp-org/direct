@@ -32,8 +32,11 @@ func savedFeed(_ state: NodeState) -> [FeedItem] {
 
 func othersPosts(_ state: NodeState) -> [FeedItem] {
     guard let selfId = state.profile?.directId else { return [] }
-    return state.feed.filter { $0.channel == FeedNotes.post && $0.ownerId != selfId }
-        .sorted { $0.createdAt > $1.createdAt }
+    return state.feed.filter { item in
+        item.channel == FeedNotes.post && item.ownerId != selfId
+            && state.contacts.first { $0.directId == item.ownerId }?.blocked != true
+    }
+    .sorted { $0.createdAt > $1.createdAt }
 }
 
 func feedOwnerName(_ state: NodeState, _ ownerId: String) -> String {
@@ -758,6 +761,7 @@ struct ContactProfileView: View {
     let peerId: String
     @Environment(\.dismiss) private var dismiss
     @State private var storyOpen = false
+    @State private var confirmBlock = false
 
     var body: some View {
         let selfProfile = peerId == model.state.profile?.directId
@@ -805,9 +809,40 @@ struct ContactProfileView: View {
                                 }
                             }
                         }
+                        if contact != nil {
+                            if contact?.blocked == true {
+                                Text("You blocked this person. Messages from them are dropped.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Button {
+                                    model.unblock(peerId)
+                                } label: {
+                                    Text("Unblock")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.regular)
+                                .tint(Ink.accent)
+                            } else {
+                                Button(role: .destructive) {
+                                    confirmBlock = true
+                                } label: {
+                                    Text("Block")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.regular)
+                                .tint(Ink.danger)
+                            }
+                        }
                     }
                 }
-                ProfilePosts(ownerId: peerId, canAdd: selfProfile, showsHeading: true)
+                if contact?.blocked != true {
+                    ProfilePosts(ownerId: peerId, canAdd: selfProfile, showsHeading: true)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 32)
@@ -819,6 +854,12 @@ struct ContactProfileView: View {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Close") { dismiss() }
             }
+        }
+        .confirmationDialog("Block \(name)?", isPresented: $confirmBlock, titleVisibility: .visible) {
+            Button("Block", role: .destructive) { model.block(peerId) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("They won’t be able to message you. Existing chats stay on this phone.")
         }
         .fullScreenCover(isPresented: $storyOpen) {
             StoryViewer(ownerId: peerId) { storyOpen = false }
