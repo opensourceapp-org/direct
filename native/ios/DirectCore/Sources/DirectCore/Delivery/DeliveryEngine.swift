@@ -135,7 +135,7 @@ public final class DeliveryEngine {
 
     /// Seals `bytes` into chunked envelopes and queues them. The file stays on this device
     /// so the bubble can show it, and so a restart can send whatever has not been written yet.
-    public func queueMedia(_ peerId: String, kind: String, mime: String, name: String, bytes: Data, caption: String) throws -> MessageRecord {
+    public func queueMedia(_ peerId: String, kind: String, mime: String, name: String, bytes: Data, caption: String, feedPostId: String? = nil, feedOwnerId: String? = nil) throws -> MessageRecord {
         guard identity() != nil else { throw DeliveryRejected(message: "Create an identity before sending.") }
         guard MediaNotes.kinds.contains(kind) else { throw DeliveryRejected(message: "That attachment is not supported.") }
         guard !bytes.isEmpty else { throw DeliveryRejected(message: "That file is empty.") }
@@ -150,10 +150,11 @@ public final class DeliveryEngine {
         try bytes.write(to: directory.appendingPathComponent(fileName))
         let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes).count
         let cleanCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
-        let job = MediaNotes.Job(kind: kind, mime: mime, name: name, caption: cleanCaption, parts: parts, nextPart: 0, fileName: fileName)
+        let job = MediaNotes.Job(kind: kind, mime: mime, name: name, caption: cleanCaption, parts: parts, nextPart: 0, fileName: fileName, feedId: feedPostId, feedOwnerId: feedOwnerId)
         let message = MessageRecord(
             id: id, peerId: peerId, direction: .outgoing, body: cleanCaption, createdAt: now, state: .queued,
-            mediaKind: kind, mediaMime: mime, mediaName: name, mediaFile: fileName
+            mediaKind: kind, mediaMime: mime, mediaName: name, mediaFile: fileName,
+            forwarded: feedPostId != nil, feedPostId: feedPostId, feedOwnerId: feedOwnerId
         )
         store.putMessage(message)
         store.putQueued(QueueItem(id: id, peerId: peerId, kind: .message, payload: MediaNotes.encodeJob(job), nextAttemptAt: now, expiresAt: now + ttlMs))
@@ -170,7 +171,9 @@ public final class DeliveryEngine {
         mime: String,
         name: String,
         bytes: Data,
-        caption: String
+        caption: String,
+        feedPostId: String? = nil,
+        feedOwnerId: String? = nil
     ) throws -> MessageRecord {
         guard identity() != nil else { throw DeliveryRejected(message: "Create an identity before sending.") }
         guard MediaNotes.kinds.contains(kind) else { throw DeliveryRejected(message: "That attachment is not supported.") }
@@ -186,10 +189,11 @@ public final class DeliveryEngine {
         try bytes.write(to: directory.appendingPathComponent(fileName))
         let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes).count
         let cleanCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
-        let job = MediaNotes.Job(kind: kind, mime: mime, name: name, caption: cleanCaption, parts: parts, nextPart: 0, fileName: fileName)
+        let job = MediaNotes.Job(kind: kind, mime: mime, name: name, caption: cleanCaption, parts: parts, nextPart: 0, fileName: fileName, feedId: feedPostId, feedOwnerId: feedOwnerId)
         let message = MessageRecord(
             id: id, peerId: group.id, direction: .outgoing, body: cleanCaption, createdAt: now, state: .queued,
-            mediaKind: kind, mediaMime: mime, mediaName: name, mediaFile: fileName, senderId: selfId
+            mediaKind: kind, mediaMime: mime, mediaName: name, mediaFile: fileName, senderId: selfId,
+            forwarded: feedPostId != nil, feedPostId: feedPostId, feedOwnerId: feedOwnerId
         )
         store.putMessage(message)
         guard enqueueGroupMedia(group, selfId, id, job, now) else {
@@ -281,9 +285,9 @@ public final class DeliveryEngine {
             let name = message.mediaName ?? "attachment"
             if GroupNotes.isGroupId(toPeerId) {
                 guard let group = store.group(toPeerId) else { throw DeliveryRejected(message: "That group is not on this device.") }
-                created = try queueGroupMedia(group, selfId, kind: kind, mime: mime, name: name, bytes: bytes, caption: message.body)
+                created = try queueGroupMedia(group, selfId, kind: kind, mime: mime, name: name, bytes: bytes, caption: message.body, feedPostId: message.feedPostId, feedOwnerId: message.feedOwnerId)
             } else {
-                created = try queueMedia(toPeerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: message.body)
+                created = try queueMedia(toPeerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: message.body, feedPostId: message.feedPostId, feedOwnerId: message.feedOwnerId)
             }
         } else if GroupNotes.isGroupId(toPeerId) {
             guard let group = store.group(toPeerId) else { throw DeliveryRejected(message: "That group is not on this device.") }
@@ -348,7 +352,8 @@ public final class DeliveryEngine {
                 let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes).count
                 let job = MediaNotes.Job(
                     kind: kind, mime: message.mediaMime ?? "application/octet-stream", name: message.mediaName ?? "",
-                    caption: message.body, parts: parts, nextPart: 0, fileName: mediaFile
+                    caption: message.body, parts: parts, nextPart: 0, fileName: mediaFile,
+                    feedId: message.feedPostId, feedOwnerId: message.feedOwnerId
                 )
                 guard enqueueGroupMedia(group, keys.directId, message.id, job, now) else { return false }
                 try store.save()
@@ -381,7 +386,8 @@ public final class DeliveryEngine {
             let parts = MediaNotes.split(bytes, chunkBytes: mediaChunkBytes).count
             let job = MediaNotes.Job(
                 kind: kind, mime: message.mediaMime ?? "application/octet-stream", name: message.mediaName ?? "",
-                caption: message.body, parts: parts, nextPart: 0, fileName: mediaFile
+                caption: message.body, parts: parts, nextPart: 0, fileName: mediaFile,
+                feedId: message.feedPostId, feedOwnerId: message.feedOwnerId
             )
             message.state = next
             message.lastError = nil
@@ -502,12 +508,41 @@ public final class DeliveryEngine {
     }
 
     public func likeFeed(_ id: String) throws {
+        try reactFeed(id, "❤️")
+    }
+
+    public func reactFeed(_ id: String, _ emoji: String) throws {
+        guard let keys = identity()?.0 else { throw DeliveryRejected(message: "Create an identity first.") }
+        guard FeedNotes.emojis.contains(emoji) else { throw DeliveryRejected(message: "That reaction is not supported.") }
+        guard let item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }
+        guard item.channel == FeedNotes.post else { throw DeliveryRejected(message: "Only posts can be reacted to.") }
+        store.putFeed(item.togglingReaction(keys.directId, emoji))
+        let note = emoji == "❤️" ? FeedNotes.encodeLike(id: id) : FeedNotes.encodeReact(id: id, emoji: emoji)
+        try fanFeedPlain(Encoding.utf8(note))
+        try store.save()
+    }
+
+    public func forwardFeed(_ id: String, to toPeerId: String) throws -> MessageRecord {
         guard let keys = identity()?.0 else { throw DeliveryRejected(message: "Create an identity first.") }
         guard let item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }
-        guard item.channel == FeedNotes.post else { throw DeliveryRejected(message: "Only posts can be liked.") }
-        store.putFeed(item.togglingLike(keys.directId))
-        try fanFeedPlain(Encoding.utf8(FeedNotes.encodeLike(id: id)))
+        guard item.channel == FeedNotes.post else { throw DeliveryRejected(message: "Only posts can be forwarded.") }
+        guard let directory = mediaDirectory else { throw DeliveryRejected(message: "Attachments need local storage.") }
+        let bytes = (try? Data(contentsOf: directory.appendingPathComponent(item.mediaFile))) ?? Data()
+        guard !bytes.isEmpty else { throw DeliveryRejected(message: "That photo is still loading.") }
+        let created: MessageRecord
+        if GroupNotes.isGroupId(toPeerId) {
+            guard let group = store.group(toPeerId) else { throw DeliveryRejected(message: "That group is not on this device.") }
+            created = try queueGroupMedia(group, keys.directId, kind: item.kind, mime: item.mime, name: item.name, bytes: bytes, caption: item.caption, feedPostId: item.id, feedOwnerId: item.ownerId)
+        } else {
+            created = try queueMedia(toPeerId, kind: item.kind, mime: item.mime, name: item.name, bytes: bytes, caption: item.caption, feedPostId: item.id, feedOwnerId: item.ownerId)
+        }
+        var marked = created
+        marked.forwarded = true
+        marked.feedPostId = item.id
+        marked.feedOwnerId = item.ownerId
+        store.putMessage(marked)
         try store.save()
+        return marked
     }
 
     public func commentFeed(_ id: String, _ body: String) throws {
@@ -995,7 +1030,7 @@ public final class DeliveryEngine {
         var job = initial
         while part < parts.count {
             let plain = MediaNotes.encodePart(
-                MediaNotes.Part(mediaId: logicalId, kind: job.kind, mime: job.mime, name: job.name, part: part, parts: parts.count, caption: job.caption, groupId: groupId),
+                MediaNotes.Part(mediaId: logicalId, kind: job.kind, mime: job.mime, name: job.name, part: part, parts: parts.count, caption: job.caption, groupId: groupId, feedId: job.feedId, feedOwnerId: job.feedOwnerId),
                 parts[part]
             )
             let envelope = try Envelopes.seal(
@@ -1126,7 +1161,12 @@ public final class DeliveryEngine {
     private func ingestSocial(_ peerId: String, _ social: FeedNotes.Social) throws -> ReceiveOutcome {
         guard var item = store.feed(social.id), item.channel == FeedNotes.post else { return .ignored }
         if social.op == "like" {
-            store.putFeed(item.togglingLike(peerId))
+            store.putFeed(item.togglingReaction(peerId, "❤️"))
+            try store.save()
+            return .stored
+        }
+        if social.op == "react", let emoji = social.body {
+            store.putFeed(item.togglingReaction(peerId, emoji))
             try store.save()
             return .stored
         }
@@ -1176,11 +1216,14 @@ public final class DeliveryEngine {
             if var existing = store.message(header.mediaId) {
                 existing.body = body
                 existing.updatedAt = clock()
+                if existing.feedPostId == nil { existing.feedPostId = header.feedId }
+                if existing.feedOwnerId == nil { existing.feedOwnerId = header.feedOwnerId }
                 store.putMessage(existing)
             } else {
                 store.putMessage(MessageRecord(
                     id: header.mediaId, peerId: threadId, direction: .incoming, body: body, createdAt: createdAt,
-                    mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, senderId: senderId
+                    mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, senderId: senderId,
+                    forwarded: header.feedId != nil, feedPostId: header.feedId, feedOwnerId: header.feedOwnerId
                 ))
             }
             try store.save()
@@ -1197,7 +1240,8 @@ public final class DeliveryEngine {
         let caption = header.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? label : header.caption
         let stored = MessageRecord(
             id: header.mediaId, peerId: threadId, direction: .incoming, body: caption, createdAt: createdAt,
-            mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, mediaFile: fileName, senderId: senderId
+            mediaKind: header.kind, mediaMime: header.mime, mediaName: header.name, mediaFile: fileName, senderId: senderId,
+            forwarded: header.feedId != nil, feedPostId: header.feedId, feedOwnerId: header.feedOwnerId
         )
         store.putMessage(stored)
         try queueReceipt(contact, .ack, header.mediaId)

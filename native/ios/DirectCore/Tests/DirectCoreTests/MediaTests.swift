@@ -73,6 +73,11 @@ final class MediaTests: XCTestCase {
         let opened = MediaNotes.decodePart(MediaNotes.encodePart(grouped, bytes))
         XCTAssertEqual(grouped, opened?.0)
         XCTAssertEqual(groupId, opened?.0.groupId)
+
+        let posted = MediaNotes.Part(mediaId: "med_1", kind: "image", mime: "image/jpeg", name: "a.jpg", part: 0, parts: 1, caption: "lake", feedId: "fed_abc", feedOwnerId: "dir_X")
+        let shared = MediaNotes.decodePart(MediaNotes.encodePart(posted, bytes))
+        XCTAssertEqual("fed_abc", shared?.0.feedId)
+        XCTAssertEqual("dir_X", shared?.0.feedOwnerId)
     }
 
     func testAnOlderSnapshotStillOpens() throws {
@@ -265,6 +270,36 @@ final class MediaTests: XCTestCase {
         XCTAssertEqual(local.id, remote.id)
         XCTAssertEqual("looks great", remote.body)
         XCTAssertEqual(bo.keys.directId, remote.fromId)
+
+        boLinks.sent.removeAll()
+        try bo.engine.reactFeed(post.id, "🔥")
+        XCTAssertEqual("🔥", bo.store.feed(post.id)?.likes.first?.emoji)
+        try await bo.engine.flush()
+        for bytes in boLinks.sent { _ = try ada.engine.receive(bo.keys.directId, bytes) }
+        XCTAssertEqual("🔥", ada.store.feed(post.id)?.likes.first?.emoji)
+
+        let fire = try XCTUnwrap(FeedNotes.decodeSocial(FeedNotes.encodeReact(id: "fed_abc", emoji: "🔥")))
+        XCTAssertEqual("react", fire.op)
+        XCTAssertEqual("🔥", fire.body)
+        XCTAssertNil(FeedNotes.decodeSocial(FeedNotes.encodeReact(id: "fed_abc", emoji: "not-an-emoji")))
+
+        adaLinks.sent.removeAll()
+        boLinks.sent.removeAll()
+        let forwarded = try bo.engine.forwardFeed(post.id, to: ada.keys.directId)
+        XCTAssertEqual(true, forwarded.forwarded)
+        XCTAssertEqual("lake", forwarded.body)
+        XCTAssertEqual("image", forwarded.mediaKind)
+        XCTAssertEqual(post.id, forwarded.feedPostId)
+        XCTAssertEqual(ada.keys.directId, forwarded.feedOwnerId)
+        XCTAssertEqual(ada.keys.directId, forwarded.peerId)
+        try await bo.engine.flush()
+        XCTAssertFalse(boLinks.sent.isEmpty)
+        for bytes in boLinks.sent { _ = try ada.engine.receive(bo.keys.directId, bytes) }
+        let copy = try XCTUnwrap(ada.store.message(forwarded.id))
+        XCTAssertEqual("lake", copy.body)
+        XCTAssertEqual("image", copy.mediaKind)
+        XCTAssertEqual(post.id, copy.feedPostId)
+        XCTAssertEqual(ada.keys.directId, copy.feedOwnerId)
     }
 
     @DirectActor

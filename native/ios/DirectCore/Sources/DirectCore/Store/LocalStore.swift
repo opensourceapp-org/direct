@@ -192,12 +192,15 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
     public var deleted: Bool
     public var forwarded: Bool
     public var reactions: [MessageReaction]
+    /// When set, this bubble is a shared feed post. Tap opens that post.
+    public var feedPostId: String?
+    public var feedOwnerId: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, peerId, direction, body, createdAt, state, read, lastError, updatedAt, mediaKind, mediaMime, mediaName, mediaFile, senderId, edited, deleted, forwarded, reactions
+        case id, peerId, direction, body, createdAt, state, read, lastError, updatedAt, mediaKind, mediaMime, mediaName, mediaFile, senderId, edited, deleted, forwarded, reactions, feedPostId, feedOwnerId
     }
 
-    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil, mediaKind: String? = nil, mediaMime: String? = nil, mediaName: String? = nil, mediaFile: String? = nil, senderId: String? = nil, edited: Bool = false, deleted: Bool = false, forwarded: Bool = false, reactions: [MessageReaction] = []) {
+    public init(id: String, peerId: String, direction: Direction, body: String, createdAt: Int64, state: MessageState? = nil, read: Bool = false, lastError: String? = nil, updatedAt: Int64? = nil, mediaKind: String? = nil, mediaMime: String? = nil, mediaName: String? = nil, mediaFile: String? = nil, senderId: String? = nil, edited: Bool = false, deleted: Bool = false, forwarded: Bool = false, reactions: [MessageReaction] = [], feedPostId: String? = nil, feedOwnerId: String? = nil) {
         self.id = id
         self.peerId = peerId
         self.direction = direction
@@ -216,6 +219,8 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         self.deleted = deleted
         self.forwarded = forwarded
         self.reactions = reactions
+        self.feedPostId = feedPostId
+        self.feedOwnerId = feedOwnerId
     }
 
     public init(from decoder: Decoder) throws {
@@ -238,6 +243,8 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         deleted = try container.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
         forwarded = try container.decodeIfPresent(Bool.self, forKey: .forwarded) ?? false
         reactions = try container.decodeIfPresent([MessageReaction].self, forKey: .reactions) ?? []
+        feedPostId = try container.decodeIfPresent(String.self, forKey: .feedPostId)
+        feedOwnerId = try container.decodeIfPresent(String.self, forKey: .feedOwnerId)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -260,14 +267,35 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
         try container.encode(deleted, forKey: .deleted)
         try container.encode(forwarded, forKey: .forwarded)
         try container.encode(reactions, forKey: .reactions)
+        try container.encodeIfPresent(feedPostId, forKey: .feedPostId)
+        try container.encodeIfPresent(feedOwnerId, forKey: .feedOwnerId)
     }
 }
 
 public struct FeedLike: Codable, Equatable, Sendable {
     public var fromId: String
+    public var emoji: String
 
-    public init(fromId: String) {
+    private enum CodingKeys: String, CodingKey { case fromId, emoji }
+
+    public init(fromId: String, emoji: String = "❤️") {
         self.fromId = fromId
+        self.emoji = emoji
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fromId = try container.decode(String.self, forKey: .fromId)
+        emoji = try container.decodeIfPresent(String.self, forKey: .emoji) ?? "❤️"
+    }
+}
+
+extension Array where Element == FeedLike {
+    public func toggling(fromId: String, emoji: String) -> [FeedLike] {
+        if first(where: { $0.fromId == fromId })?.emoji == emoji {
+            return filter { $0.fromId != fromId }
+        }
+        return filter { $0.fromId != fromId } + [FeedLike(fromId: fromId, emoji: emoji)]
     }
 }
 
@@ -355,12 +383,12 @@ public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
     }
 
     public func togglingLike(_ fromId: String) -> FeedItem {
+        togglingReaction(fromId, "❤️")
+    }
+
+    public func togglingReaction(_ fromId: String, _ emoji: String) -> FeedItem {
         var copy = self
-        if copy.likes.contains(where: { $0.fromId == fromId }) {
-            copy.likes.removeAll { $0.fromId == fromId }
-        } else {
-            copy.likes.append(FeedLike(fromId: fromId))
-        }
+        copy.likes = copy.likes.toggling(fromId: fromId, emoji: emoji)
         return copy
     }
 }
