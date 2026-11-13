@@ -23,13 +23,13 @@ enum SendFeedback {
             haptic.impactOccurred(intensity: 0.35)
             haptic.prepare()
             let clip = clip
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let session = AVAudioSession.sharedInstance()
                 if session.category != .playback {
                     try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
                     try? session.setActive(true)
                 }
-                DispatchQueue.main.async { [weak self] in
+                DispatchQueue.main.async {
                     guard let self else { return }
                     self.player = try? AVAudioPlayer(data: clip)
                     self.player?.volume = 0.45

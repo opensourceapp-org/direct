@@ -1285,7 +1285,7 @@ private final class ZoomHost: UIScrollView, UIScrollViewDelegate {
     let playerView = PlayerLayerView()
     var onScale: ((CGFloat) -> Void)?
     private var fittedBounds: CGSize = .zero
-    private var zooming = false
+    private var pinchActive = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1334,7 +1334,7 @@ private final class ZoomHost: UIScrollView, UIScrollViewDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        if !zooming, zoomScale <= 1.001 {
+        if !pinchActive, zoomScale <= 1.001 {
             layoutCanvasToFit()
         }
         centerContent()
@@ -1372,7 +1372,7 @@ private final class ZoomHost: UIScrollView, UIScrollViewDelegate {
         if contentInset != inset { contentInset = inset }
     }
 
-    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) { zooming = true }
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) { pinchActive = true }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
         centerContent()
@@ -1386,7 +1386,7 @@ private final class ZoomHost: UIScrollView, UIScrollViewDelegate {
     }
 
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
-        zooming = false
+        pinchActive = false
         if scale <= 1.001 {
             fittedBounds = .zero
             setNeedsLayout()
