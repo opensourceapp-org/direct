@@ -193,25 +193,49 @@ struct FeedActions: View {
 
     var body: some View {
         let liked = item.likes.contains { $0.fromId == model.state.profile?.directId }
-        HStack(spacing: 8) {
-            Button { model.likeFeed(item.id) } label: {
-                Label(liked ? "Liked" : "Like", systemImage: liked ? "heart.fill" : "heart")
-                    .font(.footnote.weight(.semibold))
-            }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-            .tint(liked ? Color.pink : Ink.accent)
-            .controlSize(.small)
-            Button(action: onComments) {
-                Label(item.comments.isEmpty ? "Comment" : "\(item.comments.count)", systemImage: "text.bubble")
-                    .font(.footnote.weight(.semibold))
-            }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-            .tint(Ink.accent)
-            .controlSize(.small)
+        HStack(spacing: 20) {
+            action(
+                systemImage: liked ? "heart.fill" : "heart",
+                count: item.likes.count,
+                tint: liked ? Color(uiColor: .systemPink) : Color.primary,
+                label: liked ? "Unlike" : "Like"
+            ) { model.likeFeed(item.id) }
+            action(
+                systemImage: "bubble.right",
+                count: item.comments.count,
+                tint: Color.primary,
+                label: "Comment",
+                action: onComments
+            )
             Spacer(minLength: 0)
         }
+    }
+
+    private func action(
+        systemImage: String,
+        count: Int,
+        tint: Color,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(tint)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(count > 0 ? "\(label), \(count)" : label)
     }
 }
 
