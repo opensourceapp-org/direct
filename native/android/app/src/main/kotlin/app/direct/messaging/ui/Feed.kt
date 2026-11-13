@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -616,33 +617,26 @@ internal fun ContactProfileScreen(
                     ProfileIconButton(Icons.Filled.Call, "Call") { placeCall(false) }
                     ProfileIconButton(Icons.Filled.Videocam, "Video") { placeCall(true) }
                 }
-            }
-            if (contact != null) {
-                if (contact.blocked) {
-                    Muted(
-                        "You blocked this person. Messages from them are dropped.",
-                        Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
-                    )
+                if (contact?.blocked == true) {
                     OutlinedButton(
                         onClick = { scope.launch { runCatching { node.unblock(peerId) }.onFailure { error = it.message } } },
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, Ink.border),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.accent),
-                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp).height(40.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        modifier = Modifier.height(40.dp),
                     ) {
                         Text("Unblock", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                     }
-                } else {
-                    OutlinedButton(
-                        onClick = { confirmBlock = true },
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, Ink.danger),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.danger),
-                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp).height(40.dp),
-                    ) {
-                        Text("Block", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    }
+                } else if (contact != null) {
+                    ProfileIconButton(Icons.Outlined.Block, "Block", tint = Ink.danger) { confirmBlock = true }
                 }
+            }
+            if (contact?.blocked == true) {
+                Muted(
+                    "You blocked this person. Messages from them are dropped.",
+                    Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp),
+                )
             }
         }
         error?.let { Text(it, color = Ink.danger, modifier = Modifier.padding(horizontal = 20.dp)) }
@@ -719,12 +713,12 @@ private fun ProfileCount(value: Int, label: String) {
 }
 
 @Composable
-private fun ProfileIconButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun ProfileIconButton(icon: ImageVector, label: String, tint: Color = Ink.accent, onClick: () -> Unit) {
     OutlinedButton(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, Ink.border),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.accent),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = tint),
         contentPadding = PaddingValues(0.dp),
         modifier = Modifier.size(40.dp),
     ) {

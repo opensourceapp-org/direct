@@ -808,35 +808,27 @@ struct ContactProfileView: View {
                                     model.placeCall(peerId, video: true)
                                 }
                             }
-                        }
-                        if contact != nil {
                             if contact?.blocked == true {
-                                Text("You blocked this person. Messages from them are dropped.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 Button {
                                     model.unblock(peerId)
                                 } label: {
                                     Text("Unblock")
                                         .font(.subheadline.weight(.semibold))
-                                        .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.regular)
                                 .tint(Ink.accent)
-                            } else {
-                                Button(role: .destructive) {
+                            } else if contact != nil {
+                                profileIcon("nosign", "Block", tint: Ink.danger) {
                                     confirmBlock = true
-                                } label: {
-                                    Text("Block")
-                                        .font(.subheadline.weight(.semibold))
-                                        .frame(maxWidth: .infinity)
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.regular)
-                                .tint(Ink.danger)
                             }
+                        }
+                        if contact?.blocked == true {
+                            Text("You blocked this person. Messages from them are dropped.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
@@ -867,7 +859,7 @@ struct ContactProfileView: View {
         }
     }
 
-    private func profileIcon(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+    private func profileIcon(_ symbol: String, _ label: String, tint: Color = Ink.accent, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.body.weight(.semibold))
@@ -875,7 +867,7 @@ struct ContactProfileView: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)
-        .tint(Ink.accent)
+        .tint(tint)
         .accessibilityLabel(label)
     }
 }
