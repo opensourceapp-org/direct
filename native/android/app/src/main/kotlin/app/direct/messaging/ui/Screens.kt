@@ -415,6 +415,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
     var deleting by remember { mutableStateOf<MessageRecord?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var profileOpen by rememberSaveable { mutableStateOf(false) }
+    var viewingId by rememberSaveable { mutableStateOf<String?>(null) }
     var mediaId by rememberSaveable { mutableStateOf<String?>(null) }
     var mediaCanDelete by rememberSaveable { mutableStateOf(false) }
     val list = rememberLazyListState()
@@ -553,6 +554,16 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         )
     } else if (mediaId != null) {
         LaunchedEffect(mediaId) { mediaId = null }
+    } else if (viewingId != null) {
+        FeedPostViewer(
+            node, state, viewingId, canDelete = false,
+            onClose = { viewingId = null },
+            onOpenMedia = {
+                mediaId = viewingId
+                mediaCanDelete = false
+            },
+            onError = { error = it },
+        )
     }
 }
 

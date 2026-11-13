@@ -8,7 +8,6 @@ public enum GroupNotes {
     public static let prefix = "DIRECT-GROUP/1\n"
     public static let maxMembers = 16
     public static let ops: Set<String> = ["invite", "text", "leave"]
-    private static let groupId = try! NSRegularExpression(pattern: "^grp_[0-9a-f]{32}$")
 
     public struct Note: Equatable, Sendable {
         public var op: String
@@ -29,8 +28,9 @@ public enum GroupNotes {
     }
 
     public static func isGroupId(_ value: String) -> Bool {
-        let range = NSRange(value.startIndex..<value.endIndex, in: value)
-        return groupId.firstMatch(in: value, range: range) != nil
+        let bytes = value.utf8
+        guard bytes.count == 36, value.hasPrefix("grp_") else { return false }
+        return bytes.dropFirst(4).allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102) }
     }
 
     public static func parsePrefixed(_ text: String) -> Note? {
