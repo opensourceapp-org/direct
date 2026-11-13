@@ -1,5 +1,6 @@
 package app.direct.messaging.ui
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -7,8 +8,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -17,8 +19,8 @@ import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.PhonelinkLock
 import androidx.compose.material.icons.outlined.QrCode
 import androidx.compose.material.icons.outlined.WifiTethering
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,25 +47,33 @@ fun Intro(creating: Boolean, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
     val last = pager.currentPage == pages.lastIndex
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("DIRECT", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, color = Ink.accent)
+        Text(
+            "DIRECT",
+            fontFamily = DirectFont,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 2.sp,
+            color = Ink.accent,
+        )
         HorizontalPager(pager, Modifier.fillMaxWidth().weight(1f)) { page ->
-            Column(Modifier.fillMaxWidth().padding(top = 48.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Box(Modifier.size(88.dp).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
-                    Icon(pages[page].icon, null, tint = Ink.accent, modifier = Modifier.size(40.dp))
-                }
+            Column(Modifier.fillMaxWidth().padding(top = 36.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                HeroIcon(pages[page].icon)
                 Title(pages[page].title)
                 Muted(pages[page].body)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 pages.indices.forEach { index ->
+                    val selected = index == pager.currentPage
+                    val width by animateDpAsState(if (selected) 22.dp else 7.dp, label = "intro-dot")
                     Box(
                         Modifier
-                            .padding(4.dp)
-                            .size(if (index == pager.currentPage) 8.dp else 6.dp)
+                            .padding(horizontal = 3.dp)
+                            .height(7.dp)
+                            .width(width)
                             .clip(CircleShape)
-                            .background(if (index == pager.currentPage) Ink.accent else Ink.border),
+                            .background(if (selected) Ink.accent else Ink.border),
                     )
                 }
             }

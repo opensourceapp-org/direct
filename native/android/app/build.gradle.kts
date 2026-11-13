@@ -62,6 +62,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.valentinilk.shimmer:compose-shimmer:1.3.2")
+
     implementation("com.google.zxing:core:3.5.3")
     val camera = "1.4.1"
     implementation("androidx.camera:camera-core:$camera")

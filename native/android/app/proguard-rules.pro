@@ -10,3 +10,5 @@
 -dontwarn com.google.zxing.**
 -dontwarn okhttp3.internal.platform.**
 -dontwarn org.conscrypt.**
+-dontwarn coil.**
+-dontwarn com.valentinilk.shimmer.**
