@@ -41,7 +41,7 @@ final class BootstrapClientTests: XCTestCase {
         XCTAssertEqual(.hello(from: ada, bundle: bundle(ada), nonce: nil, proof: nil, discoverable: false), SignalCodec.decode(hub.frames().first!))
         XCTAssertTrue(presence.contains { $0 == (bo, false) })
 
-        bob.announce(directId: bo, bundle: bundle(bo))
+        bob.announce(directId: bo, bundle: bundle(bo), discoverable: true)
         bob.configure("ws://192.168.1.20:8787")
         bob.start()
         await sleepMs(50)

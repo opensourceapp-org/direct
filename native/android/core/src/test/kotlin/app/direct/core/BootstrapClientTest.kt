@@ -57,7 +57,7 @@ class BootstrapClientTest {
 
         val presence = mutableListOf<SignalFrame.Presence>()
         val collector = scopeA.launchCollect(alice) { presence += it }
-        bob.announce(bo, bundle(bo))
+        bob.announce(bo, bundle(bo), discoverable = true)
         bob.configure("ws://192.168.1.20:8787")
         bob.start()
         runCurrent()

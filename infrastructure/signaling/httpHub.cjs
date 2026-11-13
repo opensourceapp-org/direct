@@ -36,6 +36,14 @@ async function enqueue(store, sessionId, frame) {
   await store.push(sessionId, JSON.stringify(frame));
 }
 
+/** A stored bundle is only returned to phones that already have a reason to see it. */
+async function revealPeer(store, requesterId, peer) {
+  if (!peer || !store.visible(peer) || !requesterId) return null;
+  if (peer.discoverable) return peer;
+  if (await store.wasIntroduced(peer.directId, requesterId)) return peer;
+  return null;
+}
+
 async function announce(store, directId, online) {
   const watchers = await store.sessionsWatching(directId);
   for (const id of watchers) {
@@ -81,7 +89,7 @@ async function handleFrames(store, session, frames) {
       const directId = message.directId;
       if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 80) continue;
       const peer = typeof directId === 'string' ? await store.loadPeer(directId) : null;
-      const shown = store.visible(peer) ? peer : null;
+      const shown = await revealPeer(store, session.directId, peer);
       replies.push({
         kind: 'lookup',
         requestId,
@@ -131,6 +139,7 @@ async function handleFrames(store, session, frames) {
     if (encoded.length > MAX_SIGNAL) continue;
     const target = await store.loadPeer(message.to);
     if (target && target.sessionId) {
+      await store.noteIntro(message.from, message.to);
       await enqueue(store, target.sessionId, message);
       continue;
     }

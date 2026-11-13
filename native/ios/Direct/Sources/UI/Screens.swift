@@ -672,7 +672,7 @@ struct ContactsView: View {
                         model.addContact(trimmed) { input = "" }
                     }
                 }
-                Muted("A DIRECT ID is looked up on the server, so the other phone must be open on that same address. A QR code or pasted card also carries the server, and scanning it saves that address on this phone.")
+                Muted("Looking up a DIRECT ID only works if that person turned on public listing on this server. A QR code or pasted card works either way, and scanning it saves that address on this phone.")
             }
             .listRowBackground(Ink.surface)
             if model.state.bootstrap.phase == .open {
@@ -1046,13 +1046,13 @@ struct SettingsView: View {
                         get: { model.state.discoverable },
                         set: { model.setDiscoverable($0) }
                     )) {
-                        Text("Appear as a suggested contact")
+                        Text("Let others find me on this server")
                     }
                     .tint(Ink.accent)
                 } header: {
                     Text("Discovery")
                 } footer: {
-                    Text("Off by default. When this is on, other DIRECT phones using this same server can see your name and add you. They still cannot read your messages.")
+                    Text("Off by default. When this is on, other DIRECT phones on this server can look you up by ID and see you in suggested contacts. They still cannot read your messages.")
                 }
                 .listRowBackground(Ink.surface)
                 Section {

@@ -13,8 +13,9 @@ const MAX_SUGGEST = 24;
  * Holds the latest public bundle per DIRECT ID, tells watchers when a DIRECT ID
  * comes online or drops, and forwards WebRTC session descriptions and ICE candidates.
  * A bundle stays findable for two minutes after the socket drops so a lookup
- * still succeeds while the phone reconnects. Message text and envelopes are never
- * accepted or forwarded here; see contracts/signaling.json.
+ * still succeeds while the phone reconnects, but only for phones that opted into
+ * discovery or that already sent this caller a WebRTC signal. Message text and
+ * envelopes are never accepted or forwarded here; see contracts/signaling.json.
  *
  * hello is accepted only with a signature over this socket's challenge nonce,
  * using the signing key inside a verified public bundle.
@@ -22,6 +23,7 @@ const MAX_SUGGEST = 24;
 function createSignalHub(options = {}) {
   const peers = new Map();
   const watchers = new Map();
+  const intros = new Map();
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const onHello = typeof options.onHello === 'function' ? options.onHello : null;
   const maxMessagesPerSec = Number.isFinite(options.maxMessagesPerSec) ? options.maxMessagesPerSec : MAX_MESSAGES_PER_SEC;
@@ -46,6 +48,25 @@ function createSignalHub(options = {}) {
     for (const [id, peer] of peers) {
       if (!peer.send && at - peer.closedAt >= GRACE_MS) peers.delete(id);
     }
+    for (const [id, seen] of intros) {
+      if (at - seen >= GRACE_MS) intros.delete(id);
+    }
+  }
+
+  function noteIntro(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    intros.set(`${fromId}\n${toId}`, now());
+  }
+
+  function wasIntroduced(fromId, toId, at) {
+    const seen = intros.get(`${fromId}\n${toId}`);
+    return typeof seen === 'number' && at - seen < GRACE_MS;
+  }
+
+  function reveal(selfId, directId, peer, at) {
+    if (!selfId || !visible(peer, at)) return false;
+    if (peer.discoverable) return true;
+    return wasIntroduced(directId, selfId, at);
   }
 
   function announce(id, online) {
@@ -56,7 +77,7 @@ function createSignalHub(options = {}) {
   }
 
   /** Record a public bundle with no live socket, or refresh one that already has a socket. */
-  function remember(id, bundle) {
+  function remember(id, bundle, discoverable) {
     if (!valid(id, bundle)) return false;
     const current = peers.get(id);
     const send = current && current.send ? current.send : null;
@@ -65,7 +86,7 @@ function createSignalHub(options = {}) {
       send,
       token: current ? current.token : 0,
       closedAt: send ? 0 : now(),
-      discoverable: Boolean(current && current.discoverable),
+      discoverable: typeof discoverable === 'boolean' ? discoverable : Boolean(current && current.discoverable),
     });
     return true;
   }
@@ -160,7 +181,7 @@ function createSignalHub(options = {}) {
         const at = now();
         sweep(at);
         const peer = typeof directId === 'string' ? peers.get(directId) : undefined;
-        const shown = visible(peer, at) ? peer : undefined;
+        const shown = reveal(selfId, directId, peer, at) ? peer : undefined;
         send(JSON.stringify({
           kind: 'lookup',
           requestId,
@@ -186,6 +207,7 @@ function createSignalHub(options = {}) {
       }
 
       if (message.kind === 'suggest') {
+        if (!selfId) return;
         const requestId = message.requestId;
         if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 80) return;
         send(JSON.stringify({ kind: 'suggestions', requestId, people: suggestions(selfId) }));
@@ -199,6 +221,7 @@ function createSignalHub(options = {}) {
       if (encoded.length > MAX_SIGNAL) return;
       const target = peers.get(message.to);
       if (target && target.send) {
+        noteIntro(message.from, message.to);
         target.send(encoded);
         return;
       }

@@ -666,7 +666,7 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Header("People", "Contacts")
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Muted("Look up a DIRECT ID from a phone that has DIRECT open on the same server. A scanned QR code also carries that server and saves it on this phone.")
+            Muted("Looking up a DIRECT ID only works if that person turned on public listing on this server. A scanned QR code also carries that server and saves it on this phone.")
             SecondaryButton("Scan a QR code", Icons.Outlined.QrCodeScanner) { scanning = true }
             Field(directId, { directId = it }, "dir_…")
             PrimaryButton(if (busy) "Looking up" else "Look up", enabled = directId.isNotBlank() && !busy) {
@@ -1037,8 +1037,8 @@ private fun SettingsScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
             Label("Discovery")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Appear as a suggested contact", fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Muted("Off by default. Other DIRECT phones using this same server can see your name and add you. They still cannot read your messages.")
+                    Text("Let others find me on this server", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Muted("Off by default. Other DIRECT phones on this server can look you up by ID and see you in suggested contacts. They still cannot read your messages.")
                 }
                 Switch(
                     checked = state.discoverable,

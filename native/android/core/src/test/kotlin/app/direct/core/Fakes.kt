@@ -29,6 +29,7 @@ class FakeHub : WebSocketFactory {
     private val live = mutableMapOf<String, Socket>()
     private val bundles = mutableMapOf<String, String>()
     private val discoverable = mutableMapOf<String, Boolean>()
+    private val intros = mutableMapOf<String, Boolean>()
     private val watching = mutableMapOf<Socket, Set<String>>()
 
     inner class Socket(val events: WebSocketEvents) : WebSocketConnection {
@@ -97,7 +98,10 @@ class FakeHub : WebSocketFactory {
             }
             is SignalFrame.Lookup -> {
                 val bundle = bundles[frame.directId]
-                socket.events.onMessage(SignalCodec.encode(SignalFrame.LookupResult(frame.requestId, frame.directId, bundle != null, bundle)))
+                val listed = discoverable[frame.directId] == true
+                val introduced = socket.selfId?.let { intros["${frame.directId}\n$it"] == true } == true
+                val shown = socket.selfId != null && bundle != null && (listed || introduced)
+                socket.events.onMessage(SignalCodec.encode(SignalFrame.LookupResult(frame.requestId, frame.directId, shown, if (shown) bundle else null)))
             }
             is SignalFrame.Watch -> {
                 watching[socket] = frame.ids.toSet()
@@ -105,6 +109,7 @@ class FakeHub : WebSocketFactory {
             }
             is SignalFrame.Negotiation -> {
                 if (frame.from != socket.selfId) return
+                intros["${frame.from}\n${frame.to}"] = true
                 val target = live[frame.to]
                 if (target != null && target.open) target.events.onMessage(text)
                 else if (frame is SignalFrame.Offer) socket.events.onMessage(SignalCodec.encode(SignalFrame.Unreachable(frame.to)))

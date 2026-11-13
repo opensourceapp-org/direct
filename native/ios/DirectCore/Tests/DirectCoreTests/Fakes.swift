@@ -21,6 +21,7 @@ final class FakeHub: WebSocketFactory {
     private var live: [String: Socket] = [:]
     private var bundles: [String: String] = [:]
     private var discoverable: [String: Bool] = [:]
+    private var intros: [String: Bool] = [:]
     private var watching: [ObjectIdentifier: (Socket, Set<String>)] = [:]
     private var sockets: [Socket] = []
     private let lock = NSRecursiveLock()
@@ -126,8 +127,11 @@ final class FakeHub: WebSocketFactory {
         case let .lookup(requestId, directId):
             lock.lock()
             let bundle = bundles[directId]
+            let listed = discoverable[directId] == true
+            let introduced = socket.selfId.map { intros["\(directId)\n\($0)"] == true } ?? false
+            let shown = socket.selfId != nil && bundle != nil && (listed || introduced)
             lock.unlock()
-            socket.events.onMessage(SignalCodec.encode(.lookupResult(requestId: requestId, directId: directId, present: bundle != nil, bundle: bundle)))
+            socket.events.onMessage(SignalCodec.encode(.lookupResult(requestId: requestId, directId: directId, present: shown, bundle: shown ? bundle : nil)))
         case let .watch(ids):
             lock.lock()
             watching[ObjectIdentifier(socket)] = (socket, Set(ids))
@@ -136,6 +140,7 @@ final class FakeHub: WebSocketFactory {
         case .offer, .answer, .ice:
             guard let route = frame.route, route.from == socket.selfId else { return }
             lock.lock()
+            intros["\(route.from)\n\(route.to)"] = true
             let target = live[route.to]
             lock.unlock()
             if let target, target.open {

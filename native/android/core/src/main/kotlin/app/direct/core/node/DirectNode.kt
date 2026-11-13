@@ -216,7 +216,7 @@ class DirectNode(
         }
     }
 
-    /** Opt in to appear as a suggested contact on this bootstrap. Off by default. */
+    /** Opt in to be findable on this bootstrap: suggested contacts and lookup by DIRECT ID. Off by default. */
     suspend fun setDiscoverable(on: Boolean) = onNode {
         store.settings = store.settings.copy(discoverable = on)
         store.save()
