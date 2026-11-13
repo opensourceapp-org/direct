@@ -193,15 +193,38 @@ struct FeedActions: View {
 
     var body: some View {
         let liked = item.likes.contains { $0.fromId == model.state.profile?.directId }
-        HStack(spacing: 16) {
-            Button(liked ? "Liked" : "Like") { model.likeFeed(item.id) }
-                .foregroundStyle(liked ? Color.secondary : Ink.accent)
-            Button("Comment", action: onComments)
-                .foregroundStyle(Ink.accent)
+        HStack(spacing: 10) {
+            iconButton(
+                systemImage: liked ? "heart.fill" : "heart",
+                tint: liked ? Color(uiColor: .systemPink) : Color.primary,
+                label: liked ? "Unlike" : "Like"
+            ) { model.likeFeed(item.id) }
+            iconButton(
+                systemImage: "text.bubble",
+                tint: Color.primary,
+                label: "Comment",
+                action: onComments
+            )
             Spacer(minLength: 0)
         }
-        .font(.subheadline.weight(.semibold))
-        .buttonStyle(.borderless)
+    }
+
+    private func iconButton(
+        systemImage: String,
+        tint: Color,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(tint)
+                .frame(width: 36, height: 36)
+                .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 
