@@ -10,6 +10,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.horizontalScroll
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
@@ -68,7 +70,6 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.DynamicFeed
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.QrCode
@@ -91,6 +92,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -144,6 +146,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.valentinilk.shimmer.shimmer
 import kotlinx.coroutines.withContext
 
 private enum class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
@@ -187,7 +192,14 @@ fun DirectRoot(node: DirectNode) {
 }
 
 @Composable
-private fun Centered(text: String) = Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) { Muted(text) }
+private fun Centered(text: String) = Column(
+    Modifier.fillMaxSize().padding(24.dp),
+    verticalArrangement = Arrangement.Center,
+    horizontalAlignment = Alignment.CenterHorizontally,
+) {
+    Box(Modifier.size(56.dp).clip(CircleShape).shimmer().background(Ink.accentSoft))
+    Muted(text, Modifier.padding(top = 16.dp), textAlign = TextAlign.Center)
+}
 
 @Composable
 private fun Onboarding(node: DirectNode) {
@@ -198,10 +210,8 @@ private fun Onboarding(node: DirectNode) {
     var error by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Spacer(Modifier.padding(top = 32.dp))
-        Box(Modifier.size(72.dp).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
-            Icon(Icons.Outlined.Lock, null, tint = Ink.accent, modifier = Modifier.size(32.dp))
-        }
-        Text("DIRECT", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp, color = Ink.accent)
+        BrandMark()
+        Text("DIRECT", fontFamily = DirectFont, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, color = Ink.accent)
         Title("No middlemen. Just connection.")
         Muted("Your identity is created on this phone and its keys stay in the Android Keystore. There is no account and no server that stores your messages.")
         Label("Display name")
@@ -320,8 +330,11 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
                 }
             }
         }
-        HorizontalDivider(color = Ink.border)
-        NavigationBar(containerColor = Ink.surface, tonalElevation = 0.dp) {
+        NavigationBar(
+            containerColor = Ink.surface,
+            tonalElevation = 2.dp,
+            modifier = Modifier.clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)),
+        ) {
             Tab.entries.forEach { item ->
                 val selected = tab == item
                 NavigationBarItem(
@@ -343,7 +356,7 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
 }
 
 @Composable
-internal fun Header(eyebrow: String, title: String) = Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)) {
+internal fun Header(eyebrow: String, title: String) = Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp)) {
     Text(eyebrow.uppercase(), color = Ink.muted, fontSize = 12.sp, letterSpacing = 1.2.sp)
     Title(title)
 }
@@ -359,42 +372,44 @@ private fun ChatsScreen(state: NodeState, onNewGroup: () -> Unit, open: (String)
             }
         }
         if (state.conversations.isEmpty()) {
-            Column(
-                Modifier.weight(1f).fillMaxWidth().padding(32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Box(Modifier.size(72.dp).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.Chat, null, tint = Ink.accent, modifier = Modifier.size(32.dp))
-                }
-                Muted(
-                    "No conversations yet. Add a contact by DIRECT ID. A message someone sends you before you add them appears here as a request.",
-                    Modifier.padding(top = 16.dp),
-                )
-            }
+            EmptyState(
+                Icons.Outlined.Chat,
+                "No conversations yet. Add a contact by DIRECT ID. A message someone sends you before you add them appears here as a request.",
+                Modifier.weight(1f),
+                title = "Start a chat",
+            )
             return
         }
-        LazyColumn {
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             items(state.conversations, key = { it.peerId }) { conversation ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { open(conversation.peerId) }.padding(horizontal = 20.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = Ink.surface,
+                    shadowElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth().clickable { open(conversation.peerId) },
                 ) {
-                    val contact = state.contacts.firstOrNull { it.directId == conversation.peerId }
-                    Avatar(conversation.name, jpegBytes(contact?.avatarJpegBase64))
-                    Column(Modifier.weight(1f)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Label(conversation.name)
-                            if (conversation.group) Badge("Group", Ink.accent)
-                            if (conversation.request) Badge("Request", Ink.warning)
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        val contact = state.contacts.firstOrNull { it.directId == conversation.peerId }
+                        Avatar(conversation.name, jpegBytes(contact?.avatarJpegBase64))
+                        Column(Modifier.weight(1f)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Label(conversation.name)
+                                if (conversation.group) Badge("Group", Ink.accent)
+                                if (conversation.request) Badge("Request", Ink.warning)
+                            }
+                            Muted(conversation.lastBody ?: "No messages yet")
                         }
-                        Muted(conversation.lastBody ?: "No messages yet")
+                        if (conversation.unread > 0) Badge(conversation.unread.toString())
+                        if (conversation.peerId in state.connected) Dot(Ink.success) else if (conversation.peerId in state.online) Dot(Ink.warning)
                     }
-                    if (conversation.unread > 0) Badge(conversation.unread.toString())
-                    if (conversation.peerId in state.connected) Dot(Ink.success) else if (conversation.peerId in state.online) Dot(Ink.warning)
                 }
-                HorizontalDivider(color = Ink.border)
             }
         }
     }
@@ -404,9 +419,10 @@ private fun ChatsScreen(state: NodeState, onNewGroup: () -> Unit, open: (String)
 private fun Badge(text: String, color: Color = Ink.accent) = Text(
     text,
     color = Color.White,
-    fontSize = 12.sp,
-    fontWeight = FontWeight.Medium,
-    modifier = Modifier.background(color, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 2.dp),
+    fontFamily = DirectFont,
+    fontSize = 11.sp,
+    fontWeight = FontWeight.SemiBold,
+    modifier = Modifier.background(color, RoundedCornerShape(12.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
 )
 
 @Composable
@@ -453,11 +469,12 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                 },
             )
         } else {
-            Column(Modifier.fillMaxSize().imePadding()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(end = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+    Column(Modifier.fillMaxSize().imePadding().background(Ink.background)) {
+        Surface(color = Ink.surface, shadowElevation = 1.dp) {
+        Row(
+            Modifier.fillMaxWidth().padding(end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
                     Box(
                         Modifier.size(48.dp).clip(CircleShape).clickable(onClick = back),
                         contentAlignment = Alignment.Center,
@@ -478,12 +495,12 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                         )
                         Text(status, fontSize = 13.sp, color = Ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    if (isGroup || (contact?.accepted == true && !contact.blocked)) {
-                        CallActions(node, peerId) { error = it }
-                    }
-                }
-                HorizontalDivider(color = Ink.border)
-                LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (isGroup || (contact?.accepted == true && !contact.blocked)) {
+                CallActions(node, peerId) { error = it }
+            }
+        }
+        }
+        LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     item { Spacer(Modifier.padding(4.dp)) }
                     items(messages, key = { it.id }) { message ->
                         MessageBubble(
@@ -503,25 +520,26 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
                         )
                     }
                 }
-                error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
-                HorizontalDivider(color = Ink.border)
-                when {
-                    isGroup -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
-                    contact == null -> Unit
-                    request -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Muted("${contact.name} is not in your contacts. Accept to reply. Decline blocks this DIRECT ID.")
-                        PrimaryButton("Accept") { scope.attempt({ error = it }) { node.acceptRequest(peerId) } }
-                        SecondaryButton("Decline") {
-                            scope.attempt({ error = it }) {
-                                node.declineRequest(peerId)
-                                back()
-                            }
+        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
+        Surface(color = Ink.surface, shadowElevation = 6.dp, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
+            when {
+                isGroup -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
+                contact == null -> Unit
+                request -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Muted("${contact.name} is not in your contacts. Accept to reply. Decline blocks this DIRECT ID.")
+                    PrimaryButton("Accept") { scope.attempt({ error = it }) { node.acceptRequest(peerId) } }
+                    SecondaryButton("Decline") {
+                        scope.attempt({ error = it }) {
+                            node.declineRequest(peerId)
+                            back()
                         }
                     }
-                    contact.blocked -> Muted("You blocked this DIRECT ID.", Modifier.padding(16.dp))
-                    else -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
                 }
+                contact.blocked -> Muted("You blocked this DIRECT ID.", Modifier.padding(16.dp))
+                else -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
             }
+        }
+        }
             forwarding?.let { message ->
                 ForwardSheet(state, peerId, onDismiss = { forwarding = null }) { target ->
                     scope.attempt({ error = it }) {
@@ -763,9 +781,11 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
                     }
                 }
             }
+            Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             state.suggestions.forEach { person ->
+                Surface(shape = RoundedCornerShape(18.dp), color = Ink.surface, shadowElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -778,14 +798,22 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
                         Text("Add", color = Ink.accent, fontWeight = FontWeight.SemiBold)
                     }
                 }
-                HorizontalDivider(color = Ink.border)
+                }
+            }
             }
         }
         Spacer(Modifier.padding(8.dp))
         Column(Modifier.padding(horizontal = 20.dp)) { Label("Contacts") }
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         state.contacts.filter { it.accepted && !it.blocked }.forEach { contact ->
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Ink.surface,
+                shadowElevation = 1.dp,
+                modifier = Modifier.fillMaxWidth().clickable { open(contact.directId) },
+            ) {
             Row(
-                Modifier.fillMaxWidth().clickable { open(contact.directId) }.padding(horizontal = 20.dp, vertical = 12.dp),
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -797,7 +825,8 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
                     Muted(if (contact.verified) "Verified · ${contact.fingerprint}" else "Not verified · ${contact.fingerprint}")
                 }
             }
-            HorizontalDivider(color = Ink.border)
+            }
+        }
         }
     }
 }
@@ -967,26 +996,29 @@ private fun ProfileHomeScreen(
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
         var library by rememberSaveable { mutableStateOf("posts") }
-        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
+        Row(
+            Modifier
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Ink.incoming)
+                .padding(4.dp),
+        ) {
             listOf("posts" to "Posts", "saved" to "Saved").forEach { (id, label) ->
                 val selected = library == id
-                Column(
-                    Modifier.weight(1f).clickable { library = id }.padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        label,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (selected) Ink.foreground else Ink.muted,
-                    )
-                    Box(
-                        Modifier
-                            .padding(top = 8.dp)
-                            .fillMaxWidth()
-                            .height(2.dp)
-                            .background(if (selected) Ink.accent else Color.Transparent),
-                    )
-                }
+                Text(
+                    label,
+                    fontFamily = DirectFont,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    color = if (selected) Color.White else Ink.muted,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (selected) Ink.accent else Color.Transparent)
+                        .clickable { library = id }
+                        .padding(vertical = 8.dp),
+                )
             }
         }
         if (library == "saved") {
@@ -1468,6 +1500,8 @@ private fun MessageBubble(
     val sticker = kind == "sticker"
     val actionable = kind != "call" && kind != "group"
     val ink = if (outgoing) Color.White else Ink.foreground
+    val bubble = if (outgoing) Ink.accent else Ink.incoming
+    val bubbleShape = if (outgoing) RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp) else RoundedCornerShape(20.dp, 20.dp, 20.dp, 6.dp)
     val hasReactions = message.reactions.isNotEmpty() && !message.deleted
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (outgoing) Alignment.End else Alignment.Start) {
         if (group && !outgoing && sender != null) {
@@ -1480,9 +1514,8 @@ private fun MessageBubble(
                     .then(
                         if ((sticker && !message.deleted) || (message.feedPostId != null && !message.deleted)) Modifier
                         else Modifier
-                            .background(if (outgoing) Ink.accent else Ink.surface, RoundedCornerShape(20.dp))
-                            .border(androidx.compose.foundation.BorderStroke(1.dp, if (outgoing) Ink.accent else Ink.border), RoundedCornerShape(20.dp))
-                            .padding(8.dp),
+                            .background(bubble, bubbleShape)
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                     )
                     .padding(bottom = if (hasReactions) 14.dp else 0.dp)
                     .combinedClickable(
@@ -1725,10 +1758,30 @@ private fun DeleteSheet(
 
 @Composable
 internal fun Avatar(name: String, jpeg: ByteArray?, size: Dp = 44.dp) {
-    val bitmap = remember(jpeg) { jpeg?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap() }
-    Box(Modifier.size(size).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
-        if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        else Text(name.trim().take(1).uppercase().ifBlank { "?" }, color = Ink.accent, fontWeight = FontWeight.SemiBold)
+    val context = LocalContext.current
+    Box(
+        Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Ink.accentSoft)
+            .border(BorderStroke(1.dp, Ink.border.copy(alpha = 0.7f)), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (jpeg != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(context).data(jpeg).crossfade(true).build(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Text(
+                name.trim().take(1).uppercase().ifBlank { "?" },
+                color = Ink.accent,
+                fontFamily = DirectFont,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 

@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -356,7 +357,12 @@ private fun callStatus(call: CallSnapshot): String {
 private fun RoundCallButton(color: Color, icon: ImageVector, label: String, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(
-            Modifier.size(58.dp).clip(CircleShape).background(color).clickable(onClick = onClick),
+            Modifier
+                .size(62.dp)
+                .shadow(10.dp, CircleShape)
+                .clip(CircleShape)
+                .background(color)
+                .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, label, tint = Color.White, modifier = Modifier.size(26.dp))

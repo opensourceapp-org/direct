@@ -73,6 +73,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -119,6 +120,7 @@ import app.direct.core.store.FeedItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.valentinilk.shimmer.shimmer
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -217,28 +219,20 @@ internal fun FeedScreen(
         HorizontalDivider(color = Ink.border)
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
         if (posts.isEmpty()) {
-            Column(
-                Modifier.weight(1f).fillMaxWidth().padding(32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Box(Modifier.size(64.dp).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Outlined.DynamicFeed, null, tint = Ink.accent, modifier = Modifier.size(28.dp))
-                }
-                Text("No posts yet", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.padding(top = 16.dp))
-                Text(
-                    "When a contact adds photos or videos to their profile, they show up here.",
-                    color = Ink.muted,
-                    fontSize = 14.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
+            EmptyState(
+                Icons.Outlined.DynamicFeed,
+                "When a contact adds photos or videos to their profile, they show up here.",
+                Modifier.weight(1f),
+                title = "No posts yet",
+            )
         } else {
-            LazyColumn(Modifier.weight(1f)) {
+            LazyColumn(
+                Modifier.weight(1f),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 items(posts, key = { it.id }) { item ->
                     FeedPostCard(node, state, item, onOpenProfile, { onOpenMedia(item.id) }) { onOpenComments(item.id) }
-                    Spacer(Modifier.height(10.dp))
                 }
             }
         }
@@ -255,7 +249,13 @@ private fun FeedPostCard(
     onOpenComments: () -> Unit,
 ) {
     val name = feedOwnerName(state, item.ownerId)
-    Column(Modifier.fillMaxWidth().background(Ink.surface).padding(bottom = 10.dp)) {
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = Ink.surface,
+        shadowElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
         Row(
             Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -301,6 +301,7 @@ private fun FeedPostCard(
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp).clickable(onClick = onOpenComments),
             )
         }
+    }
     }
 }
 
@@ -774,7 +775,7 @@ private fun FeedThumb(node: DirectNode, item: FeedItem, modifier: Modifier) {
         if (bitmap != null) {
             Image(bitmap!!, item.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
-            Box(Modifier.fillMaxSize().background(Ink.accentSoft))
+            Box(Modifier.fillMaxSize().shimmer().background(Ink.accentSoft))
         }
         if (item.kind == "video") {
             Box(Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
