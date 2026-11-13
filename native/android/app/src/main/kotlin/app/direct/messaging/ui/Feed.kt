@@ -410,11 +410,17 @@ internal fun StoryViewer(node: DirectNode, state: NodeState, ownerId: String, on
     var index by remember(ownerId) { mutableIntStateOf(0) }
     val current = stories.getOrNull(index.coerceIn(0, stories.lastIndex)) ?: return
     val selfId = state.profile?.directId
-    val name = if (ownerId == selfId) state.profile?.name ?: "You" else state.contacts.firstOrNull { it.directId == ownerId }?.name ?: ownerId
+    val mine = ownerId == selfId
+    val name = if (mine) state.profile?.name ?: "You" else state.contacts.firstOrNull { it.directId == ownerId }?.name ?: ownerId
+    var confirmDelete by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     BackHandler(onBack = onClose)
     LaunchedEffect(ownerId) { node.markStoriesSeen(ownerId) }
-    LaunchedEffect(current.id) {
-        if (current.kind == "video") return@LaunchedEffect
+    LaunchedEffect(stories.size) {
+        if (index > stories.lastIndex) index = stories.lastIndex
+    }
+    LaunchedEffect(current.id, confirmDelete) {
+        if (current.kind == "video" || confirmDelete) return@LaunchedEffect
         delay(5_000)
         if (index < stories.lastIndex) index += 1 else onClose()
     }
@@ -442,11 +448,32 @@ internal fun StoryViewer(node: DirectNode, state: NodeState, ownerId: String, on
             }
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(name, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                if (mine) {
+                    IconButton(onClick = { confirmDelete = true }) {
+                        Icon(Icons.Outlined.Delete, "Delete story", tint = Color.White)
+                    }
+                }
                 IconButton(onClick = onClose) {
                     Icon(Icons.Filled.Close, "Close", tint = Color.White)
                 }
             }
         }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete this story?") },
+            text = { Text("It will be removed from your stories and from people who already received it.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        scope.launch { runCatching { node.deleteFeed(current.id) } }
+                    },
+                ) { Text("Delete", color = Ink.danger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
     }
 }
 
