@@ -189,6 +189,76 @@ struct Muted: View {
     var body: some View { Text(text).font(.footnote).foregroundStyle(Ink.muted) }
 }
 
+struct ProfileHeader: View {
+    let name: String
+    let jpeg: String?
+    let status: String
+    let posts: Int
+    var contacts: Int? = nil
+    var stories = false
+    var unseenStories = false
+    var onAvatar: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            avatar
+            VStack(alignment: .leading, spacing: 5) {
+                Text(name)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Ink.text)
+                    .lineLimit(1)
+                if !status.isEmpty {
+                    Text(status)
+                        .font(.subheadline)
+                        .foregroundStyle(Ink.muted)
+                        .lineLimit(3)
+                }
+                HStack(spacing: 20) {
+                    count(posts, posts == 1 ? "post" : "posts")
+                    if let contacts {
+                        count(contacts, contacts == 1 ? "contact" : "contacts")
+                    }
+                }
+                .padding(.top, 4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.top, 4)
+    }
+
+    private var photo: some View {
+        Avatar(name: name, jpeg: jpeg, size: 88)
+            .padding(stories ? 3 : 0)
+            .overlay {
+                Circle().strokeBorder(
+                    stories ? (unseenStories ? Ink.accent : Ink.muted.opacity(0.55)) : Color.clear,
+                    lineWidth: 2
+                )
+            }
+    }
+
+    @ViewBuilder
+    private var avatar: some View {
+        if let onAvatar {
+            Button(action: onAvatar) { photo }.buttonStyle(.plain)
+        } else {
+            photo
+        }
+    }
+
+    private func count(_ value: Int, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("\(value)")
+                .font(.headline)
+                .foregroundStyle(Ink.text)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(Ink.muted)
+        }
+        .accessibilityLabel("\(value) \(label)")
+    }
+}
+
 func formatTime(_ ms: Int64) -> String {
     Date(timeIntervalSince1970: TimeInterval(ms) / 1000).formatted(date: .omitted, time: .shortened)
 }

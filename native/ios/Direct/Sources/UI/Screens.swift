@@ -998,22 +998,13 @@ struct IdentityView: View {
         ScrollView {
             VStack(spacing: 28) {
                 if let profile {
-                    VStack(spacing: 8) {
-                        Avatar(name: profile.name, jpeg: profile.avatarJpegBase64, size: 108)
-                        Text(profile.name)
-                            .font(.title2.weight(.semibold))
-                        if !profile.status.isEmpty {
-                            Text(profile.status)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        Text("\(posts == 1 ? "1 post" : "\(posts) posts") · \(people == 1 ? "1 contact" : "\(people) contacts")")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
+                    ProfileHeader(
+                        name: profile.name,
+                        jpeg: profile.avatarJpegBase64,
+                        status: profile.status,
+                        posts: posts,
+                        contacts: people
+                    )
                     ProfilePosts(ownerId: profile.directId, canAdd: true, showsHeading: true)
                     SavedPosts()
                 }

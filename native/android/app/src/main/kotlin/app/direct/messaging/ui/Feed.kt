@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -51,9 +52,12 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -526,33 +530,36 @@ internal fun ContactProfileScreen(
             IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground) }
             Title(name)
         }
-        Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.clickable(enabled = stories.isNotEmpty()) { storyOpen = true }) {
-                if (stories.isNotEmpty()) {
-                    Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
-                        StoryRing(stories.any { !it.seen })
-                        Avatar(name, jpegBytes(jpeg), 72.dp)
-                    }
-                } else {
-                    Avatar(name, jpegBytes(jpeg), 72.dp)
-                }
-            }
-            Column(Modifier.weight(1f)) {
-                Text(name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                if (about.isNotBlank()) Text(about, color = Ink.muted)
-                Text("${profilePosts(state, peerId).size} posts", color = Ink.muted, fontSize = 13.sp)
-            }
-        }
+        ProfileIdentityHeader(
+            name = name,
+            jpeg = jpegBytes(jpeg),
+            status = about,
+            posts = profilePosts(state, peerId).size,
+            contacts = if (self) state.contacts.count { it.accepted && !it.blocked } else null,
+            stories = stories.isNotEmpty(),
+            unseenStories = stories.any { !it.seen },
+            onAvatar = if (stories.isNotEmpty()) {{ storyOpen = true }} else null,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        )
         if (!self) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.Top,
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                ProfileAction(Icons.Outlined.Chat, "Message", onMessage)
+                Button(
+                    onClick = onMessage,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Ink.accent, contentColor = Color.White),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = Modifier.weight(1f).height(40.dp),
+                ) {
+                    Icon(Icons.Outlined.Chat, null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                    Text("Message", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                }
                 if (canCall) {
-                    ProfileAction(Icons.Filled.Call, "Call") { placeCall(false) }
-                    ProfileAction(Icons.Filled.Videocam, "Video") { placeCall(true) }
+                    ProfileIconButton(Icons.Filled.Call, "Call") { placeCall(false) }
+                    ProfileIconButton(Icons.Filled.Videocam, "Video") { placeCall(true) }
                 }
             }
         }
@@ -563,22 +570,65 @@ internal fun ContactProfileScreen(
 }
 
 @Composable
-private fun ProfileAction(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Column(
-        Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+internal fun ProfileIdentityHeader(
+    name: String,
+    jpeg: ByteArray?,
+    status: String,
+    posts: Int,
+    contacts: Int? = null,
+    stories: Boolean = false,
+    unseenStories: Boolean = false,
+    onAvatar: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Box(
-            Modifier.size(52.dp).clip(CircleShape).background(Ink.accentSoft),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, label, tint = Ink.accent, modifier = Modifier.size(22.dp))
+        Box(Modifier.clickable(enabled = onAvatar != null) { onAvatar?.invoke() }) {
+            if (stories) {
+                Box(Modifier.size(94.dp), contentAlignment = Alignment.Center) {
+                    StoryRing(unseenStories)
+                    Avatar(name, jpeg, 82.dp)
+                }
+            } else {
+                Avatar(name, jpeg, 88.dp)
+            }
         }
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            if (status.isNotBlank()) Text(status, color = Ink.muted, fontSize = 14.sp)
+            Row(
+                Modifier.padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                ProfileCount(posts, if (posts == 1) "post" else "posts")
+                if (contacts != null) ProfileCount(contacts, if (contacts == 1) "contact" else "contacts")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileCount(value: Int, label: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text("$value", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = Ink.muted, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun ProfileIconButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Ink.border),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.accent),
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier.size(40.dp),
+    ) {
+        Icon(icon, label, modifier = Modifier.size(18.dp))
     }
 }
 
