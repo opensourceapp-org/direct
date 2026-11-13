@@ -69,6 +69,8 @@ class BootstrapClient(
     private var retryJob: Job? = null
     private val lookups = HashMap<String, CompletableDeferred<String?>>()
     private val offers = HashMap<String, CompletableDeferred<Boolean>>()
+    private val suggestions = HashMap<String, CompletableDeferred<List<SignalFrame.SuggestedPerson>>>()
+    private var discoverable = false
 
     fun configure(newUrl: String?) {
         if (newUrl == url && connection != null) return
@@ -97,10 +99,16 @@ class BootstrapClient(
         if (running) connect()
     }
 
-    fun announce(directId: String, publicBundle: String, signProof: ((String) -> String)? = null) {
+    fun announce(
+        directId: String,
+        publicBundle: String,
+        signProof: ((String) -> String)? = null,
+        discoverable: Boolean = false,
+    ) {
         selfId = directId
         bundle = publicBundle
         this.signProof = signProof
+        this.discoverable = discoverable
         sendHello()
     }
 
@@ -125,6 +133,23 @@ class BootstrapClient(
             withTimeoutOrNull(timeoutMs) { waiter.await() }
         } finally {
             lookups.remove(requestId)
+        }
+    }
+
+    /** People who opted in to be suggested on this bootstrap, or empty if the socket is not open. */
+    suspend fun suggest(timeoutMs: Long = LOOKUP_TIMEOUT_MS): List<SignalFrame.SuggestedPerson> {
+        if (!_status.value.isOpen) return emptyList()
+        val requestId = Encoding.newId("sg")
+        val waiter = CompletableDeferred<List<SignalFrame.SuggestedPerson>>()
+        suggestions[requestId] = waiter
+        if (!send(SignalFrame.Suggest(requestId))) {
+            suggestions.remove(requestId)
+            return emptyList()
+        }
+        return try {
+            withTimeoutOrNull(timeoutMs) { waiter.await() } ?: emptyList()
+        } finally {
+            suggestions.remove(requestId)
         }
     }
 
@@ -209,6 +234,8 @@ class BootstrapClient(
         lookups.clear()
         offers.values.forEach { it.complete(false) }
         offers.clear()
+        suggestions.values.forEach { it.complete(emptyList()) }
+        suggestions.clear()
     }
 
     private fun incoming(text: String) {
@@ -221,6 +248,7 @@ class BootstrapClient(
             is SignalFrame.Unreachable -> offers.remove(frame.to)?.complete(false)
             is SignalFrame.Presence -> _presence.tryEmit(frame)
             is SignalFrame.Negotiation -> if (frame.to == selfId) _negotiation.tryEmit(frame)
+            is SignalFrame.Suggestions -> suggestions.remove(frame.requestId)?.complete(frame.people)
             else -> Unit
         }
     }
@@ -232,9 +260,9 @@ class BootstrapClient(
         val currentNonce = nonce
         val signer = signProof
         if (currentNonce != null && signer != null) {
-            send(SignalFrame.Hello(id, published, currentNonce, signer(currentNonce)))
+            send(SignalFrame.Hello(id, published, currentNonce, signer(currentNonce), discoverable))
         } else {
-            send(SignalFrame.Hello(id, published))
+            send(SignalFrame.Hello(id, published, discoverable = discoverable))
         }
     }
 

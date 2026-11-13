@@ -108,7 +108,7 @@ describe('signaling contract', () => {
     return Uint8Array.from({ length: value.length / 2 }, (_, i) => Number.parseInt(value.slice(i * 2, i * 2 + 2), 16));
   }
 
-  function signedHello(who: 'ada' | 'bo', nonce: string) {
+  function signedHello(who: 'ada' | 'bo', nonce: string, discoverable = false) {
     const keys = keysFromSeed(seedFromHex(identityVectors[who].seedHex));
     const directId = identityVectors[who].directId;
     return {
@@ -117,6 +117,7 @@ describe('signaling contract', () => {
       bundle: identityVectors[who].bundle,
       nonce,
       proof: bytesToBase64Url(signBytes(keys.signingSecret, signalProofMessage(nonce, directId))),
+      ...(discoverable ? { discoverable: true } : {}),
     };
   }
 
@@ -126,8 +127,8 @@ describe('signaling contract', () => {
     return String(challenge?.nonce);
   }
 
-  function announce(sock: ReturnType<typeof socket>, who: 'ada' | 'bo') {
-    sock.receive(signedHello(who, challengeNonce(sock)));
+  function announce(sock: ReturnType<typeof socket>, who: 'ada' | 'bo', discoverable = false) {
+    sock.receive(signedHello(who, challengeNonce(sock), discoverable));
   }
 
   test('hello, lookup, and watch produce the documented hub frames', () => {
@@ -429,6 +430,80 @@ describe('signaling contract', () => {
     const found = lookup.frames.find((frame) => frame.kind === 'lookup');
     expect(found?.present).toBe(true);
     expect(found?.bundle).toContain(bo);
+  });
+
+  test('HTTP suggestions omit phones that did not opt in', async () => {
+    const { exchange, createMemoryStore } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/httpHub.cjs'),
+    ) as {
+      createMemoryStore: () => object;
+      exchange: (
+        body: { session?: string; frames?: unknown[]; waitMs?: number },
+        options?: { store?: object },
+      ) => Promise<{ session: string; nonce: string; frames: { kind?: string; people?: { directId: string }[] }[] }>;
+    };
+    const store = createMemoryStore();
+    const adaSession = await exchange({ frames: [], waitMs: 0 }, { store });
+    const boSession = await exchange({ frames: [], waitMs: 0 }, { store });
+    await exchange({ session: adaSession.session, frames: [signedHello('ada', adaSession.nonce, true)], waitMs: 0 }, { store });
+    await exchange({ session: boSession.session, frames: [signedHello('bo', boSession.nonce)], waitMs: 0 }, { store });
+    const hidden = await exchange({
+      session: adaSession.session,
+      frames: [{ kind: 'suggest', requestId: 'sug-http-1' }],
+      waitMs: 0,
+    }, { store });
+    expect(hidden.frames.find((frame) => frame.kind === 'suggestions')?.people).toEqual([]);
+    const listed = await exchange({
+      session: boSession.session,
+      frames: [{ kind: 'suggest', requestId: 'sug-http-2' }],
+      waitMs: 0,
+    }, { store });
+    expect(listed.frames.find((frame) => frame.kind === 'suggestions')?.people).toEqual([{
+      directId: ada,
+      name: identityVectors.ada.name,
+      bundle: identityVectors.ada.bundle,
+      online: true,
+    }]);
+  });
+
+  test('suggested contacts list only live phones that opted in', () => {
+    const hub = createSignalHub();
+    const a = socket();
+    const b = socket();
+    const c = socket();
+    hub.attach(a);
+    hub.attach(b);
+    hub.attach(c);
+    announce(a, 'ada', true);
+    announce(b, 'bo');
+    a.receive({ kind: 'suggest', requestId: 'sug-1' });
+    expect(a.sent.at(-1)).toEqual({ kind: 'suggestions', requestId: 'sug-1', people: [] });
+    b.receive({ kind: 'suggest', requestId: 'sug-2' });
+    expect(b.sent.at(-1)).toEqual({
+      kind: 'suggestions',
+      requestId: 'sug-2',
+      people: [{
+        directId: ada,
+        name: identityVectors.ada.name,
+        bundle: identityVectors.ada.bundle,
+        online: true,
+      }],
+    });
+    announce(c, 'bo', true);
+    a.receive({ kind: 'suggest', requestId: 'sug-3' });
+    expect(a.sent.at(-1)).toEqual({
+      kind: 'suggestions',
+      requestId: 'sug-3',
+      people: [{
+        directId: bo,
+        name: identityVectors.bo.name,
+        bundle: identityVectors.bo.bundle,
+        online: true,
+      }],
+    });
+    announce(a, 'ada');
+    c.receive({ kind: 'suggest', requestId: 'sug-4' });
+    expect(c.sent.at(-1)).toEqual({ kind: 'suggestions', requestId: 'sug-4', people: [] });
   });
 
   test('the operator roster lists a phone only while its socket is open', () => {

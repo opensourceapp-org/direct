@@ -21,7 +21,12 @@ data class Profile(
 )
 
 @Serializable
-data class Settings(val bootstrapUrl: String? = null, val bootstrapDefaultVersion: Int = 0)
+data class Settings(
+    val bootstrapUrl: String? = null,
+    val bootstrapDefaultVersion: Int = 0,
+    /** Off by default. When true, other phones on this server may see this contact as a suggestion. */
+    val discoverable: Boolean = false,
+)
 
 @Serializable
 data class ContactRecord(

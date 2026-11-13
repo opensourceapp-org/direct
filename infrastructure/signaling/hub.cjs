@@ -6,6 +6,7 @@ const MAX_WATCH = 256;
 const GRACE_MS = 120_000;
 const MAX_MESSAGES_PER_SEC = 40;
 const MAX_HELLOS = 8;
+const MAX_SUGGEST = 24;
 
 /**
  * In-memory rendezvous for devices that are not on the same network.
@@ -64,6 +65,7 @@ function createSignalHub(options = {}) {
       send,
       token: current ? current.token : 0,
       closedAt: send ? 0 : now(),
+      discoverable: Boolean(current && current.discoverable),
     });
     return true;
   }
@@ -139,7 +141,13 @@ function createSignalHub(options = {}) {
         const wasOnline = Boolean(peers.get(id)?.send);
         selfId = id;
         token += 1;
-        peers.set(id, { bundle, send, token, closedAt: 0 });
+        peers.set(id, {
+          bundle,
+          send,
+          token,
+          closedAt: 0,
+          discoverable: message.discoverable === true,
+        });
         if (onHello) onHello(id, bundle);
         if (!wasOnline) announce(id, true);
         return;
@@ -177,6 +185,13 @@ function createSignalHub(options = {}) {
         return;
       }
 
+      if (message.kind === 'suggest') {
+        const requestId = message.requestId;
+        if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 80) return;
+        send(JSON.stringify({ kind: 'suggestions', requestId, people: suggestions(selfId) }));
+        return;
+      }
+
       if (message.kind !== 'offer' && message.kind !== 'answer' && message.kind !== 'ice') return;
       if (typeof message.to !== 'string' || typeof message.from !== 'string') return;
       if (!selfId || message.from !== selfId) return;
@@ -196,7 +211,13 @@ function createSignalHub(options = {}) {
       if (!selfId) return;
       const current = peers.get(selfId);
       if (current && current.send === send && current.token === token) {
-        peers.set(selfId, { bundle: current.bundle, send: null, token, closedAt: now() });
+        peers.set(selfId, {
+          bundle: current.bundle,
+          send: null,
+          token,
+          closedAt: now(),
+          discoverable: Boolean(current.discoverable),
+        });
         announce(selfId, false);
       }
     };
@@ -224,6 +245,23 @@ function createSignalHub(options = {}) {
     return '';
   }
 
+  /** Live sockets that opted in. The operator roster still lists every connected phone. */
+  function suggestions(exceptId) {
+    const people = [];
+    for (const [directId, peer] of peers) {
+      if (!peer.send || !peer.discoverable) continue;
+      if (exceptId && directId === exceptId) continue;
+      people.push({
+        directId,
+        name: displayName(peer.bundle),
+        bundle: peer.bundle,
+        online: true,
+      });
+    }
+    people.sort((a, b) => (a.name || a.directId).localeCompare(b.name || b.directId));
+    return people.slice(0, MAX_SUGGEST);
+  }
+
   /** Phones with a live socket. A phone in the two-minute grace window is findable, but not listed. */
   function roster() {
     const at = now();
@@ -240,4 +278,4 @@ function createSignalHub(options = {}) {
   return { attach, remember, roster };
 }
 
-module.exports = { createSignalHub, DIRECT_ID, GRACE_MS, MAX_SIGNAL, MAX_BUNDLE, MAX_WATCH, MAX_MESSAGES_PER_SEC, MAX_HELLOS };
+module.exports = { createSignalHub, DIRECT_ID, GRACE_MS, MAX_SIGNAL, MAX_BUNDLE, MAX_WATCH, MAX_MESSAGES_PER_SEC, MAX_HELLOS, MAX_SUGGEST };

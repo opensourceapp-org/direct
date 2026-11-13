@@ -84,6 +84,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.NavigationBar
@@ -689,6 +691,36 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
             }
             error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
         }
+        LaunchedEffect(state.bootstrap.isOpen) {
+            if (state.bootstrap.isOpen) node.refreshSuggestions()
+        }
+        if (state.bootstrap.isOpen) {
+            Spacer(Modifier.padding(8.dp))
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Label("Suggested")
+                if (state.suggestions.isEmpty()) {
+                    Muted("No one on this server has chosen to be listed right now.")
+                }
+            }
+            state.suggestions.forEach { person ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Avatar(person.name.ifBlank { person.directId }, null)
+                    Column(Modifier.weight(1f)) {
+                        Label(person.name.ifBlank { person.directId })
+                        Mono(person.directId)
+                    }
+                    TextButton(onClick = { scope.attempt({ error = it }) { node.addContactBundle(person.bundle) } }) {
+                        Text("Add", color = Ink.accent)
+                    }
+                }
+                HorizontalDivider(color = Ink.border)
+            }
+            Muted("These people turned on public suggestions on this server. Adding them still uses their signed identity.", Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        }
         Spacer(Modifier.padding(8.dp))
         state.contacts.filter { it.accepted && !it.blocked }.forEach { contact ->
             Row(
@@ -1002,6 +1034,18 @@ private fun SettingsScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                 SecondaryButton("Share profile", Icons.Outlined.Share) { shareProfile(context, profile, card, server) }
             }
             state.bundle?.let { raw -> SecondaryButton("Copy identity bundle", Icons.Outlined.ContentCopy) { copy(context, "DIRECT bundle", raw) } }
+            Label("Discovery")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Appear as a suggested contact", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Muted("Off by default. Other DIRECT phones using this same server can see your name and add you. They still cannot read your messages.")
+                }
+                Switch(
+                    checked = state.discoverable,
+                    onCheckedChange = { on -> scope.launch { node.setDiscoverable(on) } },
+                    colors = SwitchDefaults.colors(checkedTrackColor = Ink.accent, checkedThumbColor = Color.White),
+                )
+            }
             Label("Connection")
             SecondaryButton("Network", Icons.Outlined.WifiTethering) { showNetwork = true }
             Muted("Bootstrap address, connection status, and how to run your own server.")

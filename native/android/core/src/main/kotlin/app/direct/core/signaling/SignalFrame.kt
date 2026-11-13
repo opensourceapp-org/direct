@@ -12,7 +12,13 @@ import kotlinx.serialization.json.intOrNull
 
 /** Frames from contracts/signaling.json. Nothing here can carry message text. */
 sealed interface SignalFrame {
-    data class Hello(val from: String, val bundle: String, val nonce: String? = null, val proof: String? = null) : SignalFrame
+    data class Hello(
+        val from: String,
+        val bundle: String,
+        val nonce: String? = null,
+        val proof: String? = null,
+        val discoverable: Boolean = false,
+    ) : SignalFrame
     data class Challenge(val nonce: String) : SignalFrame
     data class Lookup(val requestId: String, val directId: String) : SignalFrame
     data class Watch(val ids: List<String>) : SignalFrame
@@ -34,6 +40,9 @@ sealed interface SignalFrame {
     data class LookupResult(val requestId: String, val directId: String, val present: Boolean, val bundle: String?) : SignalFrame
     data class Unreachable(val to: String) : SignalFrame
     data class Presence(val directId: String, val online: Boolean) : SignalFrame
+    data class Suggest(val requestId: String) : SignalFrame
+    data class SuggestedPerson(val directId: String, val name: String, val bundle: String, val online: Boolean)
+    data class Suggestions(val requestId: String, val people: List<SuggestedPerson>) : SignalFrame
 }
 
 object SignalCodec {
@@ -50,6 +59,7 @@ object SignalCodec {
                 fields["nonce"] = str(frame.nonce)
                 fields["proof"] = str(frame.proof)
             }
+            if (frame.discoverable) fields["discoverable"] = JsonPrimitive(true)
             JsonObject(fields)
         }
         is SignalFrame.Challenge -> obj("kind" to str("challenge"), "nonce" to str(frame.nonce))
@@ -77,6 +87,19 @@ object SignalCodec {
         )
         is SignalFrame.Unreachable -> obj("kind" to str("unreachable"), "to" to str(frame.to))
         is SignalFrame.Presence -> obj("kind" to str("presence"), "directId" to str(frame.directId), "online" to JsonPrimitive(frame.online))
+        is SignalFrame.Suggest -> obj("kind" to str("suggest"), "requestId" to str(frame.requestId))
+        is SignalFrame.Suggestions -> obj(
+            "kind" to str("suggestions"),
+            "requestId" to str(frame.requestId),
+            "people" to JsonArray(frame.people.map { person ->
+                JsonObject(linkedMapOf(
+                    "directId" to str(person.directId),
+                    "name" to str(person.name),
+                    "bundle" to str(person.bundle),
+                    "online" to JsonPrimitive(person.online),
+                ))
+            }),
+        )
     }.toString()
 
     private fun JsonObject.text(name: String): String? = (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
@@ -92,7 +115,13 @@ object SignalCodec {
         val to = json.text("to")
         val from = json.text("from")
         return when (json.text("kind")) {
-            "hello" -> SignalFrame.Hello(from ?: return null, json.text("bundle") ?: return null, json.text("nonce"), json.text("proof"))
+            "hello" -> SignalFrame.Hello(
+                from ?: return null,
+                json.text("bundle") ?: return null,
+                json.text("nonce"),
+                json.text("proof"),
+                (json["discoverable"] as? JsonPrimitive)?.booleanOrNull == true,
+            )
             "challenge" -> SignalFrame.Challenge(json.text("nonce") ?: return null)
             "lookup" -> {
                 val requestId = json.text("requestId") ?: return null
@@ -123,6 +152,25 @@ object SignalCodec {
                 json.text("directId") ?: return null,
                 (json["online"] as? JsonPrimitive)?.booleanOrNull ?: return null,
             )
+            "suggest" -> SignalFrame.Suggest(json.text("requestId") ?: return null)
+            "suggestions" -> {
+                val requestId = json.text("requestId") ?: return null
+                val people = (json["people"] as? JsonArray) ?: return null
+                SignalFrame.Suggestions(
+                    requestId,
+                    people.mapNotNull { item ->
+                        val obj = item as? JsonObject ?: return@mapNotNull null
+                        val directId = obj.text("directId") ?: return@mapNotNull null
+                        val bundle = obj.text("bundle") ?: return@mapNotNull null
+                        SignalFrame.SuggestedPerson(
+                            directId,
+                            obj.text("name").orEmpty(),
+                            bundle,
+                            (obj["online"] as? JsonPrimitive)?.booleanOrNull ?: true,
+                        )
+                    },
+                )
+            }
             else -> null
         }
     }

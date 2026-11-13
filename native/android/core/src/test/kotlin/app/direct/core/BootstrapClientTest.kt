@@ -108,6 +108,27 @@ class BootstrapClientTest {
         scope.cancel()
     }
 
+    @Test
+    fun `suggest lists only discoverable live phones`() = runTest {
+        val hub = FakeHub()
+        val (alice, scopeA) = client(hub)
+        val (bob, scopeB) = client(hub)
+        alice.announce(ada, bundle(ada), discoverable = true)
+        alice.configure("ws://192.168.1.20:8787")
+        alice.start()
+        bob.announce(bo, bundle(bo))
+        bob.configure("ws://192.168.1.20:8787")
+        bob.start()
+        runCurrent()
+        assertEquals(emptyList(), alice.suggest())
+        val listed = bob.suggest()
+        assertEquals(1, listed.size)
+        assertEquals(ada, listed[0].directId)
+        assertTrue(listed[0].online)
+        scopeA.cancel()
+        scopeB.cancel()
+    }
+
     private fun CoroutineScope.launchCollect(client: BootstrapClient, block: (SignalFrame.Presence) -> Unit) =
         launch { client.presence.collect { block(it) } }
 }

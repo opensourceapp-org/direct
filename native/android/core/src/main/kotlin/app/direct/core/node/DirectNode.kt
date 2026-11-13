@@ -88,6 +88,15 @@ data class NodeState(
     val call: CallSnapshot? = null,
     val feed: List<FeedItem> = emptyList(),
     val savedPosts: List<String> = emptyList(),
+    val discoverable: Boolean = false,
+    val suggestions: List<SuggestedContact> = emptyList(),
+)
+
+data class SuggestedContact(
+    val directId: String,
+    val name: String,
+    val bundle: String,
+    val online: Boolean,
 )
 
 /**
@@ -123,6 +132,7 @@ class DirectNode(
     private var networkAvailable = true
     private var mediaDir: File? = null
     private var callPlain: String? = null
+    private var suggested: List<SuggestedContact> = emptyList()
 
     /** Media (microphone, camera, and the call's own peer connection) listens here. */
     var onCallEvent: ((CallEvent) -> Unit)? = null
@@ -205,6 +215,17 @@ class DirectNode(
             }
         }
     }
+
+    /** Opt in to appear as a suggested contact on this bootstrap. Off by default. */
+    suspend fun setDiscoverable(on: Boolean) = onNode {
+        store.settings = store.settings.copy(discoverable = on)
+        store.save()
+        announceSelf()
+        publish()
+    }
+
+    /** Reloads people who chose to be listed on this bootstrap. */
+    suspend fun refreshSuggestions() = onNode { loadSuggestions() }
 
     suspend fun addContact(input: String): ContactRecord = onNode {
         val self = keys ?: throw DirectException(DirectException.Reason.NO_IDENTITY, "Create your identity first.")
@@ -686,9 +707,7 @@ class DirectNode(
             it.onInbound = { notifyInbound(it) }
         }
         transport = transportFactory(bootstrap, identity.directId, scope).also { it.setListener(listener) }
-        bootstrap.announce(identity.directId, Bundles.create(identity, profile.name, profile.deviceId).encode()) { nonce ->
-            Encoding.base64Url(identity.sign(SignalProof.message(nonce, identity.directId)))
-        }
+        announceSelf()
         refreshWatch()
         wake.trySend(Unit)
     }
@@ -752,8 +771,29 @@ class DirectNode(
     }
 
     private fun onBootstrapStatus(status: BootstrapStatus) {
-        if (status.isOpen) wake.trySend(Unit)
+        if (status.isOpen) {
+            wake.trySend(Unit)
+            scope.launch { loadSuggestions() }
+        }
         publish()
+    }
+
+    private suspend fun loadSuggestions() {
+        suggested = bootstrap.suggest().map { person ->
+            SuggestedContact(person.directId, person.name.ifBlank { person.directId }, person.bundle, person.online)
+        }
+        publish()
+    }
+
+    private fun announceSelf() {
+        val identity = keys ?: return
+        val profile = store.profile ?: return
+        bootstrap.announce(
+            identity.directId,
+            Bundles.create(identity, profile.name, profile.deviceId).encode(),
+            { nonce -> Encoding.base64Url(identity.sign(SignalProof.message(nonce, identity.directId))) },
+            store.settings.discoverable,
+        )
     }
 
     private suspend fun runLoop() {
@@ -885,6 +925,10 @@ class DirectNode(
             call = board.snapshot,
             feed = store.feed().sortedByDescending { it.createdAt },
             savedPosts = store.savedPosts(),
+            discoverable = store.settings.discoverable,
+            suggestions = suggested.filter { person ->
+                person.directId != identity?.directId && contacts.none { it.directId == person.directId }
+            },
         )
     }
 

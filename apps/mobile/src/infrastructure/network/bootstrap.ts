@@ -31,6 +31,7 @@ export class DirectBootstrap implements SignalingClient {
   private bundle = '';
   private nonce = '';
   private signProof: ((nonce: string) => string) | null = null;
+  private discoverable = false;
   private stopped = true;
   state: 'idle' | 'connecting' | 'open' = 'idle';
   currentUrl = '';
@@ -61,8 +62,9 @@ export class DirectBootstrap implements SignalingClient {
     this.socket?.close();
   }
 
-  announce(bundle: string, signProof?: (nonce: string) => string): void {
+  announce(bundle: string, signProof?: (nonce: string) => string, discoverable = false): void {
     this.bundle = bundle;
+    this.discoverable = discoverable;
     if (signProof) this.signProof = signProof;
     this.hello();
   }
@@ -187,17 +189,13 @@ export class DirectBootstrap implements SignalingClient {
 
   private hello(): void {
     if (!this.socket || this.socket.readyState !== 1 || !this.selfId || !this.bundle) return;
+    const frame: Record<string, unknown> = { kind: 'hello', from: this.selfId, bundle: this.bundle };
     if (this.nonce && this.signProof) {
-      this.socket.send(JSON.stringify({
-        kind: 'hello',
-        from: this.selfId,
-        bundle: this.bundle,
-        nonce: this.nonce,
-        proof: this.signProof(this.nonce),
-      }));
-      return;
+      frame.nonce = this.nonce;
+      frame.proof = this.signProof(this.nonce);
     }
-    this.socket.send(JSON.stringify({ kind: 'hello', from: this.selfId, bundle: this.bundle }));
+    if (this.discoverable) frame.discoverable = true;
+    this.socket.send(JSON.stringify(frame));
   }
 
   private incoming(raw: string): void {

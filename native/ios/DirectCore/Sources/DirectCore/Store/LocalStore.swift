@@ -43,26 +43,31 @@ public struct Profile: Codable, Equatable, Sendable {
 public struct Settings: Codable, Equatable, Sendable {
     public var bootstrapUrl: String?
     public var bootstrapDefaultVersion: Int
+    /// Off by default. When true, other phones on this server may see this contact as a suggestion.
+    public var discoverable: Bool
 
     private enum CodingKeys: String, CodingKey {
-        case bootstrapUrl, bootstrapDefaultVersion
+        case bootstrapUrl, bootstrapDefaultVersion, discoverable
     }
 
-    public init(bootstrapUrl: String? = nil, bootstrapDefaultVersion: Int = 0) {
+    public init(bootstrapUrl: String? = nil, bootstrapDefaultVersion: Int = 0, discoverable: Bool = false) {
         self.bootstrapUrl = bootstrapUrl
         self.bootstrapDefaultVersion = bootstrapDefaultVersion
+        self.discoverable = discoverable
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         bootstrapUrl = try container.decodeIfPresent(String.self, forKey: .bootstrapUrl)
         bootstrapDefaultVersion = try container.decodeIfPresent(Int.self, forKey: .bootstrapDefaultVersion) ?? 0
+        discoverable = try container.decodeIfPresent(Bool.self, forKey: .discoverable) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(bootstrapUrl, forKey: .bootstrapUrl)
         try container.encode(bootstrapDefaultVersion, forKey: .bootstrapDefaultVersion)
+        try container.encode(discoverable, forKey: .discoverable)
     }
 }
 
