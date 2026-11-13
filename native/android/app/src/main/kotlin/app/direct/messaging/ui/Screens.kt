@@ -284,7 +284,14 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     }
     val profile = profilePeer
     if (profile != null) {
-        ContactProfileScreen(node, state, profile, back = { profilePeer = null }) { id ->
+        ContactProfileScreen(
+            node, state, profile,
+            back = { profilePeer = null },
+            onMessage = {
+                openPeer = profile
+                profilePeer = null
+            },
+        ) { id ->
             mediaId = id
             mediaCanDelete = profile == state.profile?.directId
         }
@@ -541,6 +548,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         ContactProfileScreen(
             node, state, peerId,
             back = { profileOpen = false },
+            onMessage = { profileOpen = false },
             onOpenMedia = {
                 mediaId = it
                 mediaCanDelete = peerId == state.profile?.directId
