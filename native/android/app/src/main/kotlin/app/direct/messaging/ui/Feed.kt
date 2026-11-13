@@ -8,21 +8,27 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -31,15 +37,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DynamicFeed
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +58,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,8 +70,14 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -83,6 +101,147 @@ internal fun storyOwners(state: NodeState, selfId: String): List<String> {
     val contacts = state.contacts.filter { it.accepted && !it.blocked && owners.containsKey(it.directId) }
         .sortedBy { contact -> owners[contact.directId]?.all { it.seen } == true }
     return listOf(selfId) + contacts.map { it.directId }
+}
+
+internal fun othersPosts(state: NodeState): List<FeedItem> {
+    val selfId = state.profile?.directId ?: return emptyList()
+    return state.feed.filter { it.channel == FeedNotes.POST && it.ownerId != selfId }
+        .sortedByDescending { it.createdAt }
+}
+
+internal fun feedOwnerName(state: NodeState, ownerId: String): String {
+    if (ownerId == state.profile?.directId) return state.profile?.name ?: "You"
+    return state.contacts.firstOrNull { it.directId == ownerId }?.name ?: ownerId
+}
+
+internal fun feedOwnerJpeg(state: NodeState, ownerId: String): String? {
+    if (ownerId == state.profile?.directId) return state.profile?.avatarJpegBase64
+    return state.contacts.firstOrNull { it.directId == ownerId }?.avatarJpegBase64
+}
+
+private val HeartPink = Color(0xFFE0245E)
+
+private fun likedByMe(item: FeedItem, selfId: String?): Boolean =
+    selfId != null && item.likes.any { it.fromId == selfId }
+
+private fun likeSummary(state: NodeState, item: FeedItem): String? {
+    if (item.likes.isEmpty()) return null
+    val names = item.likes.map { feedOwnerName(state, it.fromId) }
+    return when (names.size) {
+        1 -> "Liked by ${names[0]}"
+        2 -> "Liked by ${names[0]} and ${names[1]}"
+        else -> "Liked by ${names[0]} and ${names.size - 1} others"
+    }
+}
+
+private fun formatFeedTime(ms: Long): String {
+    val seconds = ((System.currentTimeMillis() - ms).coerceAtLeast(0)) / 1000
+    return when {
+        seconds < 60 -> "just now"
+        seconds < 3600 -> "${seconds / 60}m"
+        seconds < 86_400 -> "${seconds / 3600}h"
+        else -> "${seconds / 86_400}d"
+    }
+}
+
+@Composable
+internal fun FeedScreen(
+    node: DirectNode,
+    state: NodeState,
+    onOpenStory: (String) -> Unit,
+    onOpenProfile: (String) -> Unit,
+    onOpenPost: (String) -> Unit,
+) {
+    val selfId = state.profile?.directId
+    val posts = othersPosts(state)
+    var error by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.fillMaxSize().background(Ink.background)) {
+        Header("From people you know", "Feed")
+        Column(Modifier.fillMaxWidth().background(Ink.surface)) {
+            if (selfId != null) {
+                StoriesTray(node, state, selfId, onOpenStory) { error = it }
+            }
+        }
+        HorizontalDivider(color = Ink.border)
+        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
+        if (posts.isEmpty()) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(Modifier.size(64.dp).clip(CircleShape).background(Ink.accentSoft), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.DynamicFeed, null, tint = Ink.accent, modifier = Modifier.size(28.dp))
+                }
+                Text("No posts yet", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, modifier = Modifier.padding(top = 16.dp))
+                Text(
+                    "When a contact adds photos or videos to their profile, they show up here.",
+                    color = Ink.muted,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f)) {
+                items(posts, key = { it.id }) { item ->
+                    FeedPostCard(node, state, item, onOpenProfile) { onOpenPost(item.id) }
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeedPostCard(
+    node: DirectNode,
+    state: NodeState,
+    item: FeedItem,
+    onOpenProfile: (String) -> Unit,
+    onOpen: () -> Unit,
+) {
+    val name = feedOwnerName(state, item.ownerId)
+    Column(Modifier.fillMaxWidth().background(Ink.surface)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 38.dp)
+            Column(Modifier.weight(1f)) {
+                Text(name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
+            }
+        }
+        FeedThumb(node, item, Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onOpen))
+        FeedActions(node, state, item, onOpen)
+        likeSummary(state, item)?.let { summary ->
+            Text(summary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
+        }
+        if (item.caption.isNotBlank()) {
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
+                    append("  ")
+                    append(item.caption)
+                },
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                fontSize = 14.sp,
+            )
+        }
+        if (item.comments.isNotEmpty()) {
+            Text(
+                if (item.comments.size == 1) "View 1 comment" else "View all ${item.comments.size} comments",
+                color = Ink.muted,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp).clickable(onClick = onOpen),
+            )
+            val latest = item.comments.last()
+            CommentRow(state, latest.fromId, latest.body, latest.createdAt, compact = true, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp).clickable(onClick = onOpen))
+        }
+        Spacer(Modifier.height(8.dp))
+    }
 }
 
 @Composable
@@ -246,12 +405,13 @@ internal fun ProfilePosts(
     state: NodeState,
     ownerId: String,
     canAdd: Boolean,
+    showHeading: Boolean = true,
     onError: (String?) -> Unit,
+    onOpenPost: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val posts = profilePosts(state, ownerId)
-    var viewing by remember { mutableStateOf<FeedItem?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -273,14 +433,14 @@ internal fun ProfilePosts(
         }
     }
     Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Label("Photos and videos")
-            if (canAdd) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (showHeading || canAdd) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (showHeading) Label("Photos and videos") else Spacer(Modifier.weight(1f))
+                if (canAdd) {
                     IconButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }) {
                         Icon(Icons.Outlined.PhotoCamera, "Add to profile", tint = Ink.accent)
                     }
@@ -301,7 +461,7 @@ internal fun ProfilePosts(
                             FeedThumb(
                                 node,
                                 item,
-                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable { viewing = item },
+                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable { onOpenPost(item.id) },
                             )
                         }
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
@@ -310,24 +470,16 @@ internal fun ProfilePosts(
             }
         }
     }
-    viewing?.let { item ->
-        Dialog(onDismissRequest = { viewing = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            FeedLightbox(node, item, canDelete = canAdd, onDelete = {
-                scope.launch {
-                    try {
-                        node.deleteFeed(item.id)
-                        viewing = null
-                    } catch (error: Exception) {
-                        onError(error.message)
-                    }
-                }
-            }, onClose = { viewing = null })
-        }
-    }
 }
 
 @Composable
-internal fun ContactProfileScreen(node: DirectNode, state: NodeState, peerId: String, back: () -> Unit) {
+internal fun ContactProfileScreen(
+    node: DirectNode,
+    state: NodeState,
+    peerId: String,
+    back: () -> Unit,
+    onOpenPost: (String) -> Unit,
+) {
     val contact = state.contacts.firstOrNull { it.directId == peerId }
     val self = peerId == state.profile?.directId
     val name = if (self) state.profile?.name ?: "You" else contact?.name ?: peerId
@@ -360,7 +512,7 @@ internal fun ContactProfileScreen(node: DirectNode, state: NodeState, peerId: St
             }
         }
         error?.let { Text(it, color = Ink.danger, modifier = Modifier.padding(horizontal = 20.dp)) }
-        ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it })
+        ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenPost = onOpenPost)
     }
     if (storyOpen) StoryViewer(node, state, peerId) { storyOpen = false }
 }
@@ -377,20 +529,252 @@ private fun FeedThumb(node: DirectNode, item: FeedItem, modifier: Modifier) {
             Box(Modifier.fillMaxSize().background(Ink.accentSoft))
         }
         if (item.kind == "video") {
-            Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(28.dp))
+            Box(Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun FeedLightbox(node: DirectNode, item: FeedItem, canDelete: Boolean, onDelete: () -> Unit, onClose: () -> Unit) {
+internal fun FeedPostViewer(
+    node: DirectNode,
+    state: NodeState,
+    viewingId: String?,
+    canDelete: Boolean,
+    onClose: () -> Unit,
+    onError: (String?) -> Unit,
+) {
+    val item = viewingId?.let { id -> state.feed.firstOrNull { it.id == id } }
+    LaunchedEffect(viewingId, item == null) {
+        if (viewingId != null && item == null) onClose()
+    }
+    if (item == null) return
+    val scope = rememberCoroutineScope()
+    FeedLightbox(
+        node, state, item, canDelete = canDelete,
+        onDelete = {
+            scope.launch {
+                try {
+                    node.deleteFeed(item.id)
+                    onClose()
+                } catch (error: Exception) {
+                    onError(error.message)
+                }
+            }
+        },
+        onClose = onClose,
+        onError = onError,
+    )
+}
+
+@Composable
+private fun FeedActions(
+    node: DirectNode,
+    state: NodeState,
+    item: FeedItem,
+    onOpenComments: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val liked = likedByMe(item, state.profile?.directId)
+    Row(
+        Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, top = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = { scope.launch { runCatching { node.likeFeed(item.id) } } }) {
+            Icon(
+                if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                "Like",
+                tint = if (liked) HeartPink else Ink.foreground,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+        IconButton(onClick = onOpenComments) {
+            Icon(Icons.Outlined.ChatBubbleOutline, "Comments", tint = Ink.foreground, modifier = Modifier.size(24.dp))
+        }
+        Spacer(Modifier.weight(1f))
+        if (item.comments.isNotEmpty()) {
+            Text("${item.comments.size}", color = Ink.muted, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun CommentRow(
+    state: NodeState,
+    fromId: String,
+    body: String,
+    createdAt: Long,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val name = feedOwnerName(state, fromId)
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+        Avatar(name, jpegBytes(feedOwnerJpeg(state, fromId)), if (compact) 24.dp else 32.dp)
+        Column(Modifier.weight(1f)) {
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
+                    append("  ")
+                    append(body)
+                },
+                fontSize = if (compact) 13.sp else 14.sp,
+                lineHeight = if (compact) 18.sp else 20.sp,
+            )
+            Text(formatFeedTime(createdAt), color = Ink.muted, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+    }
+}
+
+@Composable
+private fun CommentComposer(
+    state: NodeState,
+    draft: String,
+    onDraft: (String) -> Unit,
+    onSend: () -> Unit,
+) {
+    val focus = LocalFocusManager.current
+    val self = state.profile
+    val ready = draft.isNotBlank()
+    fun send() {
+        if (!ready) return
+        onSend()
+        focus.clearFocus()
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Avatar(self?.name ?: "You", jpegBytes(self?.avatarJpegBase64), 32.dp)
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { onDraft(it.take(FeedNotes.MAX_COMMENT)) },
+            modifier = Modifier.weight(1f),
+            placeholder = { Text("Add a comment…", color = Ink.muted, fontSize = 15.sp) },
+            singleLine = true,
+            shape = RoundedCornerShape(24.dp),
+            textStyle = TextStyle(fontSize = 15.sp, color = Ink.foreground),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { send() }),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Ink.accent,
+                unfocusedBorderColor = Ink.border,
+                focusedContainerColor = Ink.background,
+                unfocusedContainerColor = Ink.background,
+            ),
+        )
+        Text(
+            "Post",
+            color = if (ready) Ink.accent else Ink.muted,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 16.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = ready, onClick = { send() })
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+        )
+    }
+}
+
+@Composable
+private fun FeedLightbox(
+    node: DirectNode,
+    state: NodeState,
+    item: FeedItem,
+    canDelete: Boolean,
+    onDelete: () -> Unit,
+    onClose: () -> Unit,
+    onError: (String?) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var draft by rememberSaveable(item.id) { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
+    val name = feedOwnerName(state, item.ownerId)
+    val comments = rememberLazyListState()
+    LaunchedEffect(item.comments.size) {
+        if (item.comments.isNotEmpty()) comments.scrollToItem(item.comments.lastIndex)
+    }
     BackHandler(onBack = onClose)
-    Box(Modifier.fillMaxSize().background(Color.Black).clickable(onClick = onClose)) {
-        FeedMedia(node, item, Modifier.fillMaxSize())
-        Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
-            if (canDelete) {
-                IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, "Delete", tint = Color.White) }
+    Column(Modifier.fillMaxSize().background(Color.Black).imePadding()) {
+        Box(Modifier.fillMaxWidth().height(240.dp).background(Color.Black)) {
+            FeedMedia(node, item, Modifier.fillMaxSize())
+            Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
+                if (canDelete) {
+                    IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, "Delete", tint = Color.White) }
+                }
+            }
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(Ink.surface),
+        ) {
+            Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Ink.border))
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 36.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
+                }
+            }
+            FeedActions(node, state, item, onOpenComments = {})
+            likeSummary(state, item)?.let { summary ->
+                Text(summary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp))
+            }
+            if (item.caption.isNotBlank()) {
+                Text(
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
+                        append("  ")
+                        append(item.caption)
+                    },
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                    fontSize = 14.sp,
+                )
+            }
+            HorizontalDivider(color = Ink.border, modifier = Modifier.padding(top = 8.dp))
+            if (item.comments.isEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth().padding(14.dp), contentAlignment = Alignment.TopStart) {
+                    Text("No comments yet. Say something.", color = Ink.muted, fontSize = 14.sp)
+                }
+            } else {
+                LazyColumn(
+                    state = comments,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(item.comments, key = { it.id }) { comment ->
+                        CommentRow(state, comment.fromId, comment.body, comment.createdAt)
+                    }
+                }
+            }
+            localError?.let { Text(it, color = Ink.danger, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) }
+            HorizontalDivider(color = Ink.border)
+            CommentComposer(state, draft, { draft = it }) {
+                val body = draft
+                scope.launch {
+                    try {
+                        node.commentFeed(item.id, body)
+                        draft = ""
+                        localError = null
+                        onError(null)
+                    } catch (error: Exception) {
+                        val message = error.message ?: "That comment was not saved."
+                        localError = message
+                        onError(message)
+                    }
+                }
             }
         }
     }
@@ -415,6 +799,8 @@ private fun FeedMedia(node: DirectNode, item: FeedItem, modifier: Modifier) {
         AndroidView(
             factory = { viewContext ->
                 VideoView(viewContext).apply {
+                    isFocusable = false
+                    isFocusableInTouchMode = false
                     setVideoPath(file.absolutePath)
                     setOnPreparedListener { it.isLooping = false; start() }
                 }

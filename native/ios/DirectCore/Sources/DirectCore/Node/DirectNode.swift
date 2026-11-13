@@ -518,6 +518,26 @@ public final class DirectNode {
         wake.fire()
     }
 
+    public func likeFeed(_ id: String) throws {
+        do {
+            try requireEngine().likeFeed(id)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+    }
+
+    public func commentFeed(_ id: String, _ body: String) throws {
+        do {
+            try requireEngine().commentFeed(id, body)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
+        wake.fire()
+    }
+
     public func markStoriesSeen(_ ownerId: String) throws {
         try requireEngine().markFeedSeen(ownerId)
         publish()

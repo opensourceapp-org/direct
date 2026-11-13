@@ -1,7 +1,7 @@
 import Foundation
 
 /// A story or profile post sealed to accepted contacts. The bootstrap never sees the bytes.
-/// Puts are chunked like chat media. Deletes are a short JSON note.
+/// Puts are chunked like chat media. Deletes, likes, and comments are short JSON notes.
 public enum FeedNotes {
     public static let partPrefix = "DIRECT-FEED/1\n"
     public static let jobPrefix = "DIRECT-FEED-JOB/1\n"
@@ -11,8 +11,11 @@ public enum FeedNotes {
     public static let maxStories = 20
     public static let maxPosts = 60
     public static let maxCaption = 200
+    public static let maxComment = 500
+    public static let maxComments = 100
     public static let channels: Set<String> = [story, post]
     public static let kinds: Set<String> = ["image", "video", "gif"]
+    public static let socialOps: Set<String> = ["like", "comment"]
 
     public struct Part: Equatable, Sendable {
         public var id: String
@@ -43,6 +46,22 @@ public enum FeedNotes {
     public struct Delete: Equatable, Sendable {
         public var channel: String
         public var id: String
+    }
+
+    public struct Social: Equatable, Sendable {
+        public var op: String
+        public var id: String
+        public var body: String?
+        public var commentId: String?
+        public var createdAt: Int64?
+
+        public init(op: String, id: String, body: String? = nil, commentId: String? = nil, createdAt: Int64? = nil) {
+            self.op = op
+            self.id = id
+            self.body = body
+            self.commentId = commentId
+            self.createdAt = createdAt
+        }
     }
 
     public struct Job: Equatable, Sendable {
@@ -130,6 +149,42 @@ public enum FeedNotes {
               (4...80).contains(id.count)
         else { return nil }
         return Delete(channel: channel, id: id)
+    }
+
+    public static func encodeLike(id: String) -> String {
+        partPrefix + JSON.object([
+            ("v", .int(1)),
+            ("op", .string("like")),
+            ("id", .string(id)),
+        ]).serialized()
+    }
+
+    public static func encodeComment(id: String, commentId: String, body: String, createdAt: Int64) -> String {
+        partPrefix + JSON.object([
+            ("v", .int(1)),
+            ("op", .string("comment")),
+            ("id", .string(id)),
+            ("commentId", .string(commentId)),
+            ("body", .string(body)),
+            ("createdAt", .int(createdAt)),
+        ]).serialized()
+    }
+
+    public static func decodeSocial(_ plaintext: String) -> Social? {
+        guard plaintext.hasPrefix(partPrefix),
+              let json = JSON.parse(String(plaintext.dropFirst(partPrefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)),
+              let op = json["op"]?.string, socialOps.contains(op),
+              let id = json["id"]?.string, (4...80).contains(id.count)
+        else { return nil }
+        if op == "like" { return Social(op: op, id: id) }
+        guard op == "comment",
+              let raw = json["body"]?.string
+        else { return nil }
+        let body = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxComment))
+        guard !body.isEmpty,
+              let commentId = json["commentId"]?.string, (4...80).contains(commentId.count)
+        else { return nil }
+        return Social(op: op, id: id, body: body, commentId: commentId, createdAt: json["createdAt"]?.int64)
     }
 
     public static func encodeJob(_ job: Job) -> String {

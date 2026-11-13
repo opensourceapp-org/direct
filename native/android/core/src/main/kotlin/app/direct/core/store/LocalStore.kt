@@ -88,6 +88,15 @@ data class MessageRecord(
 )
 
 @Serializable
+data class FeedLike(val fromId: String)
+
+@Serializable
+data class FeedComment(val id: String, val fromId: String, val body: String, val createdAt: Long)
+
+fun List<FeedLike>.toggling(fromId: String): List<FeedLike> =
+    if (any { it.fromId == fromId }) filter { it.fromId != fromId } else this + FeedLike(fromId)
+
+@Serializable
 data class FeedItem(
     val id: String,
     val ownerId: String,
@@ -100,6 +109,8 @@ data class FeedItem(
     val expiresAt: Long? = null,
     val mediaFile: String,
     val seen: Boolean = false,
+    val likes: List<FeedLike> = emptyList(),
+    val comments: List<FeedComment> = emptyList(),
 )
 
 @Serializable

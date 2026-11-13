@@ -464,6 +464,26 @@ class DirectNode(
         wake.trySend(Unit)
     }
 
+    suspend fun likeFeed(id: String) = onNode {
+        try {
+            requireEngine().likeFeed(id)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "That like was not saved.")
+        }
+        publish()
+        wake.trySend(Unit)
+    }
+
+    suspend fun commentFeed(id: String, body: String) = onNode {
+        try {
+            requireEngine().commentFeed(id, body)
+        } catch (error: DeliveryRejected) {
+            throw DirectException(DirectException.Reason.REJECTED, error.message ?: "That comment was not saved.")
+        }
+        publish()
+        wake.trySend(Unit)
+    }
+
     suspend fun markStoriesSeen(ownerId: String) = onNode {
         requireEngine().markFeedSeen(ownerId)
         publish()

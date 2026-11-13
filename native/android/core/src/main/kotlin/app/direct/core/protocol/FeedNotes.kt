@@ -11,7 +11,7 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * A story or profile post sealed to accepted contacts. The bootstrap never sees the bytes.
- * Puts are chunked like chat media. Deletes are a short JSON note.
+ * Puts are chunked like chat media. Deletes, likes, and comments are short JSON notes.
  */
 object FeedNotes {
     const val PART_PREFIX = "DIRECT-FEED/1\n"
@@ -22,8 +22,11 @@ object FeedNotes {
     const val MAX_STORIES = 20
     const val MAX_POSTS = 60
     const val MAX_CAPTION = 200
+    const val MAX_COMMENT = 500
+    const val MAX_COMMENTS = 100
     val CHANNELS = setOf(STORY, POST)
     val KINDS = setOf("image", "video", "gif")
+    val SOCIAL_OPS = setOf("like", "comment")
 
     data class Part(
         val id: String,
@@ -39,6 +42,14 @@ object FeedNotes {
     )
 
     data class Delete(val channel: String, val id: String)
+
+    data class Social(
+        val op: String,
+        val id: String,
+        val body: String? = null,
+        val commentId: String? = null,
+        val createdAt: Long? = null,
+    )
 
     data class Job(
         val id: String,
@@ -118,6 +129,45 @@ object FeedNotes {
         val id = json.text("id") ?: return null
         if (channel !in CHANNELS || id.length !in 4..80) return null
         return Delete(channel, id)
+    }
+
+    fun encodeLike(id: String): String =
+        PART_PREFIX + json("v" to "1", "op" to "like", "id" to id, numbers = setOf("v"))
+
+    fun encodeComment(id: String, commentId: String, body: String, createdAt: Long): String =
+        PART_PREFIX + json(
+            "v" to "1",
+            "op" to "comment",
+            "id" to id,
+            "commentId" to commentId,
+            "body" to body,
+            "createdAt" to createdAt.toString(),
+            numbers = setOf("v", "createdAt"),
+        )
+
+    fun decodeSocial(plaintext: String): Social? {
+        if (!plaintext.startsWith(PART_PREFIX)) return null
+        val rest = plaintext.removePrefix(PART_PREFIX).trim()
+        val json = try {
+            Json.parseToJsonElement(rest) as? JsonObject
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        val op = json.text("op") ?: return null
+        if (op !in SOCIAL_OPS) return null
+        val id = json.text("id") ?: return null
+        if (id.length !in 4..80) return null
+        return when (op) {
+            "like" -> Social(op, id)
+            "comment" -> {
+                val body = json.text("body")?.trim()?.take(MAX_COMMENT) ?: return null
+                if (body.isEmpty()) return null
+                val commentId = json.text("commentId") ?: return null
+                if (commentId.length !in 4..80) return null
+                Social(op, id, body, commentId, json.long("createdAt"))
+            }
+            else -> null
+        }
     }
 
     fun encodeJob(job: Job): String {

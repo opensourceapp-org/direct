@@ -50,13 +50,13 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DynamicFeed
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
@@ -67,11 +67,13 @@ import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.QrCode
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.WifiTethering
@@ -145,8 +147,8 @@ import kotlinx.coroutines.withContext
 private enum class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     CHATS("Chats", Icons.Outlined.Chat, Icons.Filled.Chat),
     CONTACTS("Contacts", Icons.Outlined.Group, Icons.Filled.Group),
-    NETWORK("Network", Icons.Outlined.WifiTethering, Icons.Filled.WifiTethering),
-    IDENTITY("Settings", Icons.Outlined.Settings, Icons.Filled.Settings),
+    FEED("Feed", Icons.Outlined.DynamicFeed, Icons.Filled.DynamicFeed),
+    PROFILE("Profile", Icons.Outlined.Person, Icons.Filled.Person),
 }
 
 private fun CoroutineScope.attempt(onError: (String?) -> Unit, block: suspend () -> Unit) = launch {
@@ -229,6 +231,8 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     var newGroup by rememberSaveable { mutableStateOf(false) }
     var storyOwner by rememberSaveable { mutableStateOf<String?>(null) }
     var profilePeer by rememberSaveable { mutableStateOf<String?>(null) }
+    var viewingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var viewingCanDelete by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(pending) {
         val target = pending ?: return@LaunchedEffect
         openPeer = target
@@ -249,9 +253,20 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
         NewGroupScreen(node, state, back = { newGroup = false }) { openPeer = it; newGroup = false }
         return
     }
+    if (viewingId != null) {
+        FeedPostViewer(
+            node, state, viewingId, canDelete = viewingCanDelete,
+            onClose = { viewingId = null },
+            onError = {},
+        )
+        return
+    }
     val profile = profilePeer
     if (profile != null) {
-        ContactProfileScreen(node, state, profile) { profilePeer = null }
+        ContactProfileScreen(node, state, profile, back = { profilePeer = null }) { id ->
+            viewingId = id
+            viewingCanDelete = profile == state.profile?.directId
+        }
         return
     }
     val story = storyOwner
@@ -262,10 +277,18 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
             when (tab) {
-                Tab.CHATS -> ChatsScreen(node, state, onNewGroup = { newGroup = true }, onOpenStory = { storyOwner = it }) { openPeer = it }
+                Tab.CHATS -> ChatsScreen(state, onNewGroup = { newGroup = true }) { openPeer = it }
                 Tab.CONTACTS -> ContactsScreen(node, state) { openPeer = it }
-                Tab.NETWORK -> NetworkScreen(node, state)
-                Tab.IDENTITY -> IdentityScreen(node, state, onHowItWorks)
+                Tab.FEED -> FeedScreen(
+                    node, state,
+                    onOpenStory = { storyOwner = it },
+                    onOpenProfile = { profilePeer = it },
+                    onOpenPost = { viewingId = it; viewingCanDelete = false },
+                )
+                Tab.PROFILE -> IdentityScreen(node, state, onHowItWorks) { id ->
+                    viewingId = id
+                    viewingCanDelete = true
+                }
             }
         }
         HorizontalDivider(color = Ink.border)
@@ -291,15 +314,13 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
 }
 
 @Composable
-private fun Header(eyebrow: String, title: String) = Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)) {
+internal fun Header(eyebrow: String, title: String) = Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)) {
     Text(eyebrow.uppercase(), color = Ink.muted, fontSize = 12.sp, letterSpacing = 1.2.sp)
     Title(title)
 }
 
 @Composable
-private fun ChatsScreen(node: DirectNode, state: NodeState, onNewGroup: () -> Unit, onOpenStory: (String) -> Unit, open: (String) -> Unit) {
-    val selfId = state.profile?.directId
-    var error by remember { mutableStateOf<String?>(null) }
+private fun ChatsScreen(state: NodeState, onNewGroup: () -> Unit, open: (String) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Header("Messages", "Chats")
@@ -308,10 +329,6 @@ private fun ChatsScreen(node: DirectNode, state: NodeState, onNewGroup: () -> Un
                 Icon(Icons.Outlined.Group, "New group", tint = Ink.accent)
             }
         }
-        if (selfId != null) {
-            StoriesTray(node, state, selfId, onOpenStory) { error = it }
-        }
-        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp)) }
         if (state.conversations.isEmpty()) {
             Column(
                 Modifier.weight(1f).fillMaxWidth().padding(32.dp),
@@ -378,6 +395,7 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
     var deleting by remember { mutableStateOf<MessageRecord?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var profileOpen by rememberSaveable { mutableStateOf(false) }
+    var viewingId by rememberSaveable { mutableStateOf<String?>(null) }
     val list = rememberLazyListState()
     LaunchedEffect(peerId, messages.size, contact?.accepted, isGroup) {
         if (isGroup || contact?.accepted == true) node.openConversation(peerId)
@@ -492,7 +510,18 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         )
     }
     if (profileOpen && !isGroup) {
-        ContactProfileScreen(node, state, peerId) { profileOpen = false }
+        ContactProfileScreen(
+            node, state, peerId,
+            back = { profileOpen = false },
+            onOpenPost = { viewingId = it },
+        )
+    }
+    if (viewingId != null) {
+        FeedPostViewer(
+            node, state, viewingId, canDelete = false,
+            onClose = { viewingId = null },
+            onError = { error = it },
+        )
     }
 }
 
@@ -758,14 +787,68 @@ private fun HelpCode(text: String) = Text(
 )
 
 @Composable
-private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
+private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit, onOpenPost: (String) -> Unit) {
+    var pane by rememberSaveable { mutableStateOf("home") }
+    when (pane) {
+        "edit" -> EditProfileScreen(node, state) { pane = "home" }
+        "settings" -> SettingsScreen(node, state, onHowItWorks) { pane = "home" }
+        else -> ProfileHomeScreen(node, state, onEdit = { pane = "edit" }, onSettings = { pane = "settings" }, onOpenPost = onOpenPost)
+    }
+}
+
+@Composable
+private fun ProfileHomeScreen(
+    node: DirectNode,
+    state: NodeState,
+    onEdit: () -> Unit,
+    onSettings: () -> Unit,
+    onOpenPost: (String) -> Unit,
+) {
+    val profile = state.profile ?: return
+    var error by remember { mutableStateOf<String?>(null) }
+    val posts = profilePosts(state, profile.directId)
+    val stories = liveStories(state, profile.directId)
+    val people = state.contacts.count { it.accepted && !it.blocked }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 12.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Title("Profile")
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onSettings) {
+                Icon(Icons.Outlined.Settings, "Settings", tint = Ink.foreground)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Avatar(profile.name, jpegBytes(profile.avatarJpegBase64), 88.dp)
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly) {
+                ProfileStat("${posts.size}", "Posts")
+                ProfileStat("$people", "Contacts")
+                ProfileStat("${stories.size}", "Stories")
+            }
+        }
+        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(profile.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            if (profile.status.isNotBlank()) Text(profile.status, fontSize = 14.sp)
+            SecondaryButton("Edit profile") { onEdit() }
+        }
+        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
+        ProfilePosts(node, state, profile.directId, canAdd = true, showHeading = false, onError = { error = it }, onOpenPost = onOpenPost)
+    }
+}
+
+@Composable
+private fun EditProfileScreen(node: DirectNode, state: NodeState, back: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val profile = state.profile ?: return
-    var phrase by remember { mutableStateOf<String?>(null) }
     var status by rememberSaveable(profile.status) { mutableStateOf(profile.status) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showQr by rememberSaveable { mutableStateOf(false) }
     var acknowledged by remember { mutableStateOf<String?>(null) }
     val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -778,24 +861,27 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
             }
         }
     }
-    val bundle = state.bundle
-    val server = state.bootstrapUrl.orEmpty()
-    val card = bundle?.let { shareCard(profile, it, server) }
     val statusDraft = status.trim()
+    BackHandler(onBack = back)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Header("This phone", profile.name)
-        if (profile.status.isNotBlank()) {
-            Text(profile.status, modifier = Modifier.padding(horizontal = 20.dp), fontSize = 16.sp)
+        Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground) }
+            Title("Edit profile")
         }
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Avatar(profile.name, jpegBytes(profile.avatarJpegBase64), 72.dp)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SecondaryButton("Profile photo", Icons.Outlined.PhotoCamera) { photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-                    if (profile.avatarJpegBase64 != null) SecondaryButton("Remove photo", Icons.Outlined.Delete) { scope.attempt({ error = it }) { node.clearAvatar() } }
+                    SecondaryButton("Change photo", Icons.Outlined.PhotoCamera) {
+                        photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                    if (profile.avatarJpegBase64 != null) {
+                        SecondaryButton("Remove photo", Icons.Outlined.Delete) {
+                            scope.attempt({ error = it }) { node.clearAvatar() }
+                        }
+                    }
                 }
             }
-            ProfilePosts(node, state, profile.directId, canAdd = true, onError = { error = it })
             Label("Status")
             Field(status, { status = it.take(80) }, "Write your own status")
             PrimaryButton(if (acknowledged == statusDraft) "Saved" else "Save status") {
@@ -819,7 +905,42 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                 }
             }
             Muted("Choose one, or write your own and tap Save status.")
-            Label("DIRECT ID")
+            error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit, back: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val profile = state.profile ?: return
+    var phrase by remember { mutableStateOf<String?>(null) }
+    var showQr by rememberSaveable { mutableStateOf(false) }
+    var showNetwork by rememberSaveable { mutableStateOf(false) }
+    val bundle = state.bundle
+    val server = state.bootstrapUrl.orEmpty()
+    val card = bundle?.let { shareCard(profile, it, server) }
+    if (showNetwork) {
+        BackHandler { showNetwork = false }
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { showNetwork = false }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
+                }
+            }
+            Box(Modifier.weight(1f)) { NetworkScreen(node, state) }
+        }
+        return
+    }
+    BackHandler(onBack = back)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground) }
+            Title("Settings")
+        }
+        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Label("Share")
             Mono(profile.directId)
             SecondaryButton("Copy DIRECT ID", Icons.Outlined.ContentCopy) { copy(context, "DIRECT ID", profile.directId) }
             if (card != null) {
@@ -830,21 +951,20 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                             QrImage(card, Modifier.fillMaxWidth())
                             Muted(
                                 if (server.isEmpty()) "Set the server under Network before sharing. Without that address, the other phone can save your identity but cannot connect."
-                                else "The QR code is your signed identity and your server address, plus the status and a small photo. Scanning it saves that server so the two phones can connect. The status and photo are for display. They are not part of the signature.",
+                                else "The QR code is your signed identity and your server address, plus the status and a small photo. Scanning it saves that server so the two phones can connect.",
                             )
                         }
                     }
                 }
                 SecondaryButton("Share profile", Icons.Outlined.Share) { shareProfile(context, profile, card, server) }
-                Muted(
-                    if (server.isEmpty()) "Share includes your name and DIRECT ID. Set the server under Network first, or the other phone will not know where to connect."
-                    else "Share sends a picture of your QR code, with your name, DIRECT ID, and server address. Scanning it saves that server on the other phone.",
-                )
             }
             state.bundle?.let { raw -> SecondaryButton("Copy identity bundle", Icons.Outlined.ContentCopy) { copy(context, "DIRECT bundle", raw) } }
+            Label("Connection")
+            SecondaryButton("Network", Icons.Outlined.WifiTethering) { showNetwork = true }
+            Muted("Bootstrap address, connection status, and how to run your own server.")
             SecondaryButton("How DIRECT works", Icons.Outlined.Info) { onHowItWorks() }
             Muted("Device ${profile.deviceId}")
-            Label("Recovery phrase")
+            Label("Recovery")
             Muted("Anyone with these 24 words can become you. Write them down and keep them off this phone.")
             val shown = phrase
             if (shown == null) SecondaryButton("Show recovery phrase", Icons.Outlined.Key) { scope.launch { phrase = node.recoveryPhrase() } }
@@ -852,8 +972,15 @@ private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                 Mono(shown)
                 SecondaryButton("Hide") { phrase = null }
             }
-            error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
         }
+    }
+}
+
+@Composable
+private fun ProfileStat(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        Text(label, color = Ink.muted, fontSize = 12.sp)
     }
 }
 

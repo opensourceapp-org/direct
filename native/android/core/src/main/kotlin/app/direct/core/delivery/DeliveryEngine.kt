@@ -12,6 +12,7 @@ import app.direct.core.protocol.GroupNotes
 import app.direct.core.protocol.MediaNotes
 import app.direct.core.protocol.ProfileNotes
 import app.direct.core.store.ContactRecord
+import app.direct.core.store.FeedComment
 import app.direct.core.store.FeedItem
 import app.direct.core.store.GroupRecord
 import app.direct.core.store.Direction
@@ -433,20 +434,34 @@ class DeliveryEngine(
     }
 
     fun deleteFeed(id: String) {
-        val (keys, deviceId) = identity() ?: throw DeliveryRejected("Create an identity first.")
+        val keys = identity()?.first ?: throw DeliveryRejected("Create an identity first.")
         val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")
         if (item.ownerId != keys.directId) throw DeliveryRejected("You can only delete your own posts.")
         store.removeFeed(id)
+        fanFeedPlain(Encoding.utf8(FeedNotes.encodeDelete(item.channel, item.id)))
+        store.save()
+    }
+
+    fun likeFeed(id: String) {
+        val keys = identity()?.first ?: throw DeliveryRejected("Create an identity first.")
+        val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")
+        if (item.channel != FeedNotes.POST) throw DeliveryRejected("Only posts can be liked.")
+        store.putFeed(item.copy(likes = item.likes.toggling(keys.directId)))
+        fanFeedPlain(Encoding.utf8(FeedNotes.encodeLike(id)))
+        store.save()
+    }
+
+    fun commentFeed(id: String, body: String) {
+        val keys = identity()?.first ?: throw DeliveryRejected("Create an identity first.")
+        val text = body.trim().take(FeedNotes.MAX_COMMENT)
+        if (text.isEmpty()) throw DeliveryRejected("Write a comment first.")
+        val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")
+        if (item.channel != FeedNotes.POST) throw DeliveryRejected("Only posts can be commented on.")
+        if (item.comments.size >= FeedNotes.MAX_COMMENTS) throw DeliveryRejected("This post has too many comments.")
         val now = clock()
-        val plain = Encoding.utf8(FeedNotes.encodeDelete(item.channel, item.id))
-        val targets = store.contacts().filter { it.accepted && !it.blocked }
-        for (contact in targets) {
-            val envelope = Envelopes.seal(
-                keys, deviceId, contact.directId, bundleFor(contact).agreementPublic,
-                Encoding.newId("fed"), EnvelopeType.FEED, plain, now, ttlMs,
-            )
-            store.putQueued(QueueItem(envelope.id, contact.directId, QueueKind.RECEIPT, envelope.encode(), 0, now, envelope.expiresAt))
-        }
+        val comment = FeedComment(Encoding.newId("cmt"), keys.directId, text, now)
+        store.putFeed(item.copy(comments = item.comments + comment))
+        fanFeedPlain(Encoding.utf8(FeedNotes.encodeComment(id, comment.id, text, now)))
         store.save()
     }
 
@@ -976,13 +991,17 @@ class DeliveryEngine(
         store.pruneFeed(clock())
         val decoded = FeedNotes.decodePart(opened)
         if (decoded == null) {
-            val deleted = FeedNotes.decodeDelete(plaintext) ?: return ReceiveOutcome.IGNORED
-            val existing = store.feed(deleted.id) ?: return ReceiveOutcome.DUPLICATE
-            if (existing.ownerId != peerId) return ReceiveOutcome.IGNORED
-            store.removeFeed(deleted.id)
-            File(directory, existing.mediaFile).delete()
-            store.save()
-            return ReceiveOutcome.STORED
+            val deleted = FeedNotes.decodeDelete(plaintext)
+            if (deleted != null) {
+                val existing = store.feed(deleted.id) ?: return ReceiveOutcome.DUPLICATE
+                if (existing.ownerId != peerId) return ReceiveOutcome.IGNORED
+                store.removeFeed(deleted.id)
+                File(directory, existing.mediaFile).delete()
+                store.save()
+                return ReceiveOutcome.STORED
+            }
+            val social = FeedNotes.decodeSocial(plaintext) ?: return ReceiveOutcome.IGNORED
+            return ingestSocial(peerId, social)
         }
         val header = decoded.first
         val chunk = decoded.second
@@ -998,14 +1017,48 @@ class DeliveryEngine(
         val fileName = "${header.id}.bin"
         File(directory, fileName).writeBytes(assembled)
         partsDir.deleteRecursively()
-        val already = store.feed(header.id)?.mediaFile != null
+        val existing = store.feed(header.id)
+        val already = existing?.mediaFile != null
         val item = FeedItem(
             header.id, peerId, header.channel, header.kind, header.mime, header.name, header.caption,
-            header.createdAt, header.expiresAt, fileName, seen = already && store.feed(header.id)?.seen == true,
+            header.createdAt, header.expiresAt, fileName, seen = already && existing?.seen == true,
+            likes = existing?.likes.orEmpty(), comments = existing?.comments.orEmpty(),
         )
         store.putFeed(item)
         store.save()
         return if (already) ReceiveOutcome.DUPLICATE else ReceiveOutcome.STORED
+    }
+
+    private fun ingestSocial(peerId: String, social: FeedNotes.Social): ReceiveOutcome {
+        val item = store.feed(social.id) ?: return ReceiveOutcome.IGNORED
+        if (item.channel != FeedNotes.POST) return ReceiveOutcome.IGNORED
+        val updated = when (social.op) {
+            "like" -> item.copy(likes = item.likes.toggling(peerId))
+            "comment" -> {
+                val commentId = social.commentId ?: return ReceiveOutcome.IGNORED
+                val body = social.body?.trim()?.take(FeedNotes.MAX_COMMENT) ?: return ReceiveOutcome.IGNORED
+                if (body.isEmpty()) return ReceiveOutcome.IGNORED
+                if (item.comments.any { it.id == commentId }) return ReceiveOutcome.DUPLICATE
+                if (item.comments.size >= FeedNotes.MAX_COMMENTS) return ReceiveOutcome.IGNORED
+                item.copy(comments = item.comments + FeedComment(commentId, peerId, body, social.createdAt ?: clock()))
+            }
+            else -> return ReceiveOutcome.IGNORED
+        }
+        store.putFeed(updated)
+        store.save()
+        return ReceiveOutcome.STORED
+    }
+
+    private fun fanFeedPlain(plain: ByteArray) {
+        val (keys, deviceId) = identity() ?: return
+        val now = clock()
+        for (contact in store.contacts().filter { it.accepted && !it.blocked }) {
+            val envelope = Envelopes.seal(
+                keys, deviceId, contact.directId, bundleFor(contact).agreementPublic,
+                Encoding.newId("fed"), EnvelopeType.FEED, plain, now, ttlMs,
+            )
+            store.putQueued(QueueItem(envelope.id, contact.directId, QueueKind.RECEIPT, envelope.encode(), 0, now, envelope.expiresAt))
+        }
     }
 
     private fun ingestMedia(peerId: String, contact: ContactRecord, header: MediaNotes.Part, chunk: ByteArray, createdAt: Long): ReceiveOutcome {

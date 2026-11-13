@@ -5,7 +5,7 @@ import UIKit
 
 /// Main-actor mirror of `NodeState` for SwiftUI. Every action runs on `DirectActor`.
 enum HomeTab: Hashable {
-    case chats, contacts, network, settings
+    case chats, contacts, feed, profile
 }
 
 @MainActor
@@ -193,6 +193,8 @@ final class AppModel: ObservableObject {
     }
 
     func deleteFeed(_ id: String) { run { try $0.deleteFeed(id) } }
+    func likeFeed(_ id: String) { run { try $0.likeFeed(id) } }
+    func commentFeed(_ id: String, _ body: String) { run { try $0.commentFeed(id, body) } }
     func markStoriesSeen(_ ownerId: String) { run { try $0.markStoriesSeen(ownerId) } }
 
     func loadFeed(_ id: String, done: @escaping @MainActor (Data?) -> Void) {

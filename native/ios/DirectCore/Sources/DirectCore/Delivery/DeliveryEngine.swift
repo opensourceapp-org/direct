@@ -484,20 +484,35 @@ public final class DeliveryEngine {
     }
 
     public func deleteFeed(_ id: String) throws {
-        guard let (keys, deviceId) = identity() else { throw DeliveryRejected(message: "Create an identity first.") }
+        guard let keys = identity()?.0 else { throw DeliveryRejected(message: "Create an identity first.") }
         guard let item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }
         guard item.ownerId == keys.directId else { throw DeliveryRejected(message: "You can only delete your own posts.") }
         store.removeFeed(id)
+        try fanFeedPlain(Encoding.utf8(FeedNotes.encodeDelete(channel: item.channel, id: item.id)))
+        try store.save()
+    }
+
+    public func likeFeed(_ id: String) throws {
+        guard let keys = identity()?.0 else { throw DeliveryRejected(message: "Create an identity first.") }
+        guard let item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }
+        guard item.channel == FeedNotes.post else { throw DeliveryRejected(message: "Only posts can be liked.") }
+        store.putFeed(item.togglingLike(keys.directId))
+        try fanFeedPlain(Encoding.utf8(FeedNotes.encodeLike(id: id)))
+        try store.save()
+    }
+
+    public func commentFeed(_ id: String, _ body: String) throws {
+        guard let keys = identity()?.0 else { throw DeliveryRejected(message: "Create an identity first.") }
+        let text = String(body.trimmingCharacters(in: .whitespacesAndNewlines).prefix(FeedNotes.maxComment))
+        guard !text.isEmpty else { throw DeliveryRejected(message: "Write a comment first.") }
+        guard var item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }
+        guard item.channel == FeedNotes.post else { throw DeliveryRejected(message: "Only posts can be commented on.") }
+        guard item.comments.count < FeedNotes.maxComments else { throw DeliveryRejected(message: "This post has too many comments.") }
         let now = clock()
-        let plain = Encoding.utf8(FeedNotes.encodeDelete(channel: item.channel, id: item.id))
-        let targets = store.contacts().filter { $0.accepted && !$0.blocked }
-        for contact in targets {
-            let envelope = try Envelopes.seal(
-                sender: keys, deviceId: deviceId, recipientId: contact.directId, recipientAgreementPublic: try bundleFor(contact).agreementPublic,
-                id: Encoding.newId("fed"), type: .feed, plaintext: plain, createdAt: now, ttlMs: ttlMs
-            )
-            store.putQueued(QueueItem(id: envelope.id, peerId: contact.directId, kind: .receipt, payload: envelope.encode(), nextAttemptAt: now, expiresAt: envelope.expiresAt))
-        }
+        let comment = FeedComment(id: Encoding.newId("cmt"), fromId: keys.directId, body: text, createdAt: now)
+        item.comments.append(comment)
+        store.putFeed(item)
+        try fanFeedPlain(Encoding.utf8(FeedNotes.encodeComment(id: id, commentId: comment.id, body: text, createdAt: now)))
         try store.save()
     }
 
@@ -1061,13 +1076,16 @@ public final class DeliveryEngine {
         guard let directory = mediaDirectory else { return .ignored }
         store.pruneFeed(clock())
         guard let (header, chunk) = FeedNotes.decodePart(opened) else {
-            guard let deleted = FeedNotes.decodeDelete(plaintext) else { return .ignored }
-            guard let existing = store.feed(deleted.id) else { return .duplicate }
-            guard existing.ownerId == peerId else { return .ignored }
-            store.removeFeed(deleted.id)
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent(existing.mediaFile))
-            try store.save()
-            return .stored
+            if let deleted = FeedNotes.decodeDelete(plaintext) {
+                guard let existing = store.feed(deleted.id) else { return .duplicate }
+                guard existing.ownerId == peerId else { return .ignored }
+                store.removeFeed(deleted.id)
+                try? FileManager.default.removeItem(at: directory.appendingPathComponent(existing.mediaFile))
+                try store.save()
+                return .stored
+            }
+            guard let social = FeedNotes.decodeSocial(plaintext) else { return .ignored }
+            return try ingestSocial(peerId, social)
         }
         let partsDir = directory.appendingPathComponent("parts").appendingPathComponent("feed").appendingPathComponent(header.id)
         try FileManager.default.createDirectory(at: partsDir, withIntermediateDirectories: true)
@@ -1084,14 +1102,49 @@ public final class DeliveryEngine {
         let fileName = "\(header.id).bin"
         try assembled.write(to: directory.appendingPathComponent(fileName))
         try? FileManager.default.removeItem(at: partsDir)
-        let already = store.feed(header.id)?.mediaFile != nil
-        let seen = already && store.feed(header.id)?.seen == true
+        let existing = store.feed(header.id)
+        let already = existing?.mediaFile != nil
+        let seen = already && existing?.seen == true
         store.putFeed(FeedItem(
             id: header.id, ownerId: peerId, channel: header.channel, kind: header.kind, mime: header.mime, name: header.name,
-            caption: header.caption, createdAt: header.createdAt, expiresAt: header.expiresAt, mediaFile: fileName, seen: seen
+            caption: header.caption, createdAt: header.createdAt, expiresAt: header.expiresAt, mediaFile: fileName, seen: seen,
+            likes: existing?.likes ?? [], comments: existing?.comments ?? []
         ))
         try store.save()
         return already ? .duplicate : .stored
+    }
+
+    private func ingestSocial(_ peerId: String, _ social: FeedNotes.Social) throws -> ReceiveOutcome {
+        guard var item = store.feed(social.id), item.channel == FeedNotes.post else { return .ignored }
+        if social.op == "like" {
+            store.putFeed(item.togglingLike(peerId))
+            try store.save()
+            return .stored
+        }
+        guard social.op == "comment",
+              let commentId = social.commentId,
+              let raw = social.body
+        else { return .ignored }
+        let body = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(FeedNotes.maxComment))
+        guard !body.isEmpty else { return .ignored }
+        if item.comments.contains(where: { $0.id == commentId }) { return .duplicate }
+        guard item.comments.count < FeedNotes.maxComments else { return .ignored }
+        item.comments.append(FeedComment(id: commentId, fromId: peerId, body: body, createdAt: social.createdAt ?? clock()))
+        store.putFeed(item)
+        try store.save()
+        return .stored
+    }
+
+    private func fanFeedPlain(_ plain: Data) throws {
+        guard let (keys, deviceId) = identity() else { return }
+        let now = clock()
+        for contact in store.contacts() where contact.accepted && !contact.blocked {
+            let envelope = try Envelopes.seal(
+                sender: keys, deviceId: deviceId, recipientId: contact.directId, recipientAgreementPublic: try bundleFor(contact).agreementPublic,
+                id: Encoding.newId("fed"), type: .feed, plaintext: plain, createdAt: now, ttlMs: ttlMs
+            )
+            store.putQueued(QueueItem(id: envelope.id, peerId: contact.directId, kind: .receipt, payload: envelope.encode(), nextAttemptAt: now, expiresAt: envelope.expiresAt))
+        }
     }
 
     private func ingestMedia(_ peerId: String, _ contact: ContactRecord, _ header: MediaNotes.Part, _ chunk: Data, _ createdAt: Int64) throws -> ReceiveOutcome {
