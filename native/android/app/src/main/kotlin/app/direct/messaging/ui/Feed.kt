@@ -46,6 +46,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
@@ -211,12 +212,27 @@ internal fun FeedScreen(
     var error by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().background(Ink.background)) {
         Header("From people you know", "Feed")
-        Column(Modifier.fillMaxWidth().background(Ink.surface)) {
-            if (selfId != null) {
-                StoriesTray(node, state, selfId, onOpenStory) { error = it }
+        if (selfId != null) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Ink.surface,
+                shadowElevation = 2.dp,
+                border = BorderStroke(1.dp, Ink.border.copy(alpha = 0.7f)),
+                modifier = Modifier.padding(horizontal = 12.dp),
+            ) {
+                Column(Modifier.padding(top = 12.dp, bottom = 6.dp)) {
+                    Text(
+                        "Stories",
+                        fontFamily = DirectFont,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = Ink.foreground,
+                        modifier = Modifier.padding(start = 16.dp, bottom = 4.dp),
+                    )
+                    StoriesTray(node, state, selfId, onOpenStory) { error = it }
+                }
             }
         }
-        HorizontalDivider(color = Ink.border)
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
         if (posts.isEmpty()) {
             EmptyState(
@@ -228,8 +244,8 @@ internal fun FeedScreen(
         } else {
             LazyColumn(
                 Modifier.weight(1f),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 items(posts, key = { it.id }) { item ->
                     FeedPostCard(node, state, item, onOpenProfile, { onOpenMedia(item.id) }) { onOpenComments(item.id) }
@@ -253,52 +269,64 @@ private fun FeedPostCard(
         shape = RoundedCornerShape(22.dp),
         color = Ink.surface,
         shadowElevation = 2.dp,
+        border = BorderStroke(1.dp, Ink.border.copy(alpha = 0.7f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
-    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
         Row(
-            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 16.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().clickable { onOpenProfile(item.ownerId) }.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 34.dp)
+            Avatar(name, jpegBytes(feedOwnerJpeg(state, item.ownerId)), 38.dp)
             Column(Modifier.weight(1f)) {
-                Text(name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
+                Text(name, fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text(formatFeedTime(item.createdAt), color = Ink.muted, fontFamily = DirectFont, fontSize = 12.sp)
             }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                null,
+                tint = Ink.muted,
+                modifier = Modifier.size(20.dp),
+            )
         }
         FeedThumb(
             node,
             item,
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp)
+                .padding(horizontal = 12.dp)
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(18.dp))
+                .clip(RoundedCornerShape(16.dp))
                 .clickable(onClickLabel = "View full size", onClick = onOpenMedia),
         )
         if (item.caption.isNotBlank()) {
             Text(
                 item.caption,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                fontFamily = DirectFont,
                 fontSize = 14.sp,
+                lineHeight = 20.sp,
             )
         }
         if (item.tags.isNotEmpty()) {
             Text(
                 feedTaggedLine(state, item.tags),
                 color = Ink.muted,
+                fontFamily = DirectFont,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = if (item.caption.isNotBlank()) 2.dp else 10.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = if (item.caption.isNotBlank()) 4.dp else 12.dp),
             )
         }
         FeedActions(node, state, item, onOpenComments)
         if (item.comments.isNotEmpty()) {
             Text(
-                if (item.comments.size == 1) "1 comment" else "${item.comments.size} comments",
+                if (item.comments.size == 1) "View 1 comment" else "View ${item.comments.size} comments",
                 color = Ink.muted,
+                fontFamily = DirectFont,
+                fontWeight = FontWeight.Medium,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp).clickable(onClick = onOpenComments),
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp).clickable(onClick = onOpenComments),
             )
         }
     }
@@ -382,7 +410,17 @@ internal fun StoriesTray(
                         }
                     }
                 }
-                Text(name, fontSize = 11.sp, color = Ink.foreground, maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+                Text(
+                    name,
+                    fontFamily = DirectFont,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Ink.foreground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(72.dp).clickable {
@@ -393,7 +431,14 @@ internal fun StoriesTray(
                     Icon(Icons.Outlined.Videocam, "Add video story", tint = Ink.accent)
                 }
             }
-            Text("Video", fontSize = 11.sp, color = Ink.muted, modifier = Modifier.padding(top = 4.dp))
+            Text(
+                "Video",
+                fontFamily = DirectFont,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = Ink.muted,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
     }
 }
@@ -521,42 +566,42 @@ internal fun ProfilePosts(
             }
         }
     }
+    val addPost = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
     Column(Modifier.fillMaxWidth()) {
-        if (showHeading || canAdd) {
+        if (showHeading || (canAdd && posts.isNotEmpty())) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (showHeading) Label("Photos and videos") else Spacer(Modifier.weight(1f))
                 if (canAdd) {
-                    IconButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }) {
-                        Icon(Icons.Outlined.PhotoCamera, "Add to profile", tint = Ink.accent)
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Ink.accentSoft)
+                            .clickable(onClick = addPost)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(Icons.Outlined.PhotoCamera, "Add to profile", tint = Ink.accent, modifier = Modifier.size(16.dp))
+                        Text("Add", fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Ink.accent)
                     }
                 }
             }
         }
         if (posts.isEmpty()) {
-            Muted(
-                if (canAdd) "Add photos and videos to your profile. Accepted contacts see them."
+            FeedLibraryEmpty(
+                icon = Icons.Outlined.PhotoCamera,
+                title = if (canAdd) "Show people who you are" else "No posts yet",
+                body = if (canAdd) "Add photos and videos to your profile. Accepted contacts see them."
                 else "No photos or videos on this profile yet.",
-                Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                action = if (canAdd) "Add a photo or video" else null,
+                onAction = if (canAdd) addPost else null,
             )
         } else {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 1.dp)) {
-                posts.chunked(3).forEach { row ->
-                    Row(Modifier.fillMaxWidth()) {
-                        row.forEach { item ->
-                            FeedThumb(
-                                node,
-                                item,
-                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable(onClickLabel = "View full size") { onOpenMedia(item.id) },
-                            )
-                        }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
-                    }
-                }
-            }
+            FeedMediaGrid(node, posts, onOpenMedia)
         }
     }
     draft?.let { next ->
@@ -575,21 +620,66 @@ internal fun SavedPosts(
     Column(Modifier.fillMaxWidth()) {
         if (showHeading) Label("Saved")
         if (posts.isEmpty()) {
-            Muted("Save a post and it stays here.", Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+            FeedLibraryEmpty(
+                icon = Icons.Outlined.BookmarkBorder,
+                title = "Nothing saved",
+                body = "Save a post and it stays here.",
+            )
         } else {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 1.dp)) {
-                posts.chunked(3).forEach { row ->
-                    Row(Modifier.fillMaxWidth()) {
-                        row.forEach { item ->
-                            FeedThumb(
-                                node,
-                                item,
-                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable(onClickLabel = "View full size") { onOpenMedia(item.id) },
-                            )
-                        }
-                        repeat(3 - row.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
-                    }
+            FeedMediaGrid(node, posts, onOpenMedia)
+        }
+    }
+}
+
+@Composable
+private fun FeedMediaGrid(node: DirectNode, posts: List<FeedItem>, onOpenMedia: (String) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        posts.chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                row.forEach { item ->
+                    FeedThumb(
+                        node,
+                        item,
+                        Modifier
+                            .weight(1f)
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClickLabel = "View full size") { onOpenMedia(item.id) },
+                    )
                 }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeedLibraryEmpty(
+    icon: ImageVector,
+    title: String,
+    body: String,
+    action: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(Ink.accentSoft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = Ink.accent, modifier = Modifier.size(26.dp))
+        }
+        Text(title, fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, textAlign = TextAlign.Center)
+        Muted(body, textAlign = TextAlign.Center)
+        if (action != null && onAction != null) {
+            TextButton(onClick = onAction) {
+                Text(action, fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, color = Ink.accent)
             }
         }
     }
@@ -622,63 +712,66 @@ internal fun ContactProfileScreen(
             IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground) }
             Title(name)
         }
-        ProfileIdentityHeader(
-            name = name,
-            jpeg = jpegBytes(jpeg),
-            status = about,
-            posts = profilePosts(state, peerId).size,
-            contacts = if (self) state.contacts.count { it.accepted && !it.blocked } else null,
-            stories = stories.isNotEmpty(),
-            unseenStories = stories.any { !it.seen },
-            onAvatar = if (stories.isNotEmpty()) {{ storyOpen = true }} else null,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-        if (!self) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Button(
-                    onClick = onMessage,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Ink.accent, contentColor = Color.White),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    modifier = Modifier.weight(1f).height(40.dp),
-                ) {
-                    Icon(Icons.Outlined.Chat, null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
-                    Text("Message", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                }
-                if (canCall) {
-                    ProfileIconButton(Icons.Filled.Call, "Call") { placeCall(false) }
-                    ProfileIconButton(Icons.Filled.Videocam, "Video") { placeCall(true) }
-                }
-                if (contact?.blocked == true) {
-                    OutlinedButton(
-                        onClick = { scope.launch { runCatching { node.unblock(peerId) }.onFailure { error = it.message } } },
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, Ink.border),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.accent),
-                        contentPadding = PaddingValues(horizontal = 14.dp),
-                        modifier = Modifier.height(40.dp),
-                    ) {
-                        Text("Unblock", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Card {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ProfileIdentityHeader(
+                        name = name,
+                        jpeg = jpegBytes(jpeg),
+                        status = about,
+                        posts = profilePosts(state, peerId).size,
+                        contacts = if (self) state.contacts.count { it.accepted && !it.blocked } else null,
+                        stories = stories.isNotEmpty(),
+                        unseenStories = stories.any { !it.seen },
+                        onAvatar = if (stories.isNotEmpty()) {{ storyOpen = true }} else null,
+                    )
+                    if (!self) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Button(
+                                onClick = onMessage,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Ink.accent, contentColor = Color.White),
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                modifier = Modifier.weight(1f).height(40.dp),
+                            ) {
+                                Icon(Icons.Outlined.Chat, null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                                Text("Message", fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            }
+                            if (canCall) {
+                                ProfileIconButton(Icons.Filled.Call, "Call") { placeCall(false) }
+                                ProfileIconButton(Icons.Filled.Videocam, "Video") { placeCall(true) }
+                            }
+                            if (contact?.blocked == true) {
+                                OutlinedButton(
+                                    onClick = { scope.launch { runCatching { node.unblock(peerId) }.onFailure { error = it.message } } },
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, Ink.border),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.accent),
+                                    contentPadding = PaddingValues(horizontal = 14.dp),
+                                    modifier = Modifier.height(40.dp),
+                                ) {
+                                    Text("Unblock", fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                }
+                            } else if (contact != null) {
+                                ProfileIconButton(Icons.Outlined.Block, "Block", tint = Ink.danger) { confirmBlock = true }
+                            }
+                        }
+                        if (contact?.blocked == true) {
+                            Muted("You blocked this person. Messages from them are dropped.")
+                        }
                     }
-                } else if (contact != null) {
-                    ProfileIconButton(Icons.Outlined.Block, "Block", tint = Ink.danger) { confirmBlock = true }
                 }
-            }
-            if (contact?.blocked == true) {
-                Muted(
-                    "You blocked this person. Messages from them are dropped.",
-                    Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp),
-                )
             }
         }
-        error?.let { Text(it, color = Ink.danger, modifier = Modifier.padding(horizontal = 20.dp)) }
+        error?.let { Text(it, color = Ink.danger, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
         if (contact?.blocked != true) {
             ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenMedia = onOpenMedia)
         }
+        Spacer(Modifier.height(24.dp))
     }
     if (confirmBlock) {
         AlertDialog(
@@ -726,12 +819,21 @@ internal fun ProfileIdentityHeader(
                 Avatar(name, jpeg, 88.dp)
             }
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            if (status.isNotBlank()) Text(status, color = Ink.muted, fontSize = 14.sp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                name,
+                fontFamily = DirectFont,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (status.isNotBlank()) {
+                Text(status, color = Ink.muted, fontFamily = DirectFont, fontSize = 14.sp, lineHeight = 20.sp)
+            }
             Row(
-                Modifier.padding(top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                Modifier.padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 ProfileCount(posts, if (posts == 1) "post" else "posts")
                 if (contacts != null) ProfileCount(contacts, if (contacts == 1) "contact" else "contacts")
@@ -742,9 +844,16 @@ internal fun ProfileIdentityHeader(
 
 @Composable
 private fun ProfileCount(value: Int, label: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-        Text("$value", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-        Text(label, color = Ink.muted, fontSize = 12.sp)
+    Column(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Ink.incoming)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        Text("$value", fontFamily = DirectFont, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = Ink.muted, fontFamily = DirectFont, fontSize = 11.sp)
     }
 }
 
