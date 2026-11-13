@@ -1,4 +1,4 @@
-const { createHash, createPublicKey, randomBytes, verify } = require('node:crypto');
+const { createHash, createPublicKey, randomBytes, timingSafeEqual, verify } = require('node:crypto');
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
@@ -88,6 +88,23 @@ function newNonce() {
   return randomBytes(32).toString('base64url');
 }
 
+function newToken() {
+  return randomBytes(32).toString('base64url');
+}
+
+function hashToken(token) {
+  return createHash('sha256').update('DIRECT-SESSION/1\n').update(String(token || '')).digest('hex');
+}
+
+function tokenMatches(hash, token) {
+  if (typeof hash !== 'string' || hash.length !== 64) return false;
+  if (typeof token !== 'string' || token.length < 32 || token.length > 128) return false;
+  const expected = Buffer.from(hash, 'hex');
+  const presented = Buffer.from(hashToken(token), 'hex');
+  if (expected.length !== presented.length) return false;
+  return timingSafeEqual(expected, presented);
+}
+
 /** True only when the hello proves possession of the bundle's signing key for this socket's nonce. */
 function verifyHello(message, expectedNonce) {
   if (!message || typeof message !== 'object') return null;
@@ -108,5 +125,8 @@ module.exports = {
   parsePublicBundle,
   verifyHello,
   newNonce,
+  newToken,
+  hashToken,
+  tokenMatches,
   proofMessage,
 };

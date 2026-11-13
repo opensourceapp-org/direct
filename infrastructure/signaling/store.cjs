@@ -1,4 +1,5 @@
 const { randomBytes } = require('node:crypto');
+const { newToken, hashToken } = require('./verify.cjs');
 
 const GRACE_MS = 120_000;
 const SESSION_TTL_MS = 90_000;
@@ -20,9 +21,19 @@ function createMemoryStore() {
 
   return {
     async createSession() {
-      const row = { id: newId(), nonce: '', directId: null, bundle: null, watch: [], helloCount: 0, lastSeen: Date.now() };
+      const token = newToken();
+      const row = {
+        id: newId(),
+        tokenHash: hashToken(token),
+        nonce: '',
+        directId: null,
+        bundle: null,
+        watch: [],
+        helloCount: 0,
+        lastSeen: Date.now(),
+      };
       sessions.set(row.id, row);
-      return row;
+      return { session: row, token };
     },
     async loadSession(id) {
       return sessions.get(id) || null;
@@ -90,15 +101,20 @@ function createPgStore(pool) {
   return {
     async createSession() {
       const id = newId();
+      const token = newToken();
+      const tokenHash = hashToken(token);
       await pool.query(
-        'insert into signal_sessions (id, nonce, watch, hello_count, last_seen) values ($1, $2, $3, 0, now())',
-        [id, '', []],
+        'insert into signal_sessions (id, nonce, watch, hello_count, last_seen, token_hash) values ($1, $2, $3, 0, now(), $4)',
+        [id, '', [], tokenHash],
       );
-      return { id, nonce: '', directId: null, bundle: null, watch: [], helloCount: 0, lastSeen: Date.now() };
+      return {
+        session: { id, nonce: '', directId: null, bundle: null, watch: [], helloCount: 0, lastSeen: Date.now(), tokenHash },
+        token,
+      };
     },
     async loadSession(id) {
       const { rows } = await pool.query(
-        'select id, nonce, direct_id as "directId", bundle, watch, hello_count as "helloCount" from signal_sessions where id = $1',
+        'select id, nonce, direct_id as "directId", bundle, watch, hello_count as "helloCount", token_hash as "tokenHash" from signal_sessions where id = $1',
         [id],
       );
       const row = rows[0];

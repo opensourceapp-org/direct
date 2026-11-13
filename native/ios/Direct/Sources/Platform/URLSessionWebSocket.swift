@@ -20,6 +20,7 @@ final class HttpSignalConnection: WebSocketConnection {
     private let lock = NSLock()
     private var finished = false
     private var session: String?
+    private var token: String?
     private var outgoing: [String] = []
     private var wake = DispatchSemaphore(value: 0)
     private let queue = DispatchQueue(label: "app.direct.http-signal")
@@ -58,11 +59,13 @@ final class HttpSignalConnection: WebSocketConnection {
             let waitMs = frames.isEmpty ? 2_000 : 0
             var body: [String: Any] = ["waitMs": waitMs, "frames": frames.compactMap { Self.object(from: $0) }]
             if let session { body["session"] = session }
+            if let token { body["token"] = token }
             do {
                 var request = URLRequest(url: endpoint, timeoutInterval: 25)
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 if let session { request.setValue(session, forHTTPHeaderField: "X-Direct-Session") }
+                if let token { request.setValue(token, forHTTPHeaderField: "X-Direct-Token") }
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
                 let group = DispatchGroup()
                 group.enter()
@@ -88,6 +91,7 @@ final class HttpSignalConnection: WebSocketConnection {
                     return
                 }
                 if let id = payload?["session"] as? String { session = id }
+                if let issued = payload?["token"] as? String, !issued.isEmpty { token = issued }
                 let inbound = payload?["frames"] as? [Any] ?? []
                 for frame in inbound {
                     guard JSONSerialization.isValidJSONObject(frame),
