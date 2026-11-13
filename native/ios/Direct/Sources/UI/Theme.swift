@@ -77,10 +77,10 @@ struct PrimaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 12)
+            Text(title).font(.body.weight(.semibold)).frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
-        .controlSize(.large)
+        .controlSize(.regular)
         .tint(Ink.accent)
         // The screen's text color would otherwise paint this label dark in light mode.
         .foregroundStyle(Color.white)
