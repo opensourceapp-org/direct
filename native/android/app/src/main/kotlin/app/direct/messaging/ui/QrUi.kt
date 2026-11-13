@@ -21,18 +21,37 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.BarcodeFormat
@@ -176,7 +195,7 @@ fun QrScanner(onCode: (String) -> Unit, onClose: () -> Unit) {
     val executor = remember { Executors.newSingleThreadExecutor() }
     val seen = remember { AtomicBoolean(false) }
     DisposableEffect(Unit) { onDispose { executor.shutdown() } }
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().background(ComposeColor.Black)) {
         AndroidView(
             factory = { viewContext ->
                 val previewView = PreviewView(viewContext)
@@ -201,8 +220,43 @@ fun QrScanner(onCode: (String) -> Unit, onClose: () -> Unit) {
             },
             modifier = Modifier.fillMaxSize(),
         )
-        Box(Modifier.align(Alignment.BottomCenter).padding(24.dp)) {
-            SecondaryButton("Close", onClick = onClose)
+        Column(Modifier.fillMaxSize().padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(ComposeColor.Black.copy(alpha = 0.45f))
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Close, "Close", tint = ComposeColor.White)
+                }
+                Text(
+                    "Scan QR",
+                    color = ComposeColor.White,
+                    fontFamily = DirectFont,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 18.sp,
+                    modifier = Modifier.padding(start = 12.dp),
+                )
+            }
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .size(260.dp)
+                        .border(2.5.dp, ComposeColor.White.copy(alpha = 0.92f), RoundedCornerShape(28.dp)),
+                )
+            }
+            Text(
+                "Point the camera at their DIRECT QR code",
+                color = ComposeColor.White.copy(alpha = 0.88f),
+                fontFamily = DirectFont,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            )
+            Spacer(Modifier.size(12.dp))
         }
     }
 }
