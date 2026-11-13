@@ -304,6 +304,44 @@ final class DirectNodeTests: XCTestCase {
         bo.close()
     }
 
+    func testBothPhonesCanHangUpAtOnce() async throws {
+        let ada = node(MemorySecretStore(), "ada-hang")
+        let bo = node(MemorySecretStore(), "bo-hang")
+        await ada.start()
+        await bo.start()
+        _ = try ada.createIdentity("Ada")
+        _ = try bo.createIdentity("Bo")
+        _ = try ada.setBootstrap("192.168.1.20")
+        _ = try bo.setBootstrap("192.168.1.20")
+        await settle(300)
+        let adaId = try XCTUnwrap(ada.state.profile?.directId)
+        let boId = try XCTUnwrap(bo.state.profile?.directId)
+        try bo.setDiscoverable(true)
+        _ = try await ada.addContact(boId)
+        await settle(300)
+        try await bo.acceptRequest(adaId)
+        await settle(300)
+
+        try await ada.placeCall(boId, video: false)
+        await settle(300)
+        await bo.acceptCall()
+        await settle(300)
+        ada.markCallLive()
+        bo.markCallLive()
+        await settle(300)
+
+        async let adaHangup: Void = ada.endCall()
+        async let boHangup: Void = bo.endCall()
+        _ = await (adaHangup, boHangup)
+        await settle(300)
+        XCTAssertEqual(.ended, ada.state.call?.phase)
+        XCTAssertEqual(.ended, bo.state.call?.phase)
+        XCTAssertEqual(1, ada.state.messages[boId]?.filter { $0.mediaKind == "call" }.count)
+        XCTAssertEqual(1, bo.state.messages[adaId]?.filter { $0.mediaKind == "call" }.count)
+        ada.close()
+        bo.close()
+    }
+
     func testCreatingAGroupListsItOnThisPhone() async throws {
         let ada = node(MemorySecretStore(), "ada-g")
         let bo = node(MemorySecretStore(), "bo-g")
