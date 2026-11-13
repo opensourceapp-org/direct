@@ -53,11 +53,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DynamicFeed
 import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
@@ -92,11 +92,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -124,9 +122,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -766,6 +762,45 @@ private fun CompactAction(label: String, enabled: Boolean, onClick: () -> Unit) 
 ) { Text(label, fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp) }
 
 @Composable
+private fun ScreenBar(title: String, onBack: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground) }
+        Text(title, fontFamily = DirectFont, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink.foreground)
+    }
+}
+
+@Composable
+private fun SettingsRow(
+    title: String,
+    icon: ImageVector,
+    tint: Color = Ink.accent,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        AddGlyph(icon, tint)
+        Text(
+            title,
+            fontFamily = DirectFont,
+            fontWeight = FontWeight.Medium,
+            fontSize = 16.sp,
+            color = Ink.foreground,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Ink.muted, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+private fun SettingsDivider() = HorizontalDivider(color = Ink.border, modifier = Modifier.padding(start = 66.dp))
+
+@Composable
 private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -1112,55 +1147,60 @@ private fun ProfileHomeScreen(
 ) {
     val profile = state.profile ?: return
     var error by remember { mutableStateOf<String?>(null) }
+    var library by rememberSaveable { mutableStateOf("posts") }
     val posts = profilePosts(state, profile.directId)
     val people = state.contacts.count { it.accepted && !it.blocked }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxSize().background(Ink.background).verticalScroll(rememberScrollState())) {
         Row(
             Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 12.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Title("Profile")
             Spacer(Modifier.weight(1f))
+            TextButton(onClick = onEdit) {
+                Text("Edit", fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = Ink.accent)
+            }
             IconButton(onClick = onSettings) {
                 Icon(Icons.Outlined.Settings, "Settings", tint = Ink.foreground)
             }
         }
-        ProfileIdentityHeader(
-            name = profile.name,
-            jpeg = jpegBytes(profile.avatarJpegBase64),
-            status = profile.status,
-            posts = posts.size,
-            contacts = people,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            SecondaryButton("Edit profile") { onEdit() }
-        }
-        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
-        var library by rememberSaveable { mutableStateOf("posts") }
-        Row(
-            Modifier
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Ink.incoming)
-                .padding(4.dp),
-        ) {
-            listOf("posts" to "Posts", "saved" to "Saved").forEach { (id, label) ->
-                val selected = library == id
-                Text(
-                    label,
-                    fontFamily = DirectFont,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    color = if (selected) Color.White else Ink.muted,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) Ink.accent else Color.Transparent)
-                        .clickable { library = id }
-                        .padding(vertical = 8.dp),
-                )
+        Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Card {
+                Column(Modifier.padding(16.dp)) {
+                    ProfileIdentityHeader(
+                        name = profile.name,
+                        jpeg = jpegBytes(profile.avatarJpegBase64),
+                        status = profile.status,
+                        posts = posts.size,
+                        contacts = people,
+                    )
+                }
+            }
+            error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Ink.incoming)
+                    .padding(4.dp),
+            ) {
+                listOf("posts" to "Posts", "saved" to "Saved").forEach { (id, label) ->
+                    val selected = library == id
+                    Text(
+                        label,
+                        fontFamily = DirectFont,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = if (selected) Color.White else Ink.muted,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (selected) Ink.accent else Color.Transparent)
+                            .clickable { library = id }
+                            .padding(vertical = 8.dp),
+                    )
+                }
             }
         }
         if (library == "saved") {
@@ -1168,9 +1208,11 @@ private fun ProfileHomeScreen(
         } else {
             ProfilePosts(node, state, profile.directId, canAdd = true, showHeading = false, onError = { error = it }, onOpenMedia = onOpenMedia)
         }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EditProfileScreen(node: DirectNode, state: NodeState, back: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -1192,49 +1234,87 @@ private fun EditProfileScreen(node: DirectNode, state: NodeState, back: () -> Un
     }
     val statusDraft = status.trim()
     BackHandler(onBack = back)
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground) }
-            Title("Edit profile")
-        }
-        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Avatar(profile.name, jpegBytes(profile.avatarJpegBase64), 72.dp)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SecondaryButton("Change photo", Icons.Outlined.PhotoCamera) {
-                        photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    }
-                    if (profile.avatarJpegBase64 != null) {
-                        SecondaryButton("Remove photo", Icons.Outlined.Delete) {
-                            scope.attempt({ error = it }) { node.clearAvatar() }
+    Column(Modifier.fillMaxSize().background(Ink.background).verticalScroll(rememberScrollState())) {
+        ScreenBar("Edit profile", back)
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Card {
+                Column(
+                    Modifier.fillMaxWidth().padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Avatar(profile.name, jpegBytes(profile.avatarJpegBase64), 96.dp)
+                    Text(profile.name, fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                            Icon(Icons.Outlined.PhotoCamera, null, tint = Ink.accent, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Change photo", fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, color = Ink.accent)
+                        }
+                        if (profile.avatarJpegBase64 != null) {
+                            TextButton(onClick = { scope.attempt({ error = it }) { node.clearAvatar() } }) {
+                                Icon(Icons.Outlined.Delete, null, tint = Ink.danger, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Remove", fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, color = Ink.danger)
+                            }
                         }
                     }
                 }
             }
-            Label("Status")
-            Field(status, { status = it.take(80) }, "Write your own status")
-            PrimaryButton(if (acknowledged == statusDraft) "Saved" else "Save status") {
-                scope.attempt({ error = it }) {
-                    node.setStatus(status)
-                    acknowledged = status.trim()
+            Card {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Label("Status")
+                    Field(status, { status = it.take(80) }, "Write your own status")
+                    PrimaryButton(if (acknowledged == statusDraft) "Saved" else "Save status") {
+                        scope.attempt({ error = it }) {
+                            node.setStatus(status)
+                            acknowledged = status.trim()
+                        }
+                    }
+                    if (acknowledged == statusDraft) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Filled.CheckCircle, null, tint = Ink.success, modifier = Modifier.size(18.dp))
+                            Text(
+                                if (statusDraft.isEmpty()) "Status cleared" else "Status saved",
+                                color = Ink.success,
+                                fontFamily = DirectFont,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 14.sp,
+                            )
+                        }
+                    }
+                    Text("Or pick one", color = Ink.muted, fontFamily = DirectFont, fontSize = 13.sp)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        statusPresets.forEach { preset ->
+                            val selected = preset == status
+                            Text(
+                                preset,
+                                fontFamily = DirectFont,
+                                fontSize = 13.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                color = if (selected) Ink.accent else Ink.foreground,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(if (selected) Ink.accentSoft else Ink.incoming)
+                                    .clickable {
+                                        status = preset
+                                        scope.attempt({ error = it }) {
+                                            node.setStatus(preset)
+                                            acknowledged = preset
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                    Muted("Choose one, or write your own and tap Save status.")
+                    error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
                 }
             }
-            if (acknowledged == statusDraft) {
-                Text(
-                    if (statusDraft.isEmpty()) "Status cleared" else "Status saved",
-                    color = Ink.success,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-            StatusMenu(selected = statusPresets.firstOrNull { it == profile.status }) { preset ->
-                status = preset
-                scope.attempt({ error = it }) {
-                    node.setStatus(preset)
-                    acknowledged = preset
-                }
-            }
-            Muted("Choose one, or write your own and tap Save status.")
-            error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -1252,55 +1332,83 @@ private fun SettingsScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
     val card = bundle?.let { shareCard(profile, it, server) }
     if (showNetwork) {
         BackHandler { showNetwork = false }
-        Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { showNetwork = false }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
-                }
-            }
+        Column(Modifier.fillMaxSize().background(Ink.background)) {
+            ScreenBar("Network") { showNetwork = false }
             Box(Modifier.weight(1f)) { NetworkScreen(node, state) }
         }
         return
     }
     BackHandler(onBack = back)
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground) }
-            Title("Settings")
-        }
-        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Label("Share")
-            Mono(profile.directId)
-            SecondaryButton("Copy DIRECT ID", Icons.Outlined.ContentCopy) { copy(context, "DIRECT ID", profile.directId) }
-            if (card != null) {
-                SecondaryButton(if (showQr) "Hide QR code" else "Show QR code", Icons.Outlined.QrCode) { showQr = !showQr }
-                if (showQr) {
-                    Card {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            QrImage(card, Modifier.fillMaxWidth())
-                            Muted(
-                                if (server.isEmpty()) "Set the server under Network before sharing. Without that address, the other phone can save your identity but cannot connect."
-                                else "The QR code is your signed identity and your server address, plus the status and a small photo. Scanning it saves that server so the two phones can connect.",
-                            )
+    Column(Modifier.fillMaxSize().background(Ink.background).verticalScroll(rememberScrollState())) {
+        ScreenBar("Settings", back)
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Label("Share")
+                Card {
+                    SettingsRow("Copy DIRECT ID", Icons.Outlined.ContentCopy) { copy(context, "DIRECT ID", profile.directId) }
+                    if (card != null) {
+                        SettingsDivider()
+                        SettingsRow(if (showQr) "Hide QR code" else "Show QR code", Icons.Outlined.QrCode) { showQr = !showQr }
+                        if (showQr) {
+                            Column(
+                                Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                QrImage(card, Modifier.fillMaxWidth())
+                                Muted(
+                                    if (server.isEmpty()) "Set the server under Network before sharing. Without that address, the other phone can save your identity but cannot connect."
+                                    else "The QR code is your signed identity and your server address, plus the status and a small photo. Scanning it saves that server so the two phones can connect.",
+                                )
+                            }
                         }
+                        SettingsDivider()
+                        SettingsRow("Share profile", Icons.Outlined.Share) { shareProfile(context, profile, card, server) }
+                    }
+                    state.bundle?.let { raw ->
+                        SettingsDivider()
+                        SettingsRow("Copy identity bundle", Icons.Outlined.ContentCopy) { copy(context, "DIRECT bundle", raw) }
                     }
                 }
-                SecondaryButton("Share profile", Icons.Outlined.Share) { shareProfile(context, profile, card, server) }
+                Mono(profile.directId)
             }
-            state.bundle?.let { raw -> SecondaryButton("Copy identity bundle", Icons.Outlined.ContentCopy) { copy(context, "DIRECT bundle", raw) } }
-            Label("Connection")
-            SecondaryButton("Network", Icons.Outlined.WifiTethering) { showNetwork = true }
-            Muted("Bootstrap address, connection status, and how to run your own server.")
-            SecondaryButton("How DIRECT works", Icons.Outlined.Info) { onHowItWorks() }
-            Muted("Device ${profile.deviceId}")
-            Label("Recovery")
-            Muted("Anyone with these 24 words can become you. Write them down and keep them off this phone.")
-            val shown = phrase
-            if (shown == null) SecondaryButton("Show recovery phrase", Icons.Outlined.Key) { scope.launch { phrase = node.recoveryPhrase() } }
-            else {
-                Mono(shown)
-                SecondaryButton("Hide") { phrase = null }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Label("Connection")
+                Card {
+                    SettingsRow("Network", Icons.Outlined.WifiTethering) { showNetwork = true }
+                    SettingsDivider()
+                    SettingsRow("How DIRECT works", Icons.Outlined.Info) { onHowItWorks() }
+                }
+                Muted("Device ${profile.deviceId}")
             }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Label("Recovery")
+                Card {
+                    SettingsRow(
+                        if (phrase == null) "Show recovery phrase" else "Hide recovery phrase",
+                        Icons.Outlined.Key,
+                        tint = Ink.warning,
+                    ) {
+                        if (phrase == null) scope.launch { phrase = node.recoveryPhrase() }
+                        else phrase = null
+                    }
+                    phrase?.let { shown ->
+                        Text(
+                            shown,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 14.sp,
+                            lineHeight = 22.sp,
+                            color = Ink.foreground,
+                            modifier = Modifier
+                                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                                .fillMaxWidth()
+                                .background(Ink.incoming, RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                        )
+                    }
+                }
+                Muted("Anyone with these 24 words can become you. Write them down and keep them off this phone.")
+            }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -1953,39 +2061,3 @@ private val statusPresets = listOf(
     "🚨 Urgent calls only",
 )
 
-@Composable
-private fun StatusMenu(selected: String?, onSelect: (String) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    var menuWidth by remember { mutableStateOf(0.dp) }
-    val density = LocalDensity.current
-    Box(Modifier.fillMaxWidth().onSizeChanged { menuWidth = with(density) { it.width.toDp() } }) {
-        OutlinedTextField(
-            value = selected.orEmpty(),
-            onValueChange = {},
-            readOnly = true,
-            placeholder = { Text("Choose a status", color = Ink.muted) },
-            trailingIcon = { Icon(Icons.Filled.KeyboardArrowDown, null, tint = Ink.muted) },
-            shape = RoundedCornerShape(16.dp),
-            textStyle = TextStyle(fontSize = 16.sp, color = Ink.foreground),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Ink.foreground,
-                unfocusedBorderColor = Ink.border,
-                focusedContainerColor = Ink.surface,
-                unfocusedContainerColor = Ink.surface,
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Box(Modifier.matchParentSize().clickable { expanded = true })
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.width(menuWidth)) {
-            statusPresets.forEach { preset ->
-                DropdownMenuItem(
-                    text = { Text(preset, color = if (preset == selected) Ink.accent else Ink.foreground) },
-                    onClick = {
-                        expanded = false
-                        onSelect(preset)
-                    },
-                )
-            }
-        }
-    }
-}
