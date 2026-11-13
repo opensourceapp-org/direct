@@ -48,16 +48,6 @@ func formatFeedTime(_ ms: Int64) -> String {
     return formatter.localizedString(for: date, relativeTo: Date())
 }
 
-func likeSummary(_ state: NodeState, _ item: FeedItem) -> String? {
-    let names = item.likes.map { feedOwnerName(state, $0.fromId) }
-    switch names.count {
-    case 0: return nil
-    case 1: return "Liked by \(names[0])"
-    case 2: return "Liked by \(names[0]) and \(names[1])"
-    default: return "Liked by \(names[0]) and \(names.count - 1) others"
-    }
-}
-
 struct FeedView: View {
     @EnvironmentObject private var model: AppModel
     @State private var storyOwner: String?
@@ -167,9 +157,6 @@ struct FeedPostCard: View {
             .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 8) {
                 FeedActions(item: item, onComments: onOpen)
-                if let summary = likeSummary(model.state, item) {
-                    Text(summary).font(.footnote.weight(.semibold))
-                }
                 if !item.caption.isEmpty {
                     Text(item.caption).font(.subheadline)
                 }
@@ -190,23 +177,113 @@ struct FeedActions: View {
     @EnvironmentObject private var model: AppModel
     let item: FeedItem
     var onComments: () -> Void = {}
+    @State private var pickingEmoji = false
+    @State private var forwarding = false
 
     var body: some View {
-        let liked = item.likes.contains { $0.fromId == model.state.profile?.directId }
-        HStack(spacing: 10) {
-            iconButton(
-                systemImage: liked ? "heart.fill" : "heart",
-                tint: liked ? Color(uiColor: .systemPink) : Color.primary,
-                label: liked ? "Unlike" : "Like"
-            ) { model.likeFeed(item.id) }
-            iconButton(
-                systemImage: "text.bubble",
-                tint: Color.primary,
-                label: "Comment",
-                action: onComments
-            )
+        let selfId = model.state.profile?.directId
+        let mine = item.likes.first { $0.fromId == selfId }?.emoji
+        VStack(alignment: .leading, spacing: 10) {
+            if pickingEmoji {
+                emojiBar(mine: mine)
+            }
+            HStack(spacing: 10) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { pickingEmoji.toggle() }
+                } label: {
+                    Group {
+                        if let mine {
+                            Text(mine).font(.body)
+                        } else {
+                            Image(systemName: "heart")
+                                .font(.body.weight(.semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(Color.primary)
+                        }
+                    }
+                    .frame(width: 36, height: 36)
+                    .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("React")
+                iconButton(systemImage: "text.bubble", tint: .primary, label: "Comment", action: onComments)
+                iconButton(systemImage: "square.and.arrow.up", tint: .primary, label: "Forward") {
+                    forwarding = true
+                }
+                Spacer(minLength: 0)
+            }
+            reactionChips(selfId: selfId)
+        }
+        .sheet(isPresented: $forwarding) {
+            ForwardPicker { target in
+                model.forwardFeed(item.id, to: target)
+            }
+            .environmentObject(model)
+        }
+    }
+
+    private func emojiBar(mine: String?) -> some View {
+        HStack(spacing: 0) {
+            ForEach(ChatNotes.emojis, id: \.self) { emoji in
+                Button {
+                    model.reactFeed(item.id, emoji)
+                    withAnimation(.easeOut(duration: 0.15)) { pickingEmoji = false }
+                } label: {
+                    Text(emoji)
+                        .font(.system(size: 22))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(mine == emoji ? Ink.accent.opacity(0.16) : Color.clear, in: Circle())
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(emoji)
+            }
+        }
+        .padding(.horizontal, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Ink.line, lineWidth: 0.5))
+    }
+
+    @ViewBuilder
+    private func reactionChips(selfId: String?) -> some View {
+        if !item.likes.isEmpty {
+            chipRow(selfId: selfId)
+        }
+    }
+
+    private func chipRow(selfId: String?) -> some View {
+        let groups = Dictionary(grouping: item.likes, by: \.emoji)
+        let order = item.likes.map(\.emoji).reduce(into: [String]()) { seen, emoji in
+            if !seen.contains(emoji) { seen.append(emoji) }
+        }
+        return HStack(spacing: 6) {
+            ForEach(order, id: \.self) { emoji in
+                reactionChip(emoji: emoji, people: groups[emoji] ?? [], selfId: selfId)
+            }
             Spacer(minLength: 0)
         }
+    }
+
+    private func reactionChip(emoji: String, people: [FeedLike], selfId: String?) -> some View {
+        let mine = people.contains { $0.fromId == selfId }
+        return Button {
+            model.reactFeed(item.id, emoji)
+        } label: {
+            HStack(spacing: 4) {
+                Text(emoji).font(.system(size: 14))
+                if people.count > 1 {
+                    Text("\(people.count)")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.primary)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(mine ? Ink.accent.opacity(0.16) : Color(uiColor: .tertiarySystemFill), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(emoji), \(people.count)")
     }
 
     private func iconButton(
@@ -671,9 +748,6 @@ struct FeedLightbox: View {
                         Spacer(minLength: 0)
                     }
                     FeedActions(item: item) { commenting = true }
-                    if let summary = likeSummary(model.state, item) {
-                        Text(summary).font(.footnote.weight(.semibold))
-                    }
                     if !item.caption.isEmpty {
                         Text(item.caption).font(.subheadline)
                     }

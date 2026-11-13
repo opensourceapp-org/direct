@@ -11,7 +11,7 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * A story or profile post sealed to accepted contacts. The bootstrap never sees the bytes.
- * Puts are chunked like chat media. Deletes, likes, and comments are short JSON notes.
+ * Puts are chunked like chat media. Deletes, likes, comments, and reactions are short JSON notes.
  */
 object FeedNotes {
     const val PART_PREFIX = "DIRECT-FEED/1\n"
@@ -26,7 +26,8 @@ object FeedNotes {
     const val MAX_COMMENTS = 100
     val CHANNELS = setOf(STORY, POST)
     val KINDS = setOf("image", "video", "gif")
-    val SOCIAL_OPS = setOf("like", "comment")
+    val SOCIAL_OPS = setOf("like", "comment", "react")
+    val EMOJIS = ChatNotes.EMOJIS
 
     data class Part(
         val id: String,
@@ -134,6 +135,9 @@ object FeedNotes {
     fun encodeLike(id: String): String =
         PART_PREFIX + json("v" to "1", "op" to "like", "id" to id, numbers = setOf("v"))
 
+    fun encodeReact(id: String, emoji: String): String =
+        PART_PREFIX + json("v" to "1", "op" to "react", "id" to id, "body" to emoji, numbers = setOf("v"))
+
     fun encodeComment(id: String, commentId: String, body: String, createdAt: Long): String =
         PART_PREFIX + json(
             "v" to "1",
@@ -159,6 +163,11 @@ object FeedNotes {
         if (id.length !in 4..80) return null
         return when (op) {
             "like" -> Social(op, id)
+            "react" -> {
+                val emoji = json.text("body") ?: return null
+                if (emoji !in EMOJIS) return null
+                Social(op, id, emoji)
+            }
             "comment" -> {
                 val body = json.text("body")?.trim()?.take(MAX_COMMENT) ?: return null
                 if (body.isEmpty()) return null

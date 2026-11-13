@@ -265,9 +265,28 @@ public struct MessageRecord: Codable, Equatable, Identifiable, Sendable {
 
 public struct FeedLike: Codable, Equatable, Sendable {
     public var fromId: String
+    public var emoji: String
 
-    public init(fromId: String) {
+    private enum CodingKeys: String, CodingKey { case fromId, emoji }
+
+    public init(fromId: String, emoji: String = "❤️") {
         self.fromId = fromId
+        self.emoji = emoji
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fromId = try container.decode(String.self, forKey: .fromId)
+        emoji = try container.decodeIfPresent(String.self, forKey: .emoji) ?? "❤️"
+    }
+}
+
+extension Array where Element == FeedLike {
+    public func toggling(fromId: String, emoji: String) -> [FeedLike] {
+        if first(where: { $0.fromId == fromId })?.emoji == emoji {
+            return filter { $0.fromId != fromId }
+        }
+        return filter { $0.fromId != fromId } + [FeedLike(fromId: fromId, emoji: emoji)]
     }
 }
 
@@ -355,12 +374,12 @@ public struct FeedItem: Codable, Equatable, Identifiable, Sendable {
     }
 
     public func togglingLike(_ fromId: String) -> FeedItem {
+        togglingReaction(fromId, "❤️")
+    }
+
+    public func togglingReaction(_ fromId: String, _ emoji: String) -> FeedItem {
         var copy = self
-        if copy.likes.contains(where: { $0.fromId == fromId }) {
-            copy.likes.removeAll { $0.fromId == fromId }
-        } else {
-            copy.likes.append(FeedLike(fromId: fromId))
-        }
+        copy.likes = copy.likes.toggling(fromId: fromId, emoji: emoji)
         return copy
     }
 }

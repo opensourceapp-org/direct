@@ -260,5 +260,31 @@ class MediaTest {
         assertEquals(local.id, remote.id)
         assertEquals("looks great", remote.body)
         assertEquals(bo.keys.directId, remote.fromId)
+
+        boLinks.sent.clear()
+        bo.engine.reactFeed(post.id, "🔥")
+        assertEquals("🔥", bo.store.feed(post.id)?.likes?.first()?.emoji)
+        bo.engine.flush()
+        for (bytes in boLinks.sent) ada.engine.receive(bo.keys.directId, bytes)
+        assertEquals("🔥", ada.store.feed(post.id)?.likes?.first()?.emoji)
+
+        val fire = assertNotNull(FeedNotes.decodeSocial(FeedNotes.encodeReact("fed_abc", "🔥")))
+        assertEquals("react", fire.op)
+        assertEquals("🔥", fire.body)
+        assertNull(FeedNotes.decodeSocial(FeedNotes.encodeReact("fed_abc", "not-an-emoji")))
+
+        adaLinks.sent.clear()
+        boLinks.sent.clear()
+        val forwarded = bo.engine.forwardFeed(post.id, ada.keys.directId)
+        assertTrue(forwarded.forwarded)
+        assertEquals("lake", forwarded.body)
+        assertEquals("image", forwarded.mediaKind)
+        assertEquals(ada.keys.directId, forwarded.peerId)
+        bo.engine.flush()
+        assertTrue(boLinks.sent.isNotEmpty())
+        for (bytes in boLinks.sent) ada.engine.receive(bo.keys.directId, bytes)
+        val copy = assertNotNull(ada.store.message(forwarded.id))
+        assertEquals("lake", copy.body)
+        assertEquals("image", copy.mediaKind)
     }
 }

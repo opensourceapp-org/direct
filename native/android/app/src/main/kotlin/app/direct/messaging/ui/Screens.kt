@@ -1463,7 +1463,7 @@ private fun ReactionChip(emoji: String, count: Int, mine: Boolean, onClick: () -
 }
 
 @Composable
-private fun ForwardSheet(state: NodeState, fromPeerId: String, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+internal fun ForwardSheet(state: NodeState, fromPeerId: String = "", onDismiss: () -> Unit, onPick: (String) -> Unit) {
     val targets = state.conversations.filter { it.peerId != fromPeerId && !it.request && !it.blocked }
     AlertDialog(
         onDismissRequest = onDismiss,

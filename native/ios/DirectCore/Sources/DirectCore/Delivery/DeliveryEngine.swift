@@ -493,12 +493,39 @@ public final class DeliveryEngine {
     }
 
     public func likeFeed(_ id: String) throws {
+        try reactFeed(id, "❤️")
+    }
+
+    public func reactFeed(_ id: String, _ emoji: String) throws {
+        guard let keys = identity()?.0 else { throw DeliveryRejected(message: "Create an identity first.") }
+        guard FeedNotes.emojis.contains(emoji) else { throw DeliveryRejected(message: "That reaction is not supported.") }
+        guard let item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }
+        guard item.channel == FeedNotes.post else { throw DeliveryRejected(message: "Only posts can be reacted to.") }
+        store.putFeed(item.togglingReaction(keys.directId, emoji))
+        let note = emoji == "❤️" ? FeedNotes.encodeLike(id: id) : FeedNotes.encodeReact(id: id, emoji: emoji)
+        try fanFeedPlain(Encoding.utf8(note))
+        try store.save()
+    }
+
+    public func forwardFeed(_ id: String, to toPeerId: String) throws -> MessageRecord {
         guard let keys = identity()?.0 else { throw DeliveryRejected(message: "Create an identity first.") }
         guard let item = store.feed(id) else { throw DeliveryRejected(message: "That post is gone.") }
-        guard item.channel == FeedNotes.post else { throw DeliveryRejected(message: "Only posts can be liked.") }
-        store.putFeed(item.togglingLike(keys.directId))
-        try fanFeedPlain(Encoding.utf8(FeedNotes.encodeLike(id: id)))
+        guard item.channel == FeedNotes.post else { throw DeliveryRejected(message: "Only posts can be forwarded.") }
+        guard let directory = mediaDirectory else { throw DeliveryRejected(message: "Attachments need local storage.") }
+        let bytes = (try? Data(contentsOf: directory.appendingPathComponent(item.mediaFile))) ?? Data()
+        guard !bytes.isEmpty else { throw DeliveryRejected(message: "That photo is still loading.") }
+        let created: MessageRecord
+        if GroupNotes.isGroupId(toPeerId) {
+            guard let group = store.group(toPeerId) else { throw DeliveryRejected(message: "That group is not on this device.") }
+            created = try queueGroupMedia(group, keys.directId, kind: item.kind, mime: item.mime, name: item.name, bytes: bytes, caption: item.caption)
+        } else {
+            created = try queueMedia(toPeerId, kind: item.kind, mime: item.mime, name: item.name, bytes: bytes, caption: item.caption)
+        }
+        var marked = created
+        marked.forwarded = true
+        store.putMessage(marked)
         try store.save()
+        return marked
     }
 
     public func commentFeed(_ id: String, _ body: String) throws {
@@ -1117,7 +1144,12 @@ public final class DeliveryEngine {
     private func ingestSocial(_ peerId: String, _ social: FeedNotes.Social) throws -> ReceiveOutcome {
         guard var item = store.feed(social.id), item.channel == FeedNotes.post else { return .ignored }
         if social.op == "like" {
-            store.putFeed(item.togglingLike(peerId))
+            store.putFeed(item.togglingReaction(peerId, "❤️"))
+            try store.save()
+            return .stored
+        }
+        if social.op == "react", let emoji = social.body {
+            store.putFeed(item.togglingReaction(peerId, emoji))
             try store.save()
             return .stored
         }

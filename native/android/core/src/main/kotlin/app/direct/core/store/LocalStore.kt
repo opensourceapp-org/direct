@@ -88,13 +88,16 @@ data class MessageRecord(
 )
 
 @Serializable
-data class FeedLike(val fromId: String)
+data class FeedLike(val fromId: String, val emoji: String = "❤️")
 
 @Serializable
 data class FeedComment(val id: String, val fromId: String, val body: String, val createdAt: Long)
 
-fun List<FeedLike>.toggling(fromId: String): List<FeedLike> =
-    if (any { it.fromId == fromId }) filter { it.fromId != fromId } else this + FeedLike(fromId)
+fun List<FeedLike>.togglingReaction(fromId: String, emoji: String = "❤️"): List<FeedLike> {
+    val current = firstOrNull { it.fromId == fromId }
+    return if (current?.emoji == emoji) filter { it.fromId != fromId }
+    else filter { it.fromId != fromId } + FeedLike(fromId, emoji)
+}
 
 @Serializable
 data class FeedItem(

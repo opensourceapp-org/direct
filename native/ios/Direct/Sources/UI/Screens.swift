@@ -507,13 +507,16 @@ struct ChatView: View {
 }
 
 struct ForwardPicker: View {
-    let fromPeerId: String
+    var fromPeerId: String? = nil
     var onPick: (String) -> Void
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     private var targets: [Conversation] {
-        model.state.conversations.filter { $0.peerId != fromPeerId && !$0.request && !$0.blocked }
+        model.state.conversations.filter { conversation in
+            if let fromPeerId, conversation.peerId == fromPeerId { return false }
+            return !conversation.request && !conversation.blocked
+        }
     }
 
     var body: some View {

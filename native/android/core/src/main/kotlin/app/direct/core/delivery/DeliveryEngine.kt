@@ -21,6 +21,7 @@ import app.direct.core.store.MessageRecord
 import app.direct.core.store.QueueItem
 import app.direct.core.store.QueueKind
 import app.direct.core.store.toggling
+import app.direct.core.store.togglingReaction
 import java.io.File
 
 /** Moves envelope bytes to a peer. Implemented by the WebRTC data channel on each platform. */
@@ -443,12 +444,37 @@ class DeliveryEngine(
     }
 
     fun likeFeed(id: String) {
+        reactFeed(id, "❤️")
+    }
+
+    fun reactFeed(id: String, emoji: String) {
+        val keys = identity()?.first ?: throw DeliveryRejected("Create an identity first.")
+        if (emoji !in FeedNotes.EMOJIS) throw DeliveryRejected("That reaction is not supported.")
+        val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")
+        if (item.channel != FeedNotes.POST) throw DeliveryRejected("Only posts can be reacted to.")
+        store.putFeed(item.copy(likes = item.likes.togglingReaction(keys.directId, emoji)))
+        val note = if (emoji == "❤️") FeedNotes.encodeLike(id) else FeedNotes.encodeReact(id, emoji)
+        fanFeedPlain(Encoding.utf8(note))
+        store.save()
+    }
+
+    fun forwardFeed(id: String, toPeerId: String): MessageRecord {
         val keys = identity()?.first ?: throw DeliveryRejected("Create an identity first.")
         val item = store.feed(id) ?: throw DeliveryRejected("That post is gone.")
-        if (item.channel != FeedNotes.POST) throw DeliveryRejected("Only posts can be liked.")
-        store.putFeed(item.copy(likes = item.likes.toggling(keys.directId)))
-        fanFeedPlain(Encoding.utf8(FeedNotes.encodeLike(id)))
+        if (item.channel != FeedNotes.POST) throw DeliveryRejected("Only posts can be forwarded.")
+        val directory = mediaDirectory ?: throw DeliveryRejected("Attachments need local storage.")
+        val bytes = File(directory, item.mediaFile).let { if (it.exists()) it.readBytes() else ByteArray(0) }
+        if (bytes.isEmpty()) throw DeliveryRejected("That photo is still loading.")
+        val created = if (GroupNotes.isGroupId(toPeerId)) {
+            val group = store.group(toPeerId) ?: throw DeliveryRejected("That group is not on this device.")
+            queueGroupMedia(group, keys.directId, item.kind, item.mime, item.name, bytes, item.caption)
+        } else {
+            queueMedia(toPeerId, item.kind, item.mime, item.name, bytes, item.caption)
+        }
+        val marked = created.copy(forwarded = true)
+        store.putMessage(marked)
         store.save()
+        return marked
     }
 
     fun commentFeed(id: String, body: String) {
@@ -1033,7 +1059,11 @@ class DeliveryEngine(
         val item = store.feed(social.id) ?: return ReceiveOutcome.IGNORED
         if (item.channel != FeedNotes.POST) return ReceiveOutcome.IGNORED
         val updated = when (social.op) {
-            "like" -> item.copy(likes = item.likes.toggling(peerId))
+            "like" -> item.copy(likes = item.likes.togglingReaction(peerId, "❤️"))
+            "react" -> {
+                val emoji = social.body ?: return ReceiveOutcome.IGNORED
+                item.copy(likes = item.likes.togglingReaction(peerId, emoji))
+            }
             "comment" -> {
                 val commentId = social.commentId ?: return ReceiveOutcome.IGNORED
                 val body = social.body?.trim()?.take(FeedNotes.MAX_COMMENT) ?: return ReceiveOutcome.IGNORED

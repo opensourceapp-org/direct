@@ -193,7 +193,9 @@ final class AppModel: ObservableObject {
     }
 
     func deleteFeed(_ id: String) { run { try $0.deleteFeed(id) } }
-    func likeFeed(_ id: String) { run { try $0.likeFeed(id) } }
+    func likeFeed(_ id: String) { reactFeed(id, "❤️") }
+    func reactFeed(_ id: String, _ emoji: String) { run { try $0.reactFeed(id, emoji) } }
+    func forwardFeed(_ id: String, to peerId: String) { run { try $0.forwardFeed(id, to: peerId) } }
     func commentFeed(_ id: String, _ body: String) { run { try $0.commentFeed(id, body) } }
     func markStoriesSeen(_ ownerId: String) { run { try $0.markStoriesSeen(ownerId) } }
 

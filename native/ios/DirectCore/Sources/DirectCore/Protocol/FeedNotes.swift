@@ -1,7 +1,7 @@
 import Foundation
 
 /// A story or profile post sealed to accepted contacts. The bootstrap never sees the bytes.
-/// Puts are chunked like chat media. Deletes, likes, and comments are short JSON notes.
+/// Puts are chunked like chat media. Deletes, likes, comments, and reactions are short JSON notes.
 public enum FeedNotes {
     public static let partPrefix = "DIRECT-FEED/1\n"
     public static let jobPrefix = "DIRECT-FEED-JOB/1\n"
@@ -15,7 +15,8 @@ public enum FeedNotes {
     public static let maxComments = 100
     public static let channels: Set<String> = [story, post]
     public static let kinds: Set<String> = ["image", "video", "gif"]
-    public static let socialOps: Set<String> = ["like", "comment"]
+    public static let socialOps: Set<String> = ["like", "comment", "react"]
+    public static let emojis = ChatNotes.emojis
 
     public struct Part: Equatable, Sendable {
         public var id: String
@@ -159,6 +160,15 @@ public enum FeedNotes {
         ]).serialized()
     }
 
+    public static func encodeReact(id: String, emoji: String) -> String {
+        partPrefix + JSON.object([
+            ("v", .int(1)),
+            ("op", .string("react")),
+            ("id", .string(id)),
+            ("body", .string(emoji)),
+        ]).serialized()
+    }
+
     public static func encodeComment(id: String, commentId: String, body: String, createdAt: Int64) -> String {
         partPrefix + JSON.object([
             ("v", .int(1)),
@@ -177,6 +187,10 @@ public enum FeedNotes {
               let id = json["id"]?.string, (4...80).contains(id.count)
         else { return nil }
         if op == "like" { return Social(op: op, id: id) }
+        if op == "react" {
+            guard let emoji = json["body"]?.string, emojis.contains(emoji) else { return nil }
+            return Social(op: op, id: id, body: emoji)
+        }
         guard op == "comment",
               let raw = json["body"]?.string
         else { return nil }
