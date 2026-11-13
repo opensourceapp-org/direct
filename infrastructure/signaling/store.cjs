@@ -37,6 +37,16 @@ function createMemoryStore() {
     async savePeer(row) {
       peers.set(row.directId, row);
     },
+    async listDiscoverable(exceptId, limit = 24) {
+      const people = [];
+      for (const [directId, peer] of peers) {
+        if (!peer.sessionId || !peer.discoverable) continue;
+        if (exceptId && directId === exceptId) continue;
+        people.push({ directId, bundle: peer.bundle });
+      }
+      people.sort((a, b) => a.directId.localeCompare(b.directId));
+      return people.slice(0, limit);
+    },
     async sessionsWatching(directId) {
       const ids = [];
       for (const row of sessions.values()) {
@@ -105,7 +115,7 @@ function createPgStore(pool) {
     },
     async loadPeer(directId) {
       const { rows } = await pool.query(
-        'select direct_id as "directId", bundle, session_id as "sessionId", extract(epoch from closed_at) * 1000 as "closedAt" from signal_peers where direct_id = $1',
+        'select direct_id as "directId", bundle, session_id as "sessionId", extract(epoch from closed_at) * 1000 as "closedAt", discoverable from signal_peers where direct_id = $1',
         [directId],
       );
       const row = rows[0];
@@ -114,11 +124,23 @@ function createPgStore(pool) {
     },
     async savePeer(row) {
       await pool.query(
-        `insert into signal_peers (direct_id, bundle, session_id, closed_at)
-         values ($1, $2, $3, $4)
-         on conflict (direct_id) do update set bundle = $2, session_id = $3, closed_at = $4`,
-        [row.directId, row.bundle, row.sessionId || null, row.closedAt ? new Date(row.closedAt) : null],
+        `insert into signal_peers (direct_id, bundle, session_id, closed_at, discoverable)
+         values ($1, $2, $3, $4, $5)
+         on conflict (direct_id) do update set bundle = $2, session_id = $3, closed_at = $4, discoverable = $5`,
+        [row.directId, row.bundle, row.sessionId || null, row.closedAt ? new Date(row.closedAt) : null, Boolean(row.discoverable)],
       );
+    },
+    async listDiscoverable(exceptId, limit = 24) {
+      const { rows } = await pool.query(
+        `select direct_id as "directId", bundle
+         from signal_peers
+         where discoverable is true and session_id is not null
+           and ($1::text is null or direct_id <> $1)
+         order by direct_id
+         limit $2`,
+        [exceptId || null, limit],
+      );
+      return rows;
     },
     async sessionsWatching(directId) {
       const { rows } = await pool.query(

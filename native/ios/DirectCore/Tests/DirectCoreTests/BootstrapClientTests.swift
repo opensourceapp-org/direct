@@ -38,7 +38,7 @@ final class BootstrapClientTests: XCTestCase {
         alice.start()
         await sleepMs(50)
         XCTAssertEqual(.open, alice.status.phase)
-        XCTAssertEqual(.hello(from: ada, bundle: bundle(ada), nonce: nil, proof: nil), SignalCodec.decode(hub.frames().first!))
+        XCTAssertEqual(.hello(from: ada, bundle: bundle(ada), nonce: nil, proof: nil, discoverable: false), SignalCodec.decode(hub.frames().first!))
         XCTAssertTrue(presence.contains { $0 == (bo, false) })
 
         bob.announce(directId: bo, bundle: bundle(bo))
@@ -110,5 +110,26 @@ final class BootstrapClientTests: XCTestCase {
         XCTAssertEqual(.open, client.status.phase)
         client.stop()
         XCTAssertEqual(.stopped, client.status.phase)
+    }
+
+    func testSuggestListsOnlyDiscoverableLivePhones() async {
+        let hub = FakeHub()
+        let alice = client(hub)
+        let bob = client(hub)
+        alice.announce(directId: ada, bundle: bundle(ada), discoverable: true)
+        alice.configure("ws://192.168.1.20:8787")
+        alice.start()
+        bob.announce(directId: bo, bundle: bundle(bo))
+        bob.configure("ws://192.168.1.20:8787")
+        bob.start()
+        await sleepMs(50)
+        let fromAlice = await alice.suggest()
+        XCTAssertTrue(fromAlice.isEmpty)
+        let fromBob = await bob.suggest()
+        XCTAssertEqual(1, fromBob.count)
+        XCTAssertEqual(ada, fromBob.first?.directId)
+        XCTAssertTrue(fromBob.first?.online == true)
+        alice.stop()
+        bob.stop()
     }
 }

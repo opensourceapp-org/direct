@@ -76,6 +76,8 @@ public struct NodeState: Equatable, Sendable {
     public var call: CallSnapshot? = nil
     public var feed: [FeedItem] = []
     public var savedPosts: [String] = []
+    public var discoverable = false
+    public var suggestions: [SuggestedPerson] = []
 
     public init() {}
 }
@@ -142,6 +144,7 @@ public final class DirectNode {
     private var networkAvailable = true
     private var mediaDir: URL?
     private var cachedBundle: (key: String, value: String)?
+    private var suggested: [SuggestedPerson] = []
     private lazy var links = Links(node: self)
     private lazy var listener = Listener(node: self)
 
@@ -184,7 +187,10 @@ public final class DirectNode {
             activate(loaded)
         }
         bootstrap.addStatusHandler { [weak self] status in
-            if status.isOpen { self?.wake.fire() }
+            if status.isOpen {
+                self?.wake.fire()
+                Task { @DirectActor in await self?.refreshSuggestions() }
+            }
             self?.publish()
         }
         bootstrap.onPresence = { [weak self] id, isOnline in self?.presence(id, isOnline) }
@@ -241,6 +247,20 @@ public final class DirectNode {
             publish()
             return url
         }
+    }
+
+    /// Opt in to appear as a suggested contact on this bootstrap. Off by default.
+    public func setDiscoverable(_ on: Bool) throws {
+        store.settings.discoverable = on
+        try store.save()
+        announceSelf()
+        publish()
+    }
+
+    /// Reloads people who chose to be listed on this bootstrap.
+    public func refreshSuggestions() async {
+        suggested = await bootstrap.suggest()
+        publish()
     }
 
     @discardableResult
@@ -758,12 +778,7 @@ public final class DirectNode {
         let next = transportFactory(bootstrap, identity.directId)
         next.setListener(listener)
         transport = next
-        if let bundle = currentBundle() {
-            bootstrap.announce(directId: identity.directId, bundle: bundle) { [weak self] nonce in
-                guard let keys = self?.keys else { return "" }
-                return Encoding.base64Url(keys.sign(SignalProof.message(nonce: nonce, directId: keys.directId)))
-            }
-        }
+        announceSelf()
         refreshWatch()
         wake.fire()
     }
@@ -981,7 +996,20 @@ public final class DirectNode {
         next.call = board.snapshot
         next.feed = store.feed().sorted { $0.createdAt > $1.createdAt }
         next.savedPosts = store.savedPosts()
+        next.discoverable = store.settings.discoverable
+        let known = Set(contacts.map(\.directId))
+        next.suggestions = suggested.filter { person in
+            person.directId != identity?.directId && !known.contains(person.directId)
+        }
         state = next
+    }
+
+    private func announceSelf() {
+        guard let identity = keys, let bundle = currentBundle() else { return }
+        bootstrap.announce(directId: identity.directId, bundle: bundle, signProof: { [weak self] nonce in
+            guard let keys = self?.keys else { return "" }
+            return Encoding.base64Url(keys.sign(SignalProof.message(nonce: nonce, directId: keys.directId)))
+        }, discoverable: store.settings.discoverable)
     }
 
     private func sendCall(_ peerId: String, _ note: CallNotes.Note) async -> Bool {

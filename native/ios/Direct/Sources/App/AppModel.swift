@@ -100,6 +100,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setDiscoverable(_ on: Bool) {
+        run { try $0.setDiscoverable(on) }
+    }
+
+    func refreshSuggestions() {
+        run { await $0.refreshSuggestions() }
+    }
+
     func addContact(_ input: String, done: @escaping @MainActor () -> Void) {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         run { node in

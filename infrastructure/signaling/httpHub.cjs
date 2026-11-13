@@ -4,7 +4,21 @@ const { getStore, createMemoryStore } = require('./store.cjs');
 const MAX_SIGNAL = 64 * 1024;
 const MAX_WATCH = 256;
 const MAX_HELLOS = 8;
+const MAX_SUGGEST = 24;
 const MAX_WAIT_MS = 8_000;
+
+function displayName(bundle) {
+  try {
+    const parsed = JSON.parse(bundle);
+    if (parsed && typeof parsed.name === 'string') {
+      const name = parsed.name.trim();
+      if (name) return name.slice(0, 80);
+    }
+  } catch {
+    // A public bundle only has to contain the DIRECT ID. The name is optional.
+  }
+  return '';
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,6 +59,7 @@ async function handleFrames(store, session, frames) {
         bundle: message.bundle,
         sessionId: session.id,
         closedAt: null,
+        discoverable: message.discoverable === true,
       });
       if (!wasOnline) await announce(store, verified.directId, true);
       continue;
@@ -73,6 +88,26 @@ async function handleFrames(store, session, frames) {
         const peer = await store.loadPeer(id);
         replies.push({ kind: 'presence', directId: id, online: Boolean(peer && peer.sessionId) });
       }
+      continue;
+    }
+
+    if (message.kind === 'suggest') {
+      const requestId = message.requestId;
+      if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 80) continue;
+      const people = [];
+      if (session.directId) {
+        const listed = await store.listDiscoverable(session.directId, MAX_SUGGEST);
+        for (const row of listed) {
+          people.push({
+            directId: row.directId,
+            name: displayName(row.bundle),
+            bundle: row.bundle,
+            online: true,
+          });
+        }
+      }
+      people.sort((a, b) => (a.name || a.directId).localeCompare(b.name || b.directId));
+      replies.push({ kind: 'suggestions', requestId, people: people.slice(0, MAX_SUGGEST) });
       continue;
     }
 

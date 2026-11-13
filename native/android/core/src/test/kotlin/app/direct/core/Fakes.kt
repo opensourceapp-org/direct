@@ -13,6 +13,9 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 object Contracts {
     private val root = File(System.getProperty("direct.contracts") ?: "../../contracts")
@@ -25,6 +28,7 @@ class FakeHub : WebSocketFactory {
     val received = mutableListOf<String>()
     private val live = mutableMapOf<String, Socket>()
     private val bundles = mutableMapOf<String, String>()
+    private val discoverable = mutableMapOf<String, Boolean>()
     private val watching = mutableMapOf<Socket, Set<String>>()
 
     inner class Socket(val events: WebSocketEvents) : WebSocketConnection {
@@ -88,6 +92,7 @@ class FakeHub : WebSocketFactory {
                 socket.selfId = frame.from
                 live[frame.from] = socket
                 bundles[frame.from] = frame.bundle
+                discoverable[frame.from] = frame.discoverable
                 if (!wasOnline) notify(frame.from, true)
             }
             is SignalFrame.Lookup -> {
@@ -104,8 +109,26 @@ class FakeHub : WebSocketFactory {
                 if (target != null && target.open) target.events.onMessage(text)
                 else if (frame is SignalFrame.Offer) socket.events.onMessage(SignalCodec.encode(SignalFrame.Unreachable(frame.to)))
             }
+            is SignalFrame.Suggest -> {
+                val except = socket.selfId
+                val people = live.entries.mapNotNull { (id, peer) ->
+                    if (!peer.open || id == except || discoverable[id] != true) return@mapNotNull null
+                    val bundle = bundles[id] ?: return@mapNotNull null
+                    SignalFrame.SuggestedPerson(id, displayName(bundle), bundle, true)
+                }.sortedBy { it.name.ifEmpty { it.directId } }
+                socket.events.onMessage(SignalCodec.encode(SignalFrame.Suggestions(frame.requestId, people)))
+            }
             else -> Unit
         }
+    }
+
+    private fun displayName(bundle: String): String {
+        val json = try {
+            Json.parseToJsonElement(bundle) as? JsonObject
+        } catch (_: Exception) {
+            null
+        } ?: return ""
+        return (json["name"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty().take(80)
     }
 }
 

@@ -675,6 +675,30 @@ struct ContactsView: View {
                 Muted("A DIRECT ID is looked up on the server, so the other phone must be open on that same address. A QR code or pasted card also carries the server, and scanning it saves that address on this phone.")
             }
             .listRowBackground(Ink.surface)
+            if model.state.bootstrap.phase == .open {
+                Section {
+                    if model.state.suggestions.isEmpty {
+                        Muted("No one on this server has chosen to be listed right now.")
+                    }
+                    ForEach(model.state.suggestions, id: \.directId) { person in
+                        HStack(spacing: 12) {
+                            Avatar(name: person.name.isEmpty ? person.directId : person.name, jpeg: nil)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(person.name.isEmpty ? person.directId : person.name).font(.headline)
+                                Text(person.directId).font(.system(.caption, design: .monospaced)).foregroundStyle(Ink.muted)
+                            }
+                            Spacer()
+                            Button("Add") { model.addContact(person.bundle) {} }
+                                .tint(Ink.accent)
+                        }
+                    }
+                } header: {
+                    Text("Suggested")
+                } footer: {
+                    Text("These people turned on public suggestions on this server. Adding them still uses their signed identity.")
+                }
+                .listRowBackground(Ink.surface)
+            }
             Section("Contacts") {
                 ForEach(model.state.contacts) { contact in
                     VStack(alignment: .leading, spacing: 6) {
@@ -705,6 +729,7 @@ struct ContactsView: View {
         .background(Ink.background)
         .navigationTitle("Contacts")
         .navigationBarTitleDisplayMode(.large)
+        .onAppear { model.refreshSuggestions() }
         .sheet(isPresented: $scanning) {
             NavigationStack {
                 QrScannerView { text in
@@ -1016,6 +1041,20 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Ink.surface)
                 }
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { model.state.discoverable },
+                        set: { model.setDiscoverable($0) }
+                    )) {
+                        Text("Appear as a suggested contact")
+                    }
+                    .tint(Ink.accent)
+                } header: {
+                    Text("Discovery")
+                } footer: {
+                    Text("Off by default. When this is on, other DIRECT phones using this same server can see your name and add you. They still cannot read your messages.")
+                }
+                .listRowBackground(Ink.surface)
                 Section {
                     NavigationLink {
                         NetworkView()

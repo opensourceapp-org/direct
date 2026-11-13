@@ -1,8 +1,22 @@
 import Foundation
 
+public struct SuggestedPerson: Equatable, Sendable {
+    public var directId: String
+    public var name: String
+    public var bundle: String
+    public var online: Bool
+
+    public init(directId: String, name: String, bundle: String, online: Bool) {
+        self.directId = directId
+        self.name = name
+        self.bundle = bundle
+        self.online = online
+    }
+}
+
 /// Frames from contracts/signaling.json. Nothing here can carry message text.
 public enum SignalFrame: Equatable {
-    case hello(from: String, bundle: String, nonce: String?, proof: String?)
+    case hello(from: String, bundle: String, nonce: String?, proof: String?, discoverable: Bool)
     case challenge(nonce: String)
     case lookup(requestId: String, directId: String)
     case watch(ids: [String])
@@ -12,6 +26,8 @@ public enum SignalFrame: Equatable {
     case lookupResult(requestId: String, directId: String, present: Bool, bundle: String?)
     case unreachable(to: String)
     case presence(directId: String, online: Bool)
+    case suggest(requestId: String)
+    case suggestions(requestId: String, people: [SuggestedPerson])
 
     public var isNegotiation: Bool {
         switch self {
@@ -36,12 +52,13 @@ public enum SignalCodec {
     public static func encode(_ frame: SignalFrame) -> String {
         let json: JSON
         switch frame {
-        case let .hello(from, bundle, nonce, proof):
+        case let .hello(from, bundle, nonce, proof, discoverable):
             var fields: [(String, JSON)] = [("kind", .string("hello")), ("from", .string(from)), ("bundle", .string(bundle))]
             if let nonce, let proof {
                 fields.append(("nonce", .string(nonce)))
                 fields.append(("proof", .string(proof)))
             }
+            if discoverable { fields.append(("discoverable", .bool(true))) }
             json = .object(fields)
         case let .challenge(nonce):
             json = .object([("kind", .string("challenge")), ("nonce", .string(nonce))])
@@ -77,6 +94,21 @@ public enum SignalCodec {
             json = .object([("kind", .string("unreachable")), ("to", .string(to))])
         case let .presence(directId, online):
             json = .object([("kind", .string("presence")), ("directId", .string(directId)), ("online", .bool(online))])
+        case let .suggest(requestId):
+            json = .object([("kind", .string("suggest")), ("requestId", .string(requestId))])
+        case let .suggestions(requestId, people):
+            json = .object([
+                ("kind", .string("suggestions")),
+                ("requestId", .string(requestId)),
+                ("people", .array(people.map { person in
+                    .object([
+                        ("directId", .string(person.directId)),
+                        ("name", .string(person.name)),
+                        ("bundle", .string(person.bundle)),
+                        ("online", .bool(person.online)),
+                    ])
+                })),
+            ])
         }
         return json.serialized()
     }
@@ -89,7 +121,7 @@ public enum SignalCodec {
         switch json["kind"]?.string {
         case "hello":
             guard let from, let bundle = json["bundle"]?.string else { return nil }
-            return .hello(from: from, bundle: bundle, nonce: json["nonce"]?.string, proof: json["proof"]?.string)
+            return .hello(from: from, bundle: bundle, nonce: json["nonce"]?.string, proof: json["proof"]?.string, discoverable: json["discoverable"]?.bool == true)
         case "challenge":
             guard let nonce = json["nonce"]?.string else { return nil }
             return .challenge(nonce: nonce)
@@ -114,6 +146,20 @@ public enum SignalCodec {
         case "presence":
             guard let directId = json["directId"]?.string, let online = json["online"]?.bool else { return nil }
             return .presence(directId: directId, online: online)
+        case "suggest":
+            guard let requestId = json["requestId"]?.string else { return nil }
+            return .suggest(requestId: requestId)
+        case "suggestions":
+            guard let requestId = json["requestId"]?.string, let people = json["people"]?.array else { return nil }
+            return .suggestions(requestId: requestId, people: people.compactMap { item in
+                guard let directId = item["directId"]?.string, let bundle = item["bundle"]?.string else { return nil }
+                return SuggestedPerson(
+                    directId: directId,
+                    name: item["name"]?.string ?? "",
+                    bundle: bundle,
+                    online: item["online"]?.bool ?? true
+                )
+            })
         default:
             return nil
         }

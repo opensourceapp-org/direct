@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "description": "Frames exchanged between a DIRECT device and the bootstrap. The bootstrap keeps public bundles and presence and forwards WebRTC negotiation. It never receives message text or sealed envelopes.",
   "transport": "WebSocket text frames, one JSON object per frame",
   "defaultPort": 8787,
@@ -11,15 +11,18 @@
     "signalMaxChars": 65536,
     "requestIdMaxChars": 80,
     "watchMaxIds": 256,
-    "presenceGraceMs": 120000
+    "presenceGraceMs": 120000,
+    "suggestMaxPeople": 24
   },
   "rules": [
     "The hub sends a challenge nonce when the socket opens. hello must include that nonce and an Ed25519 proof over DIRECT-SIGNAL/1\\n<nonce>\\n<directId> using the bundle signing key.",
     "hello.bundle must be a verified public identity bundle whose DIRECT ID equals from.",
+    "hello.discoverable is optional. Omitted or false means this phone is not listed to others as a suggested contact. True lists this live socket to phones that send suggest.",
     "offer, answer, and ice are forwarded only when from equals the DIRECT ID that this socket announced.",
     "An offer to a DIRECT ID without a live socket returns unreachable. answer and ice are dropped.",
     "lookup returns a bundle while the socket is live and for presenceGraceMs after it closes.",
     "watch replaces the socket's watch list and immediately reports presence for each DIRECT ID.",
+    "suggest requires a prior hello on this socket. The hub replies with suggestions: people who are currently live and discoverable, excluding the requester, capped at suggestMaxPeople.",
     "Any other kind is dropped, including message, envelope, deliver, and text."
   ],
   "clientToHub": {
@@ -27,6 +30,16 @@
       "kind": "hello",
       "from": "dir_0123456789ABCDEF",
       "bundle": "{\"v\":1,\"name\":\"Ada\",\"directId\":\"dir_0123456789ABCDEF\",\"note\":\"public bundle\"}"
+    },
+    "helloDiscoverable": {
+      "kind": "hello",
+      "from": "dir_0123456789ABCDEF",
+      "bundle": "{\"v\":1,\"name\":\"Ada\",\"directId\":\"dir_0123456789ABCDEF\",\"note\":\"public bundle\"}",
+      "discoverable": true
+    },
+    "suggest": {
+      "kind": "suggest",
+      "requestId": "sug-1"
     },
     "lookup": {
       "kind": "lookup",
@@ -88,6 +101,18 @@
     "challenge": {
       "kind": "challenge",
       "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    "suggestions": {
+      "kind": "suggestions",
+      "requestId": "sug-1",
+      "people": [
+        {
+          "directId": "dir_ABCDEFGHJKMNPQRS",
+          "name": "Bo",
+          "bundle": "{\"v\":1,\"name\":\"Bo\",\"directId\":\"dir_ABCDEFGHJKMNPQRS\",\"note\":\"public bundle\"}",
+          "online": true
+        }
+      ]
     }
   },
   "forbidden": [

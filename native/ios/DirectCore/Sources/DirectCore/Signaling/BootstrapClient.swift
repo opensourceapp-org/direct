@@ -79,6 +79,7 @@ public final class BootstrapClient {
     private var retryTask: Task<Void, Never>?
     private var lookups: [String: Waiter<String?>] = [:]
     private var offers: [String: Waiter<Bool>] = [:]
+    private var suggestions: [String: Waiter<[SuggestedPerson]>] = [:]
     private var openWaiters: [Waiter<Bool>] = []
 
     public init(sockets: WebSocketFactory, timing: Timing = Timing()) {
@@ -117,10 +118,13 @@ public final class BootstrapClient {
         if running { connect() }
     }
 
-    public func announce(directId: String, bundle publicBundle: String, signProof: ((String) -> String)? = nil) {
+    private var discoverable = false
+
+    public func announce(directId: String, bundle publicBundle: String, signProof: ((String) -> String)? = nil, discoverable: Bool = false) {
         selfId = directId
         bundle = publicBundle
         self.signProof = signProof
+        self.discoverable = discoverable
         sendHello()
     }
 
@@ -154,6 +158,21 @@ public final class BootstrapClient {
         }
         let result = await waiter.wait(timeoutMs: timeoutMs ?? timing.lookupTimeoutMs, fallback: nil)
         lookups[requestId] = nil
+        return result
+    }
+
+    /// People who opted in to be suggested on this bootstrap, or empty if the socket is not open.
+    public func suggest(timeoutMs: Int64? = nil) async -> [SuggestedPerson] {
+        guard status.isOpen else { return [] }
+        let requestId = Encoding.newId("sg")
+        let waiter = Waiter<[SuggestedPerson]>()
+        suggestions[requestId] = waiter
+        guard send(.suggest(requestId: requestId)) else {
+            suggestions[requestId] = nil
+            return []
+        }
+        let result = await waiter.wait(timeoutMs: timeoutMs ?? timing.lookupTimeoutMs, fallback: [])
+        suggestions[requestId] = nil
         return result
     }
 
@@ -248,6 +267,8 @@ public final class BootstrapClient {
         lookups = [:]
         offers.values.forEach { $0.complete(false) }
         offers = [:]
+        suggestions.values.forEach { $0.complete([]) }
+        suggestions = [:]
     }
 
     private func incoming(_ text: String) {
@@ -262,6 +283,8 @@ public final class BootstrapClient {
             offers.removeValue(forKey: to)?.complete(false)
         case let .presence(directId, online):
             onPresence?(directId, online)
+        case let .suggestions(requestId, people):
+            suggestions.removeValue(forKey: requestId)?.complete(people)
         case .offer, .answer, .ice:
             if frame.route?.to == selfId { onNegotiation?(frame) }
         default:
@@ -272,9 +295,9 @@ public final class BootstrapClient {
     private func sendHello() {
         guard let selfId, let bundle, status.isOpen else { return }
         if let nonce, let signProof {
-            send(.hello(from: selfId, bundle: bundle, nonce: nonce, proof: signProof(nonce)))
+            send(.hello(from: selfId, bundle: bundle, nonce: nonce, proof: signProof(nonce), discoverable: discoverable))
         } else {
-            send(.hello(from: selfId, bundle: bundle, nonce: nil, proof: nil))
+            send(.hello(from: selfId, bundle: bundle, nonce: nil, proof: nil, discoverable: discoverable))
         }
     }
 

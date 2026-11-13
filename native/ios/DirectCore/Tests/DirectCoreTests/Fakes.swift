@@ -20,6 +20,7 @@ final class FakeHub: WebSocketFactory {
     private(set) var received: [String] = []
     private var live: [String: Socket] = [:]
     private var bundles: [String: String] = [:]
+    private var discoverable: [String: Bool] = [:]
     private var watching: [ObjectIdentifier: (Socket, Set<String>)] = [:]
     private var sockets: [Socket] = []
     private let lock = NSRecursiveLock()
@@ -112,13 +113,14 @@ final class FakeHub: WebSocketFactory {
         lock.unlock()
         guard let frame = SignalCodec.decode(text) else { return }
         switch frame {
-        case let .hello(from, bundle, _, _):
+        case let .hello(from, bundle, _, _, listed):
             guard DirectIds.isValid(from), bundle.contains("\"directId\":\"\(from)\"") else { return }
             let wasOnline = isOnline(from)
             lock.lock()
             socket.selfId = from
             live[from] = socket
             bundles[from] = bundle
+            discoverable[from] = listed
             lock.unlock()
             if !wasOnline { notify(from, true) }
         case let .lookup(requestId, directId):
@@ -141,9 +143,24 @@ final class FakeHub: WebSocketFactory {
             } else if case .offer = frame {
                 socket.events.onMessage(SignalCodec.encode(.unreachable(to: route.to)))
             }
+        case let .suggest(requestId):
+            lock.lock()
+            let except = socket.selfId
+            let people = live.compactMap { id, peer -> SuggestedPerson? in
+                guard peer.open, id != except, discoverable[id] == true, let bundle = bundles[id] else { return nil }
+                return SuggestedPerson(directId: id, name: Self.displayName(bundle), bundle: bundle, online: true)
+            }
+            .sorted { ($0.name.isEmpty ? $0.directId : $0.name) < ($1.name.isEmpty ? $1.directId : $1.name) }
+            lock.unlock()
+            socket.events.onMessage(SignalCodec.encode(.suggestions(requestId: requestId, people: people)))
         default:
             break
         }
+    }
+
+    private static func displayName(_ bundle: String) -> String {
+        let name = JSON.parse(bundle)?["name"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return String(name.prefix(80))
     }
 }
 
