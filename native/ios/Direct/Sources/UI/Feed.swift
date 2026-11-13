@@ -738,17 +738,25 @@ struct ContactProfileView: View {
                         onAvatar: stories.isEmpty ? nil : { storyOpen = true }
                     )
                     if !selfProfile {
-                        HStack(spacing: 12) {
-                            profileAction("Message", "bubble.left.fill") {
+                        HStack(spacing: 8) {
+                            Button {
                                 dismiss()
                                 model.openChat(peerId)
+                            } label: {
+                                Label("Message", systemImage: "bubble.left.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
                             }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
+                            .tint(Ink.accent)
+                            .foregroundStyle(Color.white)
                             if contact?.accepted == true, contact?.blocked != true {
-                                profileAction("Call", "phone.fill") {
+                                profileIcon("phone.fill", "Call") {
                                     dismiss()
                                     model.placeCall(peerId, video: false)
                                 }
-                                profileAction("Video", "video.fill") {
+                                profileIcon("video.fill", "Video") {
                                     dismiss()
                                     model.placeCall(peerId, video: true)
                                 }
@@ -775,23 +783,16 @@ struct ContactProfileView: View {
         }
     }
 
-    private func profileAction(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+    private func profileIcon(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Ink.accent)
-                    .frame(width: 52, height: 52)
-                    .background(Ink.accent.opacity(0.14), in: Circle())
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Ink.text)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .frame(minWidth: 22)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .tint(Ink.accent)
+        .accessibilityLabel(label)
     }
 }
 

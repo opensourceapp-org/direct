@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -51,9 +52,12 @@ import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -539,14 +543,23 @@ internal fun ContactProfileScreen(
         )
         if (!self) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.Top,
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                ProfileAction(Icons.Outlined.Chat, "Message", onMessage)
+                Button(
+                    onClick = onMessage,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Ink.accent, contentColor = Color.White),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = Modifier.weight(1f).height(40.dp),
+                ) {
+                    Icon(Icons.Outlined.Chat, null, modifier = Modifier.padding(end = 8.dp).size(18.dp))
+                    Text("Message", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                }
                 if (canCall) {
-                    ProfileAction(Icons.Filled.Call, "Call") { placeCall(false) }
-                    ProfileAction(Icons.Filled.Videocam, "Video") { placeCall(true) }
+                    ProfileIconButton(Icons.Filled.Call, "Call") { placeCall(false) }
+                    ProfileIconButton(Icons.Filled.Videocam, "Video") { placeCall(true) }
                 }
             }
         }
@@ -606,22 +619,16 @@ private fun ProfileCount(value: Int, label: String) {
 }
 
 @Composable
-private fun ProfileAction(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Column(
-        Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+private fun ProfileIconButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Ink.border),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.accent),
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier.size(40.dp),
     ) {
-        Box(
-            Modifier.size(52.dp).clip(CircleShape).background(Ink.accentSoft),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, label, tint = Ink.accent, modifier = Modifier.size(22.dp))
-        }
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Icon(icon, label, modifier = Modifier.size(18.dp))
     }
 }
 
