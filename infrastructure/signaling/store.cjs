@@ -1,4 +1,4 @@
-const { randomBytes } = require('node:crypto');
+const { createCipheriv, createDecipheriv, createHash, randomBytes } = require('node:crypto');
 const { newToken, hashToken } = require('./verify.cjs');
 
 const GRACE_MS = 120_000;
@@ -17,6 +17,41 @@ function live(peer, at) {
 function rateKey(ip) {
   const key = String(ip || 'unknown').trim().toLowerCase().slice(0, 64);
   return key || 'unknown';
+}
+
+const INBOX_PREFIX = 'enc1.';
+let inboxEphemeralKey;
+
+function inboxSealKey() {
+  const material = String(process.env.INBOX_SEAL_KEY || process.env.DATABASE_URL || '').trim();
+  if (material) return createHash('sha256').update('DIRECT-INBOX/1\n').update(material).digest();
+  inboxEphemeralKey ??= randomBytes(32);
+  return inboxEphemeralKey;
+}
+
+function sealInboxPayload(plain, key = inboxSealKey()) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${INBOX_PREFIX}${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
+}
+
+function openInboxPayload(stored, key = inboxSealKey()) {
+  const raw = String(stored || '');
+  if (!raw.startsWith(INBOX_PREFIX)) return raw;
+  const parts = raw.slice(INBOX_PREFIX.length).split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const iv = Buffer.from(parts[0], 'base64url');
+    const tag = Buffer.from(parts[1], 'base64url');
+    const encrypted = Buffer.from(parts[2], 'base64url');
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
 }
 
 function createMemoryStore() {
@@ -99,13 +134,13 @@ function createMemoryStore() {
     },
     async push(sessionId, payload) {
       const list = inbox.get(sessionId) || [];
-      list.push(payload);
+      list.push(sealInboxPayload(payload));
       inbox.set(sessionId, list);
     },
     async pull(sessionId) {
       const list = inbox.get(sessionId) || [];
       inbox.set(sessionId, []);
-      return list;
+      return list.map((row) => openInboxPayload(row)).filter((row) => row != null);
     },
     async sweep() {
       const at = Date.now();
@@ -239,7 +274,7 @@ function createPgStore(pool) {
       return rows.length > 0;
     },
     async push(sessionId, payload) {
-      await pool.query('insert into signal_inbox (session_id, payload) values ($1, $2)', [sessionId, payload]);
+      await pool.query('insert into signal_inbox (session_id, payload) values ($1, $2)', [sessionId, sealInboxPayload(payload)]);
     },
     async pull(sessionId) {
       const { rows } = await pool.query(
@@ -249,7 +284,7 @@ function createPgStore(pool) {
          delete from signal_inbox where id in (select id from taken) returning payload`,
         [sessionId],
       );
-      return rows.map((row) => row.payload);
+      return rows.map((row) => openInboxPayload(row.payload)).filter((row) => row != null);
     },
     async sweep() {
       await pool.query("delete from signal_sessions where last_seen < now() - interval '90 seconds'");
@@ -279,4 +314,11 @@ async function getStore() {
   return cached;
 }
 
-module.exports = { getStore, createMemoryStore, GRACE_MS, SESSION_TTL_MS };
+module.exports = {
+  getStore,
+  createMemoryStore,
+  GRACE_MS,
+  SESSION_TTL_MS,
+  sealInboxPayload,
+  openInboxPayload,
+};

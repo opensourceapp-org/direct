@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "description": "Frames exchanged between a DIRECT device and the bootstrap. The bootstrap keeps public bundles and presence and forwards WebRTC negotiation. It never receives message text or sealed envelopes.",
   "transport": "WebSocket text frames, one JSON object per frame",
   "defaultPort": 8787,
@@ -21,7 +21,7 @@
     "offer, answer, and ice are forwarded only when from equals the DIRECT ID that this socket announced.",
     "An offer to a DIRECT ID without a live socket returns unreachable. answer and ice are dropped.",
     "lookup requires a prior hello. It returns a bundle only when the target opted into discovery, or already forwarded a WebRTC signal to the requester. A matching live or recently closed peer still has to pass that check; otherwise present is false and bundle is null.",
-    "watch replaces the socket's watch list and immediately reports presence for each DIRECT ID.",
+    "watch requires a prior hello, replaces the socket's watch list, and reports online only for DIRECT IDs that opted into discovery or already forwarded a WebRTC signal to the requester. Other IDs stay on the list so a later opt-in or introduction can notify, but they report online false until then.",
     "suggest requires a prior hello on this socket. The hub replies with suggestions: people who are currently live and discoverable, excluding the requester, capped at suggestMaxPeople.",
     "Any other kind is dropped, including message, envelope, deliver, and text."
   ],

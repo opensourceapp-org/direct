@@ -32,22 +32,37 @@ function readBody(request) {
   });
 }
 
+function requestHost(request) {
+  const forwarded = headerValue(request, 'x-forwarded-host').split(',')[0].trim();
+  const host = forwarded || headerValue(request, 'host');
+  return host.split(':')[0].trim().toLowerCase();
+}
+
+function corsOrigin(request) {
+  const origin = headerValue(request, 'origin');
+  if (!origin) return null;
+  try {
+    const parsed = new URL(origin);
+    const host = parsed.hostname.toLowerCase();
+    const localHttp = parsed.protocol === 'http:' && (host === 'localhost' || host === '127.0.0.1');
+    if (localHttp) return origin;
+    if (parsed.protocol !== 'https:') return null;
+    const expected = requestHost(request);
+    if (expected && host === expected) return origin;
+  } catch {
+    // Ignore malformed Origin. Native phones send none.
+  }
+  return null;
+}
+
 function corsHeaders(request) {
   const headers = {
     'access-control-allow-headers': 'content-type, x-direct-session, x-direct-token',
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     vary: 'origin',
   };
-  const origin = headerValue(request, 'origin');
-  if (!origin) return headers;
-  try {
-    const parsed = new URL(origin);
-    const host = parsed.hostname.toLowerCase();
-    const localHttp = parsed.protocol === 'http:' && (host === 'localhost' || host === '127.0.0.1');
-    if (parsed.protocol === 'https:' || localHttp) headers['access-control-allow-origin'] = origin;
-  } catch {
-    // Ignore malformed Origin. Native phones send none.
-  }
+  const allowed = corsOrigin(request);
+  if (allowed) headers['access-control-allow-origin'] = allowed;
   return headers;
 }
 
