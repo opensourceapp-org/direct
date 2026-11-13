@@ -694,12 +694,62 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
         LaunchedEffect(state.bootstrap.isOpen) {
             if (state.bootstrap.isOpen) node.refreshSuggestions()
         }
+        Spacer(Modifier.padding(8.dp))
+        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Label("Discovery")
+            Card {
+                Row(
+                    Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (state.discoverable) Ink.success.copy(alpha = 0.14f) else Ink.accentSoft),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Outlined.Person,
+                            null,
+                            tint = if (state.discoverable) Ink.success else Ink.accent,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Let others find you", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Muted(if (state.discoverable) "Visible on this server" else "Hidden until you share a QR or ID")
+                    }
+                    Switch(
+                        checked = state.discoverable,
+                        onCheckedChange = { on -> scope.launch { node.setDiscoverable(on) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Ink.accent, checkedThumbColor = Color.White),
+                    )
+                }
+            }
+            Muted(
+                if (state.discoverable) "Other DIRECT phones on this server can look you up and see you here. They still cannot read your messages."
+                else "Off by default. Turn this on to appear in suggestions. A QR code or pasted card still works either way.",
+            )
+        }
         if (state.bootstrap.isOpen) {
-            Spacer(Modifier.padding(8.dp))
-            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Label("Suggested")
-                if (state.suggestions.isEmpty()) {
-                    Muted("No one on this server has chosen to be listed right now.")
+            if (state.suggestions.isEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(Ink.border),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Outlined.Person, null, tint = Ink.muted, modifier = Modifier.size(20.dp))
+                    }
+                    Column {
+                        Text("No one else is listed", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Muted("When someone turns this on, they show up here to add.")
+                    }
                 }
             }
             state.suggestions.forEach { person ->
@@ -714,14 +764,14 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
                         Mono(person.directId)
                     }
                     TextButton(onClick = { scope.attempt({ error = it }) { node.addContactBundle(person.bundle) } }) {
-                        Text("Add", color = Ink.accent)
+                        Text("Add", color = Ink.accent, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 HorizontalDivider(color = Ink.border)
             }
-            Muted("These people turned on public suggestions on this server. Adding them still uses their signed identity.", Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         }
         Spacer(Modifier.padding(8.dp))
+        Column(Modifier.padding(horizontal = 20.dp)) { Label("Contacts") }
         state.contacts.filter { it.accepted && !it.blocked }.forEach { contact ->
             Row(
                 Modifier.fillMaxWidth().clickable { open(contact.directId) }.padding(horizontal = 20.dp, vertical = 12.dp),
@@ -1034,18 +1084,6 @@ private fun SettingsScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                 SecondaryButton("Share profile", Icons.Outlined.Share) { shareProfile(context, profile, card, server) }
             }
             state.bundle?.let { raw -> SecondaryButton("Copy identity bundle", Icons.Outlined.ContentCopy) { copy(context, "DIRECT bundle", raw) } }
-            Label("Discovery")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Let others find me on this server", fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Muted("Off by default. Other DIRECT phones on this server can look you up by ID and see you in suggested contacts. They still cannot read your messages.")
-                }
-                Switch(
-                    checked = state.discoverable,
-                    onCheckedChange = { on -> scope.launch { node.setDiscoverable(on) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = Ink.accent, checkedThumbColor = Color.White),
-                )
-            }
             Label("Connection")
             SecondaryButton("Network", Icons.Outlined.WifiTethering) { showNetwork = true }
             Muted("Bootstrap address, connection status, and how to run your own server.")
