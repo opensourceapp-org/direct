@@ -783,6 +783,7 @@ public final class DirectNode {
         wake.fire()
     }
 
+    @DirectActor
     private final class Links: PeerLinks {
         weak var node: DirectNode?
         init(node: DirectNode) { self.node = node }
@@ -800,6 +801,7 @@ public final class DirectNode {
         }
     }
 
+    @DirectActor
     private final class Listener: PeerListener {
         weak var node: DirectNode?
         init(node: DirectNode) { self.node = node }

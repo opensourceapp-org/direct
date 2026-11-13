@@ -52,9 +52,11 @@ public struct CallRejected: Error {
 
 /// One live call on this phone. Signaling is sealed and written on the data channel.
 /// Group calls are a mesh: each pair of members opens their own connection, and the
-/// lower DIRECT ID offers. Every method runs on `DirectActor`.
+/// lower DIRECT ID offers. Isolated to `DirectActor` so `await end()` cannot hop onto
+/// the concurrent pool and race `LocalStore` while another task is saving.
+@DirectActor
 final class CallBoard {
-    static let ringMs: Int64 = 45_000
+    nonisolated static let ringMs: Int64 = 45_000
 
     var snapshot: CallSnapshot?
     var ringUntil: Int64?
