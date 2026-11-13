@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Delete
@@ -150,7 +151,8 @@ internal fun FeedScreen(
     state: NodeState,
     onOpenStory: (String) -> Unit,
     onOpenProfile: (String) -> Unit,
-    onOpenPost: (String) -> Unit,
+    onOpenMedia: (String) -> Unit,
+    onOpenComments: (String) -> Unit,
 ) {
     val selfId = state.profile?.directId
     val posts = othersPosts(state)
@@ -185,7 +187,7 @@ internal fun FeedScreen(
         } else {
             LazyColumn(Modifier.weight(1f)) {
                 items(posts, key = { it.id }) { item ->
-                    FeedPostCard(node, state, item, onOpenProfile) { onOpenPost(item.id) }
+                    FeedPostCard(node, state, item, onOpenProfile, { onOpenMedia(item.id) }) { onOpenComments(item.id) }
                     Spacer(Modifier.height(10.dp))
                 }
             }
@@ -199,7 +201,8 @@ private fun FeedPostCard(
     state: NodeState,
     item: FeedItem,
     onOpenProfile: (String) -> Unit,
-    onOpen: () -> Unit,
+    onOpenMedia: () -> Unit,
+    onOpenComments: () -> Unit,
 ) {
     val name = feedOwnerName(state, item.ownerId)
     Column(Modifier.fillMaxWidth().background(Ink.surface)) {
@@ -214,8 +217,12 @@ private fun FeedPostCard(
                 Text(formatFeedTime(item.createdAt), color = Ink.muted, fontSize = 12.sp)
             }
         }
-        FeedThumb(node, item, Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onOpen))
-        FeedActions(node, state, item, onOpen)
+        FeedThumb(
+            node,
+            item,
+            Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClickLabel = "View full size", onClick = onOpenMedia),
+        )
+        FeedActions(node, state, item, onOpenComments)
         likeSummary(state, item)?.let { summary ->
             Text(summary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp))
         }
@@ -235,10 +242,10 @@ private fun FeedPostCard(
                 if (item.comments.size == 1) "View 1 comment" else "View all ${item.comments.size} comments",
                 color = Ink.muted,
                 fontSize = 13.sp,
-                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp).clickable(onClick = onOpen),
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp).clickable(onClick = onOpenComments),
             )
             val latest = item.comments.last()
-            CommentRow(state, latest.fromId, latest.body, latest.createdAt, compact = true, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp).clickable(onClick = onOpen))
+            CommentRow(state, latest.fromId, latest.body, latest.createdAt, compact = true, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp).clickable(onClick = onOpenComments))
         }
         Spacer(Modifier.height(8.dp))
     }
@@ -407,7 +414,7 @@ internal fun ProfilePosts(
     canAdd: Boolean,
     showHeading: Boolean = true,
     onError: (String?) -> Unit,
-    onOpenPost: (String) -> Unit,
+    onOpenMedia: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -461,7 +468,7 @@ internal fun ProfilePosts(
                             FeedThumb(
                                 node,
                                 item,
-                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable { onOpenPost(item.id) },
+                                Modifier.weight(1f).aspectRatio(1f).padding(1.dp).clickable(onClickLabel = "View full size") { onOpenMedia(item.id) },
                             )
                         }
                         repeat(3 - row.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
@@ -478,7 +485,7 @@ internal fun ContactProfileScreen(
     state: NodeState,
     peerId: String,
     back: () -> Unit,
-    onOpenPost: (String) -> Unit,
+    onOpenMedia: (String) -> Unit,
 ) {
     val contact = state.contacts.firstOrNull { it.directId == peerId }
     val self = peerId == state.profile?.directId
@@ -512,7 +519,7 @@ internal fun ContactProfileScreen(
             }
         }
         error?.let { Text(it, color = Ink.danger, modifier = Modifier.padding(horizontal = 20.dp)) }
-        ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenPost = onOpenPost)
+        ProfilePosts(node, state, peerId, canAdd = self, onError = { error = it }, onOpenMedia = onOpenMedia)
     }
     if (storyOpen) StoryViewer(node, state, peerId) { storyOpen = false }
 }
@@ -543,6 +550,7 @@ internal fun FeedPostViewer(
     viewingId: String?,
     canDelete: Boolean,
     onClose: () -> Unit,
+    onOpenMedia: () -> Unit,
     onError: (String?) -> Unit,
 ) {
     val item = viewingId?.let { id -> state.feed.firstOrNull { it.id == id } }
@@ -564,6 +572,7 @@ internal fun FeedPostViewer(
             }
         },
         onClose = onClose,
+        onOpenMedia = onOpenMedia,
         onError = onError,
     )
 }
@@ -678,13 +687,14 @@ private fun CommentComposer(
 }
 
 @Composable
-private fun FeedLightbox(
+internal fun FeedLightbox(
     node: DirectNode,
     state: NodeState,
     item: FeedItem,
     canDelete: Boolean,
     onDelete: () -> Unit,
     onClose: () -> Unit,
+    onOpenMedia: () -> Unit,
     onError: (String?) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -699,10 +709,21 @@ private fun FeedLightbox(
     Column(Modifier.fillMaxSize().background(Color.Black).imePadding()) {
         Box(Modifier.fillMaxWidth().height(240.dp).background(Color.Black)) {
             FeedMedia(node, item, Modifier.fillMaxSize())
+            if (item.kind != "video") {
+                Box(Modifier.matchParentSize().clickable(onClickLabel = "View full size", onClick = onOpenMedia))
+            }
             Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
                 if (canDelete) {
                     IconButton(onClick = onDelete) { Icon(Icons.Outlined.Delete, "Delete", tint = Color.White) }
+                }
+            }
+            IconButton(onClick = onOpenMedia, modifier = Modifier.align(Alignment.BottomEnd)) {
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Fullscreen, "View full size", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
             }
         }
