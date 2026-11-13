@@ -441,139 +441,142 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         peerId in state.online -> "On the bootstrap"
         else -> "Offline · messages wait on this phone"
     }
-    Column(Modifier.fillMaxSize().imePadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(end = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier.size(48.dp).clip(CircleShape).clickable(onClick = back),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
+    Box(Modifier.fillMaxSize()) {
+        if (profileOpen && !isGroup) {
+            ContactProfileScreen(
+                node, state, peerId,
+                back = { profileOpen = false },
+                onMessage = { profileOpen = false },
+                onOpenMedia = {
+                    mediaId = it
+                    mediaCanDelete = peerId == state.profile?.directId
+                },
+            )
+        } else {
+            Column(Modifier.fillMaxSize().imePadding()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(end = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier.size(48.dp).clip(CircleShape).clickable(onClick = back),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Ink.foreground)
+                    }
+                    Box(Modifier.clickable(enabled = !isGroup && contact != null) { profileOpen = true }) {
+                        Avatar(contact?.name ?: conversation?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 40.dp)
+                    }
+                    Column(Modifier.weight(1f).padding(start = 12.dp, top = 8.dp, bottom = 8.dp)) {
+                        Text(
+                            contact?.name ?: conversation?.name ?: peerId,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Ink.foreground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(status, fontSize = 13.sp, color = Ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (isGroup || (contact?.accepted == true && !contact.blocked)) {
+                        CallActions(node, peerId) { error = it }
+                    }
+                }
+                HorizontalDivider(color = Ink.border)
+                LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item { Spacer(Modifier.padding(4.dp)) }
+                    items(messages, key = { it.id }) { message ->
+                        MessageBubble(
+                            node, state, message, isGroup,
+                            onRetry = { scope.attempt({ error = it }) { node.retry(message.id) } },
+                            onEdit = {
+                                editingId = message.id
+                                draft = message.body
+                            },
+                            onForward = { forwarding = message },
+                            onDelete = { deleting = message },
+                            onReact = { emoji -> scope.attempt({ error = it }) { node.react(message.id, emoji) } },
+                            onOpenPost = { id ->
+                                if (state.feed.any { it.id == id }) viewingId = id
+                                else error = "That post isn't on this phone."
+                            },
+                        )
+                    }
+                }
+                error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
+                HorizontalDivider(color = Ink.border)
+                when {
+                    isGroup -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
+                    contact == null -> Unit
+                    request -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Muted("${contact.name} is not in your contacts. Accept to reply. Decline blocks this DIRECT ID.")
+                        PrimaryButton("Accept") { scope.attempt({ error = it }) { node.acceptRequest(peerId) } }
+                        SecondaryButton("Decline") {
+                            scope.attempt({ error = it }) {
+                                node.declineRequest(peerId)
+                                back()
+                            }
+                        }
+                    }
+                    contact.blocked -> Muted("You blocked this DIRECT ID.", Modifier.padding(16.dp))
+                    else -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
+                }
             }
-            Box(Modifier.clickable(enabled = !isGroup && contact != null) { profileOpen = true }) {
-                Avatar(contact?.name ?: conversation?.name ?: "?", jpegBytes(contact?.avatarJpegBase64), 40.dp)
-            }
-            Column(Modifier.weight(1f).padding(start = 12.dp, top = 8.dp, bottom = 8.dp)) {
-                Text(
-                    contact?.name ?: conversation?.name ?: peerId,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Ink.foreground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(status, fontSize = 13.sp, color = Ink.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (isGroup || (contact?.accepted == true && !contact.blocked)) {
-                CallActions(node, peerId) { error = it }
-            }
-        }
-        HorizontalDivider(color = Ink.border)
-        LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { Spacer(Modifier.padding(4.dp)) }
-            items(messages, key = { it.id }) { message ->
-                MessageBubble(
-                    node, state, message, isGroup,
-                    onRetry = { scope.attempt({ error = it }) { node.retry(message.id) } },
-                    onEdit = {
-                        editingId = message.id
-                        draft = message.body
-                    },
-                    onForward = { forwarding = message },
-                    onDelete = { deleting = message },
-                    onReact = { emoji -> scope.attempt({ error = it }) { node.react(message.id, emoji) } },
-                    onOpenPost = { id ->
-                        if (state.feed.any { it.id == id }) viewingId = id
-                        else error = "That post isn't on this phone."
-                    },
-                )
-            }
-        }
-        error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 16.dp)) }
-        HorizontalDivider(color = Ink.border)
-        when {
-            isGroup -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
-            contact == null -> Unit
-            request -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Muted("${contact.name} is not in your contacts. Accept to reply. Decline blocks this DIRECT ID.")
-                PrimaryButton("Accept") { scope.attempt({ error = it }) { node.acceptRequest(peerId) } }
-                SecondaryButton("Decline") {
+            forwarding?.let { message ->
+                ForwardSheet(state, peerId, onDismiss = { forwarding = null }) { target ->
                     scope.attempt({ error = it }) {
-                        node.declineRequest(peerId)
-                        back()
+                        node.forwardMessage(message.id, target)
+                        forwarding = null
                     }
                 }
             }
-            contact.blocked -> Muted("You blocked this DIRECT ID.", Modifier.padding(16.dp))
-            else -> Composer(node, peerId, draft, { draft = it }, { error = it }, editingId = editingId, onCancelEdit = { editingId = null; draft = "" })
-        }
-    }
-    forwarding?.let { message ->
-        ForwardSheet(state, peerId, onDismiss = { forwarding = null }) { target ->
-            scope.attempt({ error = it }) {
-                node.forwardMessage(message.id, target)
-                forwarding = null
+            deleting?.let { message ->
+                DeleteSheet(
+                    message = message,
+                    onDismiss = { deleting = null },
+                    onDeleteForMe = {
+                        scope.attempt({ error = it }) {
+                            node.deleteMessage(message.id, false)
+                            if (editingId == message.id) {
+                                editingId = null
+                                draft = ""
+                            }
+                            deleting = null
+                        }
+                    },
+                    onDeleteForEveryone = {
+                        scope.attempt({ error = it }) {
+                            node.deleteMessage(message.id, true)
+                            if (editingId == message.id) {
+                                editingId = null
+                                draft = ""
+                            }
+                            deleting = null
+                        }
+                    },
+                )
             }
         }
-    }
-    deleting?.let { message ->
-        DeleteSheet(
-            message = message,
-            onDismiss = { deleting = null },
-            onDeleteForMe = {
-                scope.attempt({ error = it }) {
-                    node.deleteMessage(message.id, false)
-                    if (editingId == message.id) {
-                        editingId = null
-                        draft = ""
-                    }
-                    deleting = null
-                }
-            },
-            onDeleteForEveryone = {
-                scope.attempt({ error = it }) {
-                    node.deleteMessage(message.id, true)
-                    if (editingId == message.id) {
-                        editingId = null
-                        draft = ""
-                    }
-                    deleting = null
-                }
-            },
-        )
-    }
-    if (profileOpen && !isGroup) {
-        ContactProfileScreen(
-            node, state, peerId,
-            back = { profileOpen = false },
-            onMessage = { profileOpen = false },
-            onOpenMedia = {
-                mediaId = it
-                mediaCanDelete = peerId == state.profile?.directId
-            },
-        )
-    }
-    val media = mediaId?.let { id -> state.feed.firstOrNull { it.id == id } }
-    if (media != null) {
-        FeedMediaViewer(
-            node, state, media, canDelete = mediaCanDelete,
-            onClose = { mediaId = null },
-            onError = { error = it },
-        )
-    } else if (mediaId != null) {
-        LaunchedEffect(mediaId) { mediaId = null }
-    } else if (viewingId != null) {
-        FeedPostViewer(
-            node, state, viewingId, canDelete = false,
-            onClose = { viewingId = null },
-            onOpenMedia = {
-                mediaId = viewingId
-                mediaCanDelete = false
-            },
-            onError = { error = it },
-        )
+        val media = mediaId?.let { id -> state.feed.firstOrNull { it.id == id } }
+        if (media != null) {
+            FeedMediaViewer(
+                node, state, media, canDelete = mediaCanDelete,
+                onClose = { mediaId = null },
+                onError = { error = it },
+            )
+        } else if (mediaId != null) {
+            LaunchedEffect(mediaId) { mediaId = null }
+        } else if (viewingId != null) {
+            FeedPostViewer(
+                node, state, viewingId, canDelete = false,
+                onClose = { viewingId = null },
+                onOpenMedia = {
+                    mediaId = viewingId
+                    mediaCanDelete = false
+                },
+                onError = { error = it },
+            )
+        }
     }
 }
 
