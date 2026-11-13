@@ -3,6 +3,7 @@ package app.direct.core
 import app.direct.core.crypto.Bundles
 import app.direct.core.crypto.IdentityKeys
 import app.direct.core.delivery.DeliveryEngine
+import app.direct.core.delivery.DeliveryRejected
 import app.direct.core.delivery.MessageState.ACCEPTED
 import app.direct.core.delivery.MessageState.QUEUED
 import app.direct.core.delivery.MessageState.SENT
@@ -17,6 +18,7 @@ import app.direct.core.store.LocalStore
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -295,5 +297,40 @@ class MediaTest {
         assertEquals("image", copy.mediaKind)
         assertEquals(post.id, copy.feedPostId)
         assertEquals(ada.keys.directId, copy.feedOwnerId)
+    }
+
+    @Test
+    fun `saving a post stays on this phone`() = runTest {
+        var now = 1_000L
+        val adaLinks = Links()
+        val boLinks = Links()
+        val ada = Device("Ada", { now }, adaLinks, chunk = 8)
+        val bo = Device("Bo", { now }, boLinks, chunk = 8)
+        ada.know(bo)
+        bo.know(ada)
+        val post = ada.engine.queueFeed(FeedNotes.POST, "image", "image/jpeg", "pic.jpg", byteArrayOf(1, 2, 3, 4, 5), "")
+        ada.engine.flush()
+        for (bytes in adaLinks.sent) bo.engine.receive(ada.keys.directId, bytes)
+
+        boLinks.sent.clear()
+        assertTrue(bo.store.savedPosts().isEmpty())
+        bo.engine.saveFeed(post.id)
+        assertEquals(listOf(post.id), bo.store.savedPosts())
+        bo.engine.flush()
+        assertTrue(boLinks.sent.isEmpty())
+        assertTrue(ada.store.savedPosts().isEmpty())
+
+        bo.engine.saveFeed(post.id)
+        assertTrue(bo.store.savedPosts().isEmpty())
+
+        bo.engine.saveFeed(post.id)
+        ada.engine.deleteFeed(post.id)
+        ada.engine.flush()
+        for (bytes in adaLinks.sent) bo.engine.receive(ada.keys.directId, bytes)
+        assertTrue(bo.store.savedPosts().isEmpty())
+
+        val story = ada.engine.queueFeed(FeedNotes.STORY, "image", "image/jpeg", "story.jpg", byteArrayOf(9), "")
+        assertFailsWith<DeliveryRejected> { ada.engine.saveFeed(story.id) }
+        assertTrue(ada.store.savedPosts().isEmpty())
     }
 }

@@ -438,12 +438,14 @@ struct Snapshot: Codable {
     var queue: [QueueItem] = []
     var groups: [GroupRecord] = []
     var feed: [FeedItem] = []
+    /// Post ids this phone has saved, newest first. Not shared with contacts.
+    var savedPosts: [String] = []
 
     private enum CodingKeys: String, CodingKey {
-        case version, profile, settings, contacts, messages, queue, groups, feed
+        case version, profile, settings, contacts, messages, queue, groups, feed, savedPosts
     }
 
-    init(version: Int = 1, profile: Profile? = nil, settings: Settings = Settings(), contacts: [ContactRecord] = [], messages: [MessageRecord] = [], queue: [QueueItem] = [], groups: [GroupRecord] = [], feed: [FeedItem] = []) {
+    init(version: Int = 1, profile: Profile? = nil, settings: Settings = Settings(), contacts: [ContactRecord] = [], messages: [MessageRecord] = [], queue: [QueueItem] = [], groups: [GroupRecord] = [], feed: [FeedItem] = [], savedPosts: [String] = []) {
         self.version = version
         self.profile = profile
         self.settings = settings
@@ -452,6 +454,7 @@ struct Snapshot: Codable {
         self.queue = queue
         self.groups = groups
         self.feed = feed
+        self.savedPosts = savedPosts
     }
 
     init(from decoder: Decoder) throws {
@@ -464,6 +467,7 @@ struct Snapshot: Codable {
         queue = try container.decodeIfPresent([QueueItem].self, forKey: .queue) ?? []
         groups = try container.decodeIfPresent([GroupRecord].self, forKey: .groups) ?? []
         feed = try container.decodeIfPresent([FeedItem].self, forKey: .feed) ?? []
+        savedPosts = try container.decodeIfPresent([String].self, forKey: .savedPosts) ?? []
     }
 }
 
@@ -485,6 +489,7 @@ public final class LocalStore {
     private var groupMap: [String: GroupRecord]
     private var feedOrder: [String]
     private var feedMap: [String: FeedItem]
+    private var savedOrder: [String]
     private let file: URL?
     private let key: Data?
 
@@ -503,6 +508,7 @@ public final class LocalStore {
         groupMap = Dictionary(snapshot.groups.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         feedOrder = snapshot.feed.map(\.id)
         feedMap = Dictionary(snapshot.feed.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        savedOrder = snapshot.savedPosts
     }
 
     public func contact(_ directId: String) -> ContactRecord? { contactMap[directId] }
@@ -566,6 +572,19 @@ public final class LocalStore {
     public func removeFeed(_ id: String) {
         feedMap[id] = nil
         feedOrder.removeAll { $0 == id }
+        savedOrder.removeAll { $0 == id }
+    }
+    public func savedPosts() -> [String] { savedOrder }
+    /// Returns true when the post is saved after the toggle.
+    @discardableResult
+    public func toggleSaved(_ id: String) -> Bool {
+        if let index = savedOrder.firstIndex(of: id) {
+            savedOrder.remove(at: index)
+            return false
+        }
+        savedOrder.insert(id, at: 0)
+        if savedOrder.count > Self.maxSaved { savedOrder.removeLast(savedOrder.count - Self.maxSaved) }
+        return true
     }
     @discardableResult
     public func pruneFeed(_ now: Int64) -> [FeedItem] {
@@ -579,7 +598,7 @@ public final class LocalStore {
 
     public func save() throws {
         guard let file, let key else { return }
-        let snapshot = Snapshot(profile: profile, settings: settings, contacts: contacts(), messages: messages(), queue: queue(), groups: groups(), feed: feed())
+        let snapshot = Snapshot(profile: profile, settings: settings, contacts: contacts(), messages: messages(), queue: queue(), groups: groups(), feed: feed(), savedPosts: savedOrder)
         let sealed = try Seal.sealAtRest(key: key, plaintext: try JSONEncoder().encode(snapshot))
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         // .atomic writes a sibling temp file and renames it over the target.
@@ -600,4 +619,6 @@ public final class LocalStore {
     }
 
     public static func inMemory() -> LocalStore { LocalStore(file: nil, key: nil, snapshot: Snapshot()) }
+
+    private static let maxSaved = 200
 }

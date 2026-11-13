@@ -301,4 +301,41 @@ final class MediaTests: XCTestCase {
         XCTAssertEqual(post.id, copy.feedPostId)
         XCTAssertEqual(ada.keys.directId, copy.feedOwnerId)
     }
+
+    @DirectActor
+    func testSavingAPostStaysOnThisPhone() async throws {
+        let clock = Clock()
+        let adaLinks = Links()
+        let boLinks = Links()
+        let ada = Device("Ada", clock, adaLinks, chunk: 8)
+        let bo = Device("Bo", clock, boLinks, chunk: 8)
+        ada.know(bo)
+        bo.know(ada)
+        let post = try ada.engine.queueFeed(channel: FeedNotes.post, kind: "image", mime: "image/jpeg", name: "pic.jpg", bytes: Data([1, 2, 3, 4, 5]), caption: "")
+        try await ada.engine.flush()
+        for bytes in adaLinks.sent { _ = try bo.engine.receive(ada.keys.directId, bytes) }
+
+        boLinks.sent.removeAll()
+        XCTAssertTrue(bo.store.savedPosts().isEmpty)
+        try bo.engine.saveFeed(post.id)
+        XCTAssertEqual([post.id], bo.store.savedPosts())
+        try await bo.engine.flush()
+        XCTAssertTrue(boLinks.sent.isEmpty)
+        XCTAssertTrue(ada.store.savedPosts().isEmpty)
+
+        try bo.engine.saveFeed(post.id)
+        XCTAssertTrue(bo.store.savedPosts().isEmpty)
+
+        try bo.engine.saveFeed(post.id)
+        try ada.engine.deleteFeed(post.id)
+        try await ada.engine.flush()
+        for bytes in adaLinks.sent { _ = try bo.engine.receive(ada.keys.directId, bytes) }
+        XCTAssertTrue(bo.store.savedPosts().isEmpty)
+
+        let story = try ada.engine.queueFeed(channel: FeedNotes.story, kind: "image", mime: "image/jpeg", name: "story.jpg", bytes: Data([9]), caption: "")
+        XCTAssertThrowsError(try ada.engine.saveFeed(story.id)) { error in
+            XCTAssertEqual(DeliveryRejected(message: "Only posts can be saved."), error as? DeliveryRejected)
+        }
+        XCTAssertTrue(ada.store.savedPosts().isEmpty)
+    }
 }

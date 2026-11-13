@@ -25,6 +25,11 @@ func storyOwners(_ state: NodeState, selfId: String) -> [String] {
     return [selfId] + contacts.map(\.directId)
 }
 
+func savedFeed(_ state: NodeState) -> [FeedItem] {
+    let byId = Dictionary(state.feed.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+    return state.savedPosts.compactMap { byId[$0] }.filter { $0.channel == FeedNotes.post }
+}
+
 func othersPosts(_ state: NodeState) -> [FeedItem] {
     guard let selfId = state.profile?.directId else { return [] }
     return state.feed.filter { $0.channel == FeedNotes.post && $0.ownerId != selfId }
@@ -52,6 +57,7 @@ struct FeedView: View {
     @EnvironmentObject private var model: AppModel
     @State private var storyOwner: String?
     @State private var viewingId: String?
+    @State private var mediaId: String?
     @State private var profilePeer: String?
 
     var body: some View {
@@ -86,7 +92,12 @@ struct FeedView: View {
             } else {
                 ForEach(posts) { item in
                     Section {
-                        FeedPostCard(item: item, onOpen: { viewingId = item.id }, onProfile: { profilePeer = item.ownerId })
+                        FeedPostCard(
+                            item: item,
+                            onOpen: { viewingId = item.id },
+                            onMedia: { mediaId = item.id },
+                            onProfile: { profilePeer = item.ownerId }
+                        )
                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                             .listRowBackground(Ink.surface)
                             .listRowSeparator(.hidden)
@@ -104,6 +115,18 @@ struct FeedView: View {
             set: { if !$0 { viewingId = nil } }
         )) {
             FeedLightbox(id: viewingId ?? "", canDelete: false)
+        }
+        .background {
+            Color.clear.fullScreenCover(isPresented: Binding(
+                get: { mediaId != nil },
+                set: { if !$0 { mediaId = nil } }
+            )) {
+                if let mediaId {
+                    FeedMediaViewer(id: mediaId, canDelete: false) { self.mediaId = nil }
+                        .id(mediaId)
+                        .environmentObject(model)
+                }
+            }
         }
         .fullScreenCover(isPresented: Binding(
             get: { storyOwner != nil },
@@ -132,6 +155,7 @@ struct FeedPostCard: View {
     @EnvironmentObject private var model: AppModel
     let item: FeedItem
     var onOpen: () -> Void
+    var onMedia: () -> Void
     var onProfile: () -> Void
 
     var body: some View {
@@ -150,11 +174,12 @@ struct FeedPostCard: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            Button(action: onOpen) {
+            Button(action: onMedia) {
                 FeedThumb(item: item, cornerRadius: 18)
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
+            .accessibilityLabel(item.kind == "video" ? "View video" : "View photo")
             VStack(alignment: .leading, spacing: 8) {
                 if !item.caption.isEmpty {
                     Text(item.caption)
@@ -216,6 +241,13 @@ struct FeedActions: View {
                     forwarding = true
                 }
                 Spacer(minLength: 0)
+                iconButton(
+                    systemImage: model.state.savedPosts.contains(item.id) ? "bookmark.fill" : "bookmark",
+                    tint: model.state.savedPosts.contains(item.id) ? Ink.accent : .primary,
+                    label: model.state.savedPosts.contains(item.id) ? "Saved" : "Save"
+                ) {
+                    model.saveFeed(item.id)
+                }
             }
             reactionChips(selfId: selfId)
         }
@@ -511,7 +543,7 @@ struct ProfilePosts: View {
     var showsHeading: Bool = true
     @State private var item: PhotosPickerItem?
     @State private var picking = false
-    @State private var viewingId: String?
+    @State private var mediaId: String?
 
     var body: some View {
         let posts = profilePosts(model.state, ownerId: ownerId)
@@ -540,11 +572,15 @@ struct ProfilePosts: View {
             }
         }
         .photosPicker(isPresented: $picking, selection: $item, matching: .any(of: [.images, .videos]))
-        .navigationDestination(isPresented: Binding(
-            get: { viewingId != nil },
-            set: { if !$0 { viewingId = nil } }
+        .fullScreenCover(isPresented: Binding(
+            get: { mediaId != nil },
+            set: { if !$0 { mediaId = nil } }
         )) {
-            FeedLightbox(id: viewingId ?? "", canDelete: canAdd)
+            if let mediaId {
+                FeedMediaViewer(id: mediaId, canDelete: canAdd) { self.mediaId = nil }
+                    .id(mediaId)
+                    .environmentObject(model)
+            }
         }
     }
 
@@ -599,11 +635,12 @@ struct ProfilePosts: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Add post")
         case .post(let post):
-            Button { viewingId = post.id } label: {
+            Button { mediaId = post.id } label: {
                 FeedThumb(item: post)
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
+            .accessibilityLabel(post.kind == "video" ? "View video" : "View photo")
         }
     }
 }
@@ -616,6 +653,59 @@ private enum ProfileTile: Identifiable {
         switch self {
         case .add: return "add"
         case .post(let item): return item.id
+        }
+    }
+}
+
+struct SavedPosts: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var mediaId: String?
+
+    var body: some View {
+        let posts = savedFeed(model.state)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Saved").font(.headline)
+            if posts.isEmpty {
+                Text("Save a post and it stays here.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(Array(stride(from: 0, to: posts.count, by: 2)), id: \.self) { start in
+                        savedRow(Array(posts[start..<min(start + 2, posts.count)]))
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { mediaId != nil },
+            set: { if !$0 { mediaId = nil } }
+        )) {
+            if let mediaId {
+                FeedMediaViewer(
+                    id: mediaId,
+                    canDelete: model.state.feed.first { $0.id == mediaId }?.ownerId == model.state.profile?.directId
+                ) { self.mediaId = nil }
+                    .id(mediaId)
+                    .environmentObject(model)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func savedRow(_ row: [FeedItem]) -> some View {
+        HStack(spacing: 10) {
+            ForEach(row, id: \.id) { post in
+                Button { mediaId = post.id } label: {
+                    FeedThumb(item: post)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel(post.kind == "video" ? "View video" : "View photo")
+            }
+            if row.count == 1 {
+                Color.clear.aspectRatio(1, contentMode: .fit).frame(maxWidth: .infinity)
+            }
         }
     }
 }
@@ -718,9 +808,12 @@ struct FeedLightbox: View {
     @Environment(\.dismiss) private var dismiss
     let id: String
     var canDelete: Bool
+    var allowsFullView: Bool = true
+    var showsClose: Bool = false
     @State private var bytes: Data?
     @State private var draft = ""
     @State private var confirmDelete = false
+    @State private var mediaOpen = false
     @FocusState private var commenting: Bool
 
     var body: some View {
@@ -730,7 +823,13 @@ struct FeedLightbox: View {
             ZStack {
                 Color(uiColor: .secondarySystemFill)
                 if let item, let bytes, item.kind != "video", let image = UIImage(data: bytes) {
-                    Image(uiImage: image).resizable().scaledToFit()
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .contentShape(Rectangle())
+                        .onTapGesture { if allowsFullView { mediaOpen = true } }
+                        .accessibilityLabel(allowsFullView ? "View full size" : item.name)
+                        .accessibilityAddTraits(allowsFullView ? .isButton : .isImage)
                 } else if let item, let bytes, item.kind == "video" {
                     StoryVideo(data: bytes, name: item.name)
                 } else {
@@ -740,6 +839,20 @@ struct FeedLightbox: View {
             .frame(maxWidth: .infinity)
             .frame(height: commenting ? 140 : 260)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(alignment: .bottomTrailing) {
+                if allowsFullView, bytes != nil {
+                    Button { mediaOpen = true } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(.black.opacity(0.45), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(8)
+                    .accessibilityLabel("View full size")
+                }
+            }
             .padding(.horizontal, 16)
             .padding(.top, 8)
             if let item {
@@ -801,11 +914,21 @@ struct FeedLightbox: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
+            if showsClose {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
             if canDelete, item != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Delete", role: .destructive) { confirmDelete = true }
                 }
             }
+        }
+        .fullScreenCover(isPresented: $mediaOpen) {
+            FeedMediaViewer(id: id, canDelete: canDelete, onClose: { mediaOpen = false }, onComments: { mediaOpen = false })
+                .id(id)
+                .environmentObject(model)
         }
         .confirmationDialog("Delete this post?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete Post", role: .destructive) {
@@ -817,7 +940,13 @@ struct FeedLightbox: View {
             Text("It will be removed from your profile and from people who already received it.")
         }
         .animation(.easeInOut(duration: 0.22), value: commenting)
-        .onAppear { model.loadFeed(id) { bytes = $0 } }
+        .onAppear {
+            if model.state.feed.first(where: { $0.id == id }) == nil { dismiss() }
+            model.loadFeed(id) { bytes = $0 }
+        }
+        .onChange(of: model.state.feed.contains(where: { $0.id == id })) { exists in
+            if !exists { dismiss() }
+        }
     }
 
     private func commentComposer(_ postId: String) -> some View {
@@ -886,6 +1015,399 @@ private struct KeyboardLift: ViewModifier {
                     inset = 0
                 }
             }
+    }
+}
+
+/// Full-screen photo or video for a post. Pinch, double-tap, and the buttons zoom between 1x and 5x.
+struct FeedMediaViewer: View {
+    @EnvironmentObject private var model: AppModel
+    let id: String
+    var canDelete: Bool
+    var onClose: () -> Void
+    var onComments: (() -> Void)? = nil
+    @State private var image: UIImage?
+    @State private var player: AVPlayer?
+    @State private var playing = true
+    @State private var missing = false
+    @State private var comments = false
+    @State private var confirmDelete = false
+    @State private var scale: CGFloat = 1
+    @State private var command = ZoomCommand()
+
+    var body: some View {
+        let item = model.state.feed.first { $0.id == id }
+        ZStack {
+            Color.black.ignoresSafeArea()
+            ZoomingMedia(image: image, player: player, command: command, scale: $scale)
+                .ignoresSafeArea()
+            if image == nil, player == nil {
+                if missing {
+                    Text(item?.kind == "video" ? "This video could not be opened." : "This photo could not be opened.")
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            ViewerIconButton(systemName: "xmark", label: "Close", action: onClose)
+                .padding(.leading, 8)
+                .padding(.top, 4)
+        }
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 8) {
+                ViewerIconButton(systemName: "text.bubble", label: "Comments") {
+                    if let onComments {
+                        onComments()
+                    } else {
+                        comments = true
+                    }
+                }
+                if canDelete, item != nil {
+                    ViewerIconButton(systemName: "trash", label: "Delete") { confirmDelete = true }
+                }
+            }
+            .padding(.trailing, 8)
+            .padding(.top, 4)
+        }
+        .overlay(alignment: .bottom) { bottomBar(item) }
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $comments) {
+            NavigationStack {
+                FeedLightbox(id: id, canDelete: canDelete, allowsFullView: false, showsClose: true)
+                    .environmentObject(model)
+            }
+        }
+        .confirmationDialog("Delete this post?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete Post", role: .destructive) {
+                model.deleteFeed(id)
+                onClose()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It will be removed from your profile and from people who already received it.")
+        }
+        .onAppear { load() }
+        .onChange(of: item?.mediaFile) { _ in load() }
+        .onChange(of: item == nil) { gone in
+            if gone { onClose() }
+        }
+        .onChange(of: comments) { shown in
+            if shown {
+                player?.pause()
+            } else if playing {
+                player?.play()
+            }
+        }
+        .onDisappear { player?.pause() }
+    }
+
+    private func bottomBar(_ item: FeedItem?) -> some View {
+        let percent = Int((scale * 100).rounded())
+        return VStack(alignment: .leading, spacing: 8) {
+            if let caption = item?.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.subheadline)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.85), radius: 6)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: 8) {
+                Color.clear.frame(width: 36, height: 36)
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                ViewerIconButton(systemName: "minus.magnifyingglass", label: "Zoom out", disabled: scale <= 1.01) {
+                    command = ZoomCommand(generation: command.generation + 1, factor: 1 / 1.4)
+                }
+                Text("\(percent)%")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 52)
+                    .accessibilityLabel("\(percent) percent")
+                ViewerIconButton(systemName: "plus.magnifyingglass", label: "Zoom in", disabled: scale >= 4.99) {
+                    command = ZoomCommand(generation: command.generation + 1, factor: 1.4)
+                }
+                if item?.kind == "video" {
+                    ViewerIconButton(systemName: playing ? "pause.fill" : "play.fill", label: playing ? "Pause" : "Play") {
+                        playing.toggle()
+                        if playing { player?.play() } else { player?.pause() }
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .background(.black.opacity(0.45), in: Capsule())
+                Spacer(minLength: 0)
+                if let item {
+                    ViewerIconButton(
+                        systemName: model.state.savedPosts.contains(item.id) ? "bookmark.fill" : "bookmark",
+                        label: model.state.savedPosts.contains(item.id) ? "Saved" : "Save"
+                    ) {
+                        model.saveFeed(item.id)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
+    }
+
+    private func load() {
+        guard let item = model.state.feed.first(where: { $0.id == id }) else { missing = true; return }
+        model.loadFeed(item.id) { data in
+            guard let data else { missing = true; return }
+            if item.kind == "video" {
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("feed-view-\(item.id).mp4")
+                do {
+                    try data.write(to: url, options: .atomic)
+                    let next = AVPlayer(url: url)
+                    player = next
+                    image = nil
+                    playing = true
+                    missing = false
+                    next.play()
+                } catch {
+                    missing = true
+                }
+            } else if let photo = UIImage(data: data) {
+                image = photo
+                player = nil
+                missing = false
+            } else {
+                missing = true
+            }
+        }
+    }
+}
+
+private struct ZoomCommand: Equatable {
+    var generation: Int = 0
+    var factor: CGFloat = 1
+}
+
+private struct ViewerIconButton: View {
+    let systemName: String
+    let label: String
+    var disabled: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.45), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.35 : 1)
+        .accessibilityLabel(label)
+    }
+}
+
+private struct ZoomingMedia: UIViewRepresentable {
+    let image: UIImage?
+    let player: AVPlayer?
+    let command: ZoomCommand
+    @Binding var scale: CGFloat
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> ZoomHost {
+        let host = ZoomHost()
+        context.coordinator.bind(host, scale: $scale)
+        return host
+    }
+
+    func updateUIView(_ host: ZoomHost, context: Context) {
+        context.coordinator.bind(host, scale: $scale)
+        context.coordinator.sync(host, image: image, player: player, command: command)
+    }
+
+    final class Coordinator {
+        var image: UIImage?
+        var player: AVPlayer?
+        var applied = 0
+
+        func bind(_ host: ZoomHost, scale: Binding<CGFloat>) {
+            host.onScale = { value in
+                guard abs(scale.wrappedValue - value) > 0.01 else { return }
+                DispatchQueue.main.async { scale.wrappedValue = value }
+            }
+        }
+
+        func sync(_ host: ZoomHost, image: UIImage?, player: AVPlayer?, command: ZoomCommand) {
+            if player !== self.player || image !== self.image {
+                self.player = player
+                self.image = image
+                if let player {
+                    host.setPlayer(player)
+                } else {
+                    host.setImage(image)
+                }
+            }
+            if command.generation != applied {
+                applied = command.generation
+                if command.generation > 0 {
+                    host.apply(factor: command.factor)
+                }
+            }
+        }
+    }
+}
+
+private final class PlayerLayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    var player: AVPlayer? {
+        get { playerLayer.player }
+        set {
+            playerLayer.player = newValue
+            playerLayer.videoGravity = .resizeAspect
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        playerLayer.videoGravity = .resizeAspect
+    }
+
+    required init?(coder: NSCoder) { return nil }
+}
+
+private final class ZoomHost: UIScrollView, UIScrollViewDelegate {
+    let canvas = UIView()
+    let imageView = UIImageView()
+    let playerView = PlayerLayerView()
+    var onScale: ((CGFloat) -> Void)?
+    private var fittedBounds: CGSize = .zero
+    private var zooming = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        delegate = self
+        minimumZoomScale = 1
+        maximumZoomScale = 5
+        bouncesZoom = true
+        showsHorizontalScrollIndicator = false
+        showsVerticalScrollIndicator = false
+        backgroundColor = .clear
+        contentInsetAdjustmentBehavior = .never
+        addSubview(canvas)
+        canvas.addSubview(imageView)
+        canvas.addSubview(playerView)
+        imageView.contentMode = .scaleAspectFit
+        imageView.isHidden = true
+        playerView.isHidden = true
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(onDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        addGestureRecognizer(doubleTap)
+    }
+
+    required init?(coder: NSCoder) { return nil }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? { canvas }
+
+    func setImage(_ image: UIImage?) {
+        playerView.player = nil
+        playerView.isHidden = true
+        imageView.image = image
+        imageView.isHidden = image == nil
+        fittedBounds = .zero
+        if zoomScale > 1.001 { setZoomScale(1, animated: false) }
+        setNeedsLayout()
+    }
+
+    func setPlayer(_ player: AVPlayer?) {
+        imageView.image = nil
+        imageView.isHidden = true
+        playerView.isHidden = player == nil
+        playerView.player = player
+        fittedBounds = .zero
+        if zoomScale > 1.001 { setZoomScale(1, animated: false) }
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if !zooming, zoomScale <= 1.001 {
+            layoutCanvasToFit()
+        }
+        centerContent()
+        updateBounce()
+    }
+
+    private func layoutCanvasToFit() {
+        let boundsSize = bounds.size
+        guard boundsSize.width > 1, boundsSize.height > 1 else { return }
+        let size = fittedSize(boundsSize)
+        if abs(fittedBounds.width - boundsSize.width) < 0.5,
+           abs(fittedBounds.height - boundsSize.height) < 0.5,
+           abs(canvas.bounds.width - size.width) < 0.5,
+           abs(canvas.bounds.height - size.height) < 0.5 {
+            return
+        }
+        fittedBounds = boundsSize
+        canvas.transform = .identity
+        canvas.frame = CGRect(origin: .zero, size: size)
+        imageView.frame = canvas.bounds
+        playerView.frame = canvas.bounds
+        contentSize = size
+    }
+
+    private func fittedSize(_ boundsSize: CGSize) -> CGSize {
+        guard let image = imageView.image, image.size.width > 0, image.size.height > 0 else { return boundsSize }
+        let fit = min(boundsSize.width / image.size.width, boundsSize.height / image.size.height)
+        return CGSize(width: max(1, floor(image.size.width * fit)), height: max(1, floor(image.size.height * fit)))
+    }
+
+    private func centerContent() {
+        let extraW = max(bounds.width - contentSize.width, 0)
+        let extraH = max(bounds.height - contentSize.height, 0)
+        let inset = UIEdgeInsets(top: extraH / 2, left: extraW / 2, bottom: extraH / 2, right: extraW / 2)
+        if contentInset != inset { contentInset = inset }
+    }
+
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) { zooming = true }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        centerContent()
+        updateBounce()
+        onScale?(zoomScale)
+    }
+
+    private func updateBounce() {
+        let enabled = zoomScale > 1.01
+        if bounces != enabled { bounces = enabled }
+    }
+
+    func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+        zooming = false
+        if scale <= 1.001 {
+            fittedBounds = .zero
+            setNeedsLayout()
+        }
+    }
+
+    func apply(factor: CGFloat) {
+        let next = min(maximumZoomScale, max(minimumZoomScale, zoomScale * factor))
+        setZoomScale(next, animated: true)
+    }
+
+    @objc private func onDoubleTap(_ gesture: UITapGestureRecognizer) {
+        if zoomScale > 1.01 {
+            setZoomScale(minimumZoomScale, animated: true)
+            return
+        }
+        let point = gesture.location(in: canvas)
+        let target = min(maximumZoomScale, 2.5)
+        let width = bounds.width / target
+        let height = bounds.height / target
+        zoom(to: CGRect(x: point.x - width / 2, y: point.y - height / 2, width: width, height: height), animated: true)
     }
 }
 

@@ -151,6 +151,8 @@ data class Snapshot(
     val queue: List<QueueItem> = emptyList(),
     val groups: List<GroupRecord> = emptyList(),
     val feed: List<FeedItem> = emptyList(),
+    /** Post ids this phone has saved, newest first. Not shared with contacts. */
+    val savedPosts: List<String> = emptyList(),
 )
 
 /**
@@ -168,6 +170,7 @@ class LocalStore private constructor(private val file: File?, private val key: B
     private val queue = LinkedHashMap(snapshot.queue.associateBy { it.id })
     private val groups = LinkedHashMap(snapshot.groups.associateBy { it.id })
     private val feedItems = LinkedHashMap(snapshot.feed.associateBy { it.id })
+    private val savedPosts = snapshot.savedPosts.toMutableList()
 
     fun contact(directId: String): ContactRecord? = contacts[directId]
     fun contacts(): List<ContactRecord> = contacts.values.toList()
@@ -216,17 +219,30 @@ class LocalStore private constructor(private val file: File?, private val key: B
     }
     fun removeFeed(id: String) {
         feedItems.remove(id)
+        savedPosts.remove(id)
+    }
+    fun savedPosts(): List<String> = savedPosts.toList()
+    /** Returns true when the post is saved after the toggle. */
+    fun toggleSaved(id: String): Boolean {
+        val existing = savedPosts.indexOf(id)
+        if (existing >= 0) {
+            savedPosts.removeAt(existing)
+            return false
+        }
+        savedPosts.add(0, id)
+        while (savedPosts.size > MAX_SAVED) savedPosts.removeAt(savedPosts.lastIndex)
+        return true
     }
     fun pruneFeed(now: Long): List<FeedItem> {
         val expired = feedItems.values.filter { item -> item.expiresAt != null && item.expiresAt <= now }
-        expired.forEach { feedItems.remove(it.id) }
+        expired.forEach { removeFeed(it.id) }
         return expired
     }
 
     fun snapshot(): Snapshot = Snapshot(
         1, profile, settings,
         contacts.values.toList(), messages.values.toList(), queue.values.toList(), groups.values.toList(),
-        feedItems.values.toList(),
+        feedItems.values.toList(), savedPosts.toList(),
     )
 
     fun save() {
@@ -239,6 +255,7 @@ class LocalStore private constructor(private val file: File?, private val key: B
     }
 
     companion object {
+        private const val MAX_SAVED = 200
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
         /** Opens or creates the sealed file. A wrong key throws instead of wiping data. */

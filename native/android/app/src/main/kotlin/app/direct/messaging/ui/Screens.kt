@@ -233,6 +233,8 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     var profilePeer by rememberSaveable { mutableStateOf<String?>(null) }
     var viewingId by rememberSaveable { mutableStateOf<String?>(null) }
     var viewingCanDelete by rememberSaveable { mutableStateOf(false) }
+    var mediaId by rememberSaveable { mutableStateOf<String?>(null) }
+    var mediaCanDelete by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(pending) {
         val target = pending ?: return@LaunchedEffect
         openPeer = target
@@ -253,10 +255,27 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
         NewGroupScreen(node, state, back = { newGroup = false }) { openPeer = it; newGroup = false }
         return
     }
+    val media = mediaId?.let { id -> state.feed.firstOrNull { it.id == id } }
+    if (mediaId != null) {
+        if (media == null) {
+            LaunchedEffect(mediaId) { mediaId = null }
+        } else {
+            FeedMediaViewer(
+                node, state, media, canDelete = mediaCanDelete,
+                onClose = { mediaId = null },
+                onError = {},
+            )
+        }
+        return
+    }
     if (viewingId != null) {
         FeedPostViewer(
             node, state, viewingId, canDelete = viewingCanDelete,
             onClose = { viewingId = null },
+            onOpenMedia = {
+                mediaId = viewingId
+                mediaCanDelete = viewingCanDelete
+            },
             onError = {},
         )
         return
@@ -264,8 +283,8 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
     val profile = profilePeer
     if (profile != null) {
         ContactProfileScreen(node, state, profile, back = { profilePeer = null }) { id ->
-            viewingId = id
-            viewingCanDelete = profile == state.profile?.directId
+            mediaId = id
+            mediaCanDelete = profile == state.profile?.directId
         }
         return
     }
@@ -283,11 +302,12 @@ private fun Home(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit) {
                     node, state,
                     onOpenStory = { storyOwner = it },
                     onOpenProfile = { profilePeer = it },
-                    onOpenPost = { viewingId = it; viewingCanDelete = false },
+                    onOpenMedia = { mediaId = it; mediaCanDelete = false },
+                    onOpenComments = { viewingId = it; viewingCanDelete = false },
                 )
                 Tab.PROFILE -> IdentityScreen(node, state, onHowItWorks) { id ->
-                    viewingId = id
-                    viewingCanDelete = true
+                    mediaId = id
+                    mediaCanDelete = state.feed.firstOrNull { it.id == id }?.ownerId == state.profile?.directId
                 }
             }
         }
@@ -395,7 +415,8 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
     var deleting by remember { mutableStateOf<MessageRecord?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var profileOpen by rememberSaveable { mutableStateOf(false) }
-    var viewingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var mediaId by rememberSaveable { mutableStateOf<String?>(null) }
+    var mediaCanDelete by rememberSaveable { mutableStateOf(false) }
     val list = rememberLazyListState()
     LaunchedEffect(peerId, messages.size, contact?.accepted, isGroup) {
         if (isGroup || contact?.accepted == true) node.openConversation(peerId)
@@ -517,15 +538,21 @@ private fun ChatScreen(node: DirectNode, state: NodeState, peerId: String, back:
         ContactProfileScreen(
             node, state, peerId,
             back = { profileOpen = false },
-            onOpenPost = { viewingId = it },
+            onOpenMedia = {
+                mediaId = it
+                mediaCanDelete = peerId == state.profile?.directId
+            },
         )
     }
-    if (viewingId != null) {
-        FeedPostViewer(
-            node, state, viewingId, canDelete = false,
-            onClose = { viewingId = null },
+    val media = mediaId?.let { id -> state.feed.firstOrNull { it.id == id } }
+    if (media != null) {
+        FeedMediaViewer(
+            node, state, media, canDelete = mediaCanDelete,
+            onClose = { mediaId = null },
             onError = { error = it },
         )
+    } else if (mediaId != null) {
+        LaunchedEffect(mediaId) { mediaId = null }
     }
 }
 
@@ -791,12 +818,12 @@ private fun HelpCode(text: String) = Text(
 )
 
 @Composable
-private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit, onOpenPost: (String) -> Unit) {
+private fun IdentityScreen(node: DirectNode, state: NodeState, onHowItWorks: () -> Unit, onOpenMedia: (String) -> Unit) {
     var pane by rememberSaveable { mutableStateOf("home") }
     when (pane) {
         "edit" -> EditProfileScreen(node, state) { pane = "home" }
         "settings" -> SettingsScreen(node, state, onHowItWorks) { pane = "home" }
-        else -> ProfileHomeScreen(node, state, onEdit = { pane = "edit" }, onSettings = { pane = "settings" }, onOpenPost = onOpenPost)
+        else -> ProfileHomeScreen(node, state, onEdit = { pane = "edit" }, onSettings = { pane = "settings" }, onOpenMedia = onOpenMedia)
     }
 }
 
@@ -806,7 +833,7 @@ private fun ProfileHomeScreen(
     state: NodeState,
     onEdit: () -> Unit,
     onSettings: () -> Unit,
-    onOpenPost: (String) -> Unit,
+    onOpenMedia: (String) -> Unit,
 ) {
     val profile = state.profile ?: return
     var error by remember { mutableStateOf<String?>(null) }
@@ -842,7 +869,8 @@ private fun ProfileHomeScreen(
             SecondaryButton("Edit profile") { onEdit() }
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
-        ProfilePosts(node, state, profile.directId, canAdd = true, showHeading = false, onError = { error = it }, onOpenPost = onOpenPost)
+        ProfilePosts(node, state, profile.directId, canAdd = true, showHeading = false, onError = { error = it }, onOpenMedia = onOpenMedia)
+        SavedPosts(node, state, onOpenMedia)
     }
 }
 

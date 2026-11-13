@@ -75,6 +75,7 @@ public struct NodeState: Equatable, Sendable {
     public var storageError: String?
     public var call: CallSnapshot? = nil
     public var feed: [FeedItem] = []
+    public var savedPosts: [String] = []
 
     public init() {}
 }
@@ -516,6 +517,15 @@ public final class DirectNode {
         }
         publish()
         wake.fire()
+    }
+
+    public func saveFeed(_ id: String) throws {
+        do {
+            try requireEngine().saveFeed(id)
+        } catch let error as DeliveryRejected {
+            throw DirectError(.rejected, error.message)
+        }
+        publish()
     }
 
     public func likeFeed(_ id: String) throws {
@@ -970,6 +980,7 @@ public final class DirectNode {
         next.networkAvailable = networkAvailable
         next.call = board.snapshot
         next.feed = store.feed().sorted { $0.createdAt > $1.createdAt }
+        next.savedPosts = store.savedPosts()
         state = next
     }
 
