@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "description": "Frames exchanged between a DIRECT device and the bootstrap. The bootstrap keeps public bundles and presence and forwards WebRTC negotiation. It never receives message text or sealed envelopes.",
   "transport": "WebSocket text frames, one JSON object per frame",
   "defaultPort": 8787,
@@ -17,10 +17,10 @@
   "rules": [
     "The hub sends a challenge nonce when the socket opens. hello must include that nonce and an Ed25519 proof over DIRECT-SIGNAL/1\\n<nonce>\\n<directId> using the bundle signing key.",
     "hello.bundle must be a verified public identity bundle whose DIRECT ID equals from.",
-    "hello.discoverable is optional. Omitted or false means this phone is not listed to others as a suggested contact. True lists this live socket to phones that send suggest.",
+    "hello.discoverable is optional. Omitted or false means this phone is not listed as a suggested contact and cannot be looked up by DIRECT ID alone. True lists this live socket to phones that send suggest and allows lookup of this public bundle.",
     "offer, answer, and ice are forwarded only when from equals the DIRECT ID that this socket announced.",
     "An offer to a DIRECT ID without a live socket returns unreachable. answer and ice are dropped.",
-    "lookup returns a bundle while the socket is live and for presenceGraceMs after it closes.",
+    "lookup requires a prior hello. It returns a bundle only when the target opted into discovery, or already forwarded a WebRTC signal to the requester. A matching live or recently closed peer still has to pass that check; otherwise present is false and bundle is null.",
     "watch replaces the socket's watch list and immediately reports presence for each DIRECT ID.",
     "suggest requires a prior hello on this socket. The hub replies with suggestions: people who are currently live and discoverable, excluding the requester, capped at suggestMaxPeople.",
     "Any other kind is dropped, including message, envelope, deliver, and text."

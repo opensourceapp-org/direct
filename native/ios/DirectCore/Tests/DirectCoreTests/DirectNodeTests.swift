@@ -66,6 +66,7 @@ final class DirectNodeTests: XCTestCase {
         XCTAssertEqual(.open, ada.state.bootstrap.phase)
 
         _ = await assertThrows(.notFound) { try await ada.addContact("dir_0123456789ABCDEH") }
+        try bo.setDiscoverable(true)
         try await ada.addContact(boId.lowercased().replacingOccurrences(of: "dir_", with: "DIR_"))
         XCTAssertEqual(true, ada.state.contacts.first?.accepted)
 
@@ -123,6 +124,7 @@ final class DirectNodeTests: XCTestCase {
         await settle()
         let adaId = ada.state.profile!.directId
         let boId = bo.state.profile!.directId
+        try bo.setDiscoverable(true)
         try await ada.addContact(boId)
         try ada.send(boId, "first")
         await settle()
@@ -150,6 +152,7 @@ final class DirectNodeTests: XCTestCase {
         await settle()
         let adaId = ada.state.profile!.directId
         let boId = bo.state.profile!.directId
+        try bo.setDiscoverable(true)
         try await ada.addContact(boId)
         try ada.send(boId, "Are you there?")
         await settle()
@@ -213,6 +216,7 @@ final class DirectNodeTests: XCTestCase {
         await settle()
         let adaId = try XCTUnwrap(ada.state.profile?.directId)
         let boId = try XCTUnwrap(bo.state.profile?.directId)
+        try bo.setDiscoverable(true)
         _ = try await ada.addContact(boId)
         let jpeg = Data([0xFF, 0xD8, 0xFF, 0xD9])
         try ada.setAvatar(jpeg)
@@ -257,6 +261,7 @@ final class DirectNodeTests: XCTestCase {
         await settle(300)
         let adaId = try XCTUnwrap(ada.state.profile?.directId)
         let boId = try XCTUnwrap(bo.state.profile?.directId)
+        try bo.setDiscoverable(true)
         _ = try await ada.addContact(boId)
         await settle(300)
         try await bo.acceptRequest(adaId)
@@ -310,6 +315,7 @@ final class DirectNodeTests: XCTestCase {
         _ = try bo.setBootstrap("192.168.1.20")
         await settle(300)
         let boId = try XCTUnwrap(bo.state.profile?.directId)
+        try bo.setDiscoverable(true)
         _ = try await ada.addContact(boId)
         await settle(300)
         let group = try ada.createGroup(name: "Weekend", memberIds: [boId])
@@ -332,6 +338,7 @@ final class DirectNodeTests: XCTestCase {
         await settle(300)
         let adaId = try XCTUnwrap(ada.state.profile?.directId)
         let boId = try XCTUnwrap(bo.state.profile?.directId)
+        try bo.setDiscoverable(true)
         _ = try await ada.addContact(boId)
         await settle(300)
         try bo.acceptRequest(adaId)
@@ -367,6 +374,7 @@ final class DirectNodeTests: XCTestCase {
         await settle(300)
         let adaId = try XCTUnwrap(ada.state.profile?.directId)
         let boId = try XCTUnwrap(bo.state.profile?.directId)
+        try bo.setDiscoverable(true)
         _ = try await ada.addContact(boId)
         await settle(300)
         try bo.acceptRequest(adaId)

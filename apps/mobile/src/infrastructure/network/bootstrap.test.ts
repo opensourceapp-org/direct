@@ -20,7 +20,7 @@ const { createSignalHub } = createRequire(__filename)(
 ) as {
   createSignalHub: (options?: { now?: () => number; onHello?: (id: string, bundle: string) => void }) => {
     attach(socket: HubSocket): void;
-    remember(id: string, bundle: string): boolean;
+    remember(id: string, bundle: string, discoverable?: boolean): boolean;
   };
 };
 
@@ -40,7 +40,7 @@ function signFor(keys: ReturnType<typeof keysFromSeed>): (nonce: string) => stri
   return (nonce) => bytesToBase64Url(signBytes(keys.signingSecret, signalProofMessage(nonce, directId)));
 }
 
-function signedHello(keys: ReturnType<typeof keysFromSeed>, name: string, nonce: string) {
+function signedHello(keys: ReturnType<typeof keysFromSeed>, name: string, nonce: string, discoverable = false) {
   const directId = directIdFromSigningPublic(keys.signingPublic);
   return {
     kind: 'hello',
@@ -48,6 +48,7 @@ function signedHello(keys: ReturnType<typeof keysFromSeed>, name: string, nonce:
     bundle: bundleFor(keys, name),
     nonce,
     proof: signFor(keys)(nonce),
+    ...(discoverable ? { discoverable: true } : {}),
   };
 }
 
@@ -77,10 +78,10 @@ function localSocket(): HubSocket & {
   };
 }
 
-function announce(sock: ReturnType<typeof localSocket>, keys: ReturnType<typeof keysFromSeed>, name: string) {
+function announce(sock: ReturnType<typeof localSocket>, keys: ReturnType<typeof keysFromSeed>, name: string, discoverable = false) {
   const nonce = sock.sent.find((frame) => frame.kind === 'challenge')?.nonce;
   if (!nonce) throw new Error('missing challenge');
-  sock.receive(signedHello(keys, name, nonce));
+  sock.receive(signedHello(keys, name, nonce, discoverable));
 }
 
 function waitFor(ready: () => boolean): Promise<void> {
@@ -114,7 +115,7 @@ test('two phones on one bootstrap find each other by DIRECT ID', async () => {
   try {
     await waitFor(() => alice.state === 'open' && bob.state === 'open');
     alice.announce(bundleFor(aliceKeys, 'Ada'), signFor(aliceKeys));
-    bob.announce(bundleFor(bobKeys, 'Bo'), signFor(bobKeys));
+    bob.announce(bundleFor(bobKeys, 'Bo'), signFor(bobKeys), true);
     let found: string | null = null;
     const started = Date.now();
     while (!found && Date.now() - started < 3_000) {
@@ -154,11 +155,11 @@ test('a bundle stays findable for two minutes after the phone drops, then expire
   const alice = localSocket();
   hub.attach(bob);
   hub.attach(alice);
-  announce(bob, bobKeys, 'Bo');
+  announce(alice, aliceKeys, 'Ada');
+  announce(bob, bobKeys, 'Bo', true);
   bob.close();
   alice.receive({ kind: 'lookup', requestId: 'r1', directId: BOB });
   expect(alice.sent.at(-1)).toMatchObject({ present: true, bundle: bundleFor(bobKeys, 'Bo') });
-  announce(alice, aliceKeys, 'Ada');
   alice.receive({ kind: 'offer', to: BOB, from: ALICE });
   expect(alice.sent.at(-1)).toMatchObject({ kind: 'unreachable', to: BOB });
   now += 120_001;
@@ -171,7 +172,7 @@ test('an http presence hello is visible to a websocket lookup', () => {
   const seen: string[] = [];
   const hub = createSignalHub({ onHello: (id) => seen.push(id) });
   const bobBundle = JSON.stringify({ directId: BOB, name: 'Bo', note: 'public-only' });
-  expect(hub.remember(BOB, bobBundle)).toBe(true);
+  expect(hub.remember(BOB, bobBundle, true)).toBe(true);
   expect(hub.remember('dir_NOPE', bobBundle)).toBe(false);
   const alice = localSocket();
   hub.attach(alice);

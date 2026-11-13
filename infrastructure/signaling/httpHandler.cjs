@@ -1,15 +1,13 @@
 const { readFileSync, existsSync } = require('node:fs');
 const { isIP } = require('node:net');
 const { join } = require('node:path');
-const { exchange, SignalingAuthError } = require('./httpHub.cjs');
+const { exchange, SignalingAuthError, getStore } = require('./httpHub.cjs');
 
 const PAGE = join(__dirname, 'index.html');
 const MAX_BODY = 80 * 1024;
 const POST_WINDOW_MS = 10_000;
 const MAX_POSTS_PER_WINDOW = 40;
 const MAX_NEW_SESSIONS_PER_WINDOW = 10;
-
-const postHits = new Map();
 
 function readBody(request) {
   if (typeof request.body === 'string') return Promise.resolve(request.body);
@@ -99,21 +97,9 @@ function requestIp(request) {
   return peer || 'unknown';
 }
 
-function tooManyPosts(ip, isNewSession) {
-  const at = Date.now();
-  let row = postHits.get(ip);
-  if (!row || at - row.start >= POST_WINDOW_MS) {
-    row = { start: at, posts: 0, created: 0 };
-    postHits.set(ip, row);
-  }
-  row.posts += 1;
-  if (isNewSession) row.created += 1;
-  if (postHits.size > 10_000) {
-    for (const [key, value] of postHits) {
-      if (at - value.start >= POST_WINDOW_MS) postHits.delete(key);
-    }
-  }
-  return row.posts > MAX_POSTS_PER_WINDOW || row.created > MAX_NEW_SESSIONS_PER_WINDOW;
+async function tooManyPosts(ip, isNewSession) {
+  const store = await getStore();
+  return store.hitRate(ip, isNewSession, POST_WINDOW_MS, MAX_POSTS_PER_WINDOW, MAX_NEW_SESSIONS_PER_WINDOW);
 }
 
 function headerValue(request, name) {
@@ -194,7 +180,7 @@ async function handleHttp(request, response) {
     }
     const ip = requestIp(request);
     const isNewSession = !parsed.session;
-    if (tooManyPosts(ip, isNewSession)) {
+    if (await tooManyPosts(ip, isNewSession)) {
       sendJson(request, response, 429, { error: 'Too many signaling requests. Try again shortly.' });
       return true;
     }

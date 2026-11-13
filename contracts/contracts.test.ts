@@ -140,7 +140,7 @@ describe('signaling contract', () => {
     announce(a, 'ada');
     a.receive({ kind: 'watch', ids: [bo] });
     expect(a.sent.at(-1)).toEqual({ kind: 'presence', directId: bo, online: false });
-    announce(b, 'bo');
+    announce(b, 'bo', true);
     expect(a.sent.at(-1)).toEqual({ kind: 'presence', directId: bo, online: true });
     a.receive({ kind: 'lookup', requestId: 'req-1', directId: bo });
     expect(a.sent.at(-1)).toEqual({
@@ -465,6 +465,23 @@ describe('signaling contract', () => {
     expect(last).toBe(429);
   });
 
+  test('HTTP rate limits are shared on the signaling store', async () => {
+    const { createMemoryStore } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/store.cjs'),
+    ) as {
+      createMemoryStore: () => {
+        hitRate(ip: string, isNewSession: boolean, windowMs: number, maxPosts: number, maxCreated: number): Promise<boolean>;
+      };
+    };
+    const store = createMemoryStore();
+    let blocked = false;
+    for (let i = 0; i < 12; i += 1) {
+      blocked = await store.hitRate('198.51.100.99', true, 10_000, 40, 10);
+    }
+    expect(blocked).toBe(true);
+    expect(await store.hitRate('198.51.100.100', true, 10_000, 40, 10)).toBe(false);
+  });
+
   test('HTTP long-poll signaling finds another phone by DIRECT ID', async () => {
     const { exchange, createMemoryStore } = createRequire(__filename)(
       path.resolve(__dirname, '../infrastructure/signaling/httpHub.cjs'),
@@ -482,7 +499,7 @@ describe('signaling contract', () => {
     expect(boSession.frames[0]?.kind).toBe('challenge');
     expect(adaSession.token).toEqual(expect.any(String));
     await exchange({ session: adaSession.session, token: adaSession.token, frames: [signedHello('ada', adaSession.nonce)], waitMs: 0 }, { store });
-    await exchange({ session: boSession.session, token: boSession.token, frames: [signedHello('bo', boSession.nonce)], waitMs: 0 }, { store });
+    await exchange({ session: boSession.session, token: boSession.token, frames: [signedHello('bo', boSession.nonce, true)], waitMs: 0 }, { store });
     const lookup = await exchange({
       session: adaSession.session,
       token: adaSession.token,
@@ -600,6 +617,73 @@ describe('signaling contract', () => {
     expect(hub.roster()).toEqual([]);
   });
 
+  test('lookup hides a private phone until they opt in or send a signal', () => {
+    const hub = createSignalHub();
+    const a = socket();
+    const b = socket();
+    hub.attach(a);
+    hub.attach(b);
+    announce(a, 'ada');
+    announce(b, 'bo');
+    a.receive({ kind: 'lookup', requestId: 'req-private', directId: bo });
+    expect(a.sent.at(-1)).toEqual({
+      kind: 'lookup',
+      requestId: 'req-private',
+      directId: bo,
+      present: false,
+      bundle: null,
+    });
+    b.receive({ ...signaling.clientToHub.offer, from: bo, to: ada });
+    a.receive({ kind: 'lookup', requestId: 'req-intro', directId: bo });
+    expect(a.sent.at(-1)).toEqual({
+      kind: 'lookup',
+      requestId: 'req-intro',
+      directId: bo,
+      present: true,
+      bundle: identityVectors.bo.bundle,
+    });
+  });
+
+  test('HTTP lookup of a private phone stays empty without an introduction', async () => {
+    const { exchange, createMemoryStore } = createRequire(__filename)(
+      path.resolve(__dirname, '../infrastructure/signaling/httpHub.cjs'),
+    ) as {
+      createMemoryStore: () => object;
+      exchange: (
+        body: { session?: string; token?: string; frames?: unknown[]; waitMs?: number },
+        options?: { store?: object },
+      ) => Promise<{ session: string; token?: string; nonce: string; frames: { kind?: string; present?: boolean; bundle?: string | null }[] }>;
+    };
+    const store = createMemoryStore();
+    const adaSession = await exchange({ frames: [], waitMs: 0 }, { store });
+    const boSession = await exchange({ frames: [], waitMs: 0 }, { store });
+    await exchange({ session: adaSession.session, token: adaSession.token, frames: [signedHello('ada', adaSession.nonce)], waitMs: 0 }, { store });
+    await exchange({ session: boSession.session, token: boSession.token, frames: [signedHello('bo', boSession.nonce)], waitMs: 0 }, { store });
+    const hidden = await exchange({
+      session: adaSession.session,
+      token: adaSession.token,
+      frames: [{ kind: 'lookup', requestId: 'req-private', directId: bo }],
+      waitMs: 0,
+    }, { store });
+    expect(hidden.frames.find((frame) => frame.kind === 'lookup')).toMatchObject({ present: false, bundle: null });
+    await exchange({
+      session: boSession.session,
+      token: boSession.token,
+      frames: [{ ...signaling.clientToHub.offer, from: bo, to: ada }],
+      waitMs: 0,
+    }, { store });
+    const introduced = await exchange({
+      session: adaSession.session,
+      token: adaSession.token,
+      frames: [{ kind: 'lookup', requestId: 'req-intro', directId: bo }],
+      waitMs: 0,
+    }, { store });
+    expect(introduced.frames.find((frame) => frame.kind === 'lookup')).toMatchObject({
+      present: true,
+      bundle: identityVectors.bo.bundle,
+    });
+  });
+
   test('a dropped device stays findable for the grace period only', () => {
     let now = 5_000_000;
     const hub = createSignalHub({ now: () => now });
@@ -607,7 +691,8 @@ describe('signaling contract', () => {
     const b = socket();
     hub.attach(a);
     hub.attach(b);
-    announce(b, 'bo');
+    announce(a, 'ada');
+    announce(b, 'bo', true);
     b.close();
     a.receive({ kind: 'lookup', requestId: 'req-1', directId: bo });
     expect(a.sent.at(-1)).toMatchObject({ present: true });

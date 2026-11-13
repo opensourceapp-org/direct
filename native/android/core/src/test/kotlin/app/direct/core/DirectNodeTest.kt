@@ -67,6 +67,8 @@ class DirectNodeTest {
 
         val missing = assertFailsWith<DirectException> { ada.addContact("dir_0123456789ABCDEH") }
         assertEquals(DirectException.Reason.NOT_FOUND, missing.reason)
+        bo.setDiscoverable(true)
+        settle()
         ada.addContact(boId.lowercase().replaceFirst("dir_", "DIR_"))
         assertTrue(ada.state.value.contacts.single().accepted)
 
@@ -126,6 +128,8 @@ class DirectNodeTest {
         settle()
         val adaId = ada.state.value.profile!!.directId
         val boId = bo.state.value.profile!!.directId
+        bo.setDiscoverable(true)
+        settle()
         ada.addContact(boId)
         ada.send(boId, "first")
         settle()
@@ -154,6 +158,8 @@ class DirectNodeTest {
         settle()
         val adaId = ada.state.value.profile!!.directId
         val boId = bo.state.value.profile!!.directId
+        bo.setDiscoverable(true)
+        settle()
         ada.addContact(boId)
         ada.send(boId, "Are you there?")
         settle()
@@ -203,6 +209,8 @@ class DirectNodeTest {
         settle()
         val adaId = ada.state.value.profile!!.directId
         val boId = bo.state.value.profile!!.directId
+        bo.setDiscoverable(true)
+        settle()
         ada.addContact(boId)
         val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte())
         ada.setAvatar(jpeg)
@@ -250,6 +258,8 @@ class DirectNodeTest {
         settle()
         val adaId = ada.state.value.profile!!.directId
         val boId = bo.state.value.profile!!.directId
+        bo.setDiscoverable(true)
+        settle()
         ada.addContact(boId)
         settle()
         bo.acceptRequest(adaId)
@@ -331,6 +341,8 @@ class DirectNodeTest {
         bo.setBootstrap("192.168.1.20")
         settle()
         val boId = bo.state.value.profile!!.directId
+        bo.setDiscoverable(true)
+        settle()
         ada.addContact(boId)
         settle()
         val group = ada.createGroup("Weekend", listOf(boId))
@@ -354,6 +366,8 @@ class DirectNodeTest {
         settle()
         val adaId = ada.state.value.profile!!.directId
         val boId = bo.state.value.profile!!.directId
+        bo.setDiscoverable(true)
+        settle()
         ada.addContact(boId)
         settle()
         bo.acceptRequest(adaId)
@@ -390,6 +404,8 @@ class DirectNodeTest {
         settle()
         val adaId = ada.state.value.profile!!.directId
         val boId = bo.state.value.profile!!.directId
+        bo.setDiscoverable(true)
+        settle()
         ada.addContact(boId)
         settle()
         bo.acceptRequest(adaId)

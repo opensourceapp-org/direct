@@ -14,10 +14,17 @@ function live(peer, at) {
   return at - Number(peer.closedAt || 0) < GRACE_MS;
 }
 
+function rateKey(ip) {
+  const key = String(ip || 'unknown').trim().toLowerCase().slice(0, 64);
+  return key || 'unknown';
+}
+
 function createMemoryStore() {
   const sessions = new Map();
   const peers = new Map();
   const inbox = new Map();
+  const rate = new Map();
+  const intros = new Map();
 
   return {
     async createSession() {
@@ -65,6 +72,31 @@ function createMemoryStore() {
       }
       return ids;
     },
+    async hitRate(ip, isNewSession, windowMs, maxPosts, maxCreated) {
+      const key = rateKey(ip);
+      const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
+      let row = rate.get(key);
+      if (!row || row.windowStart !== windowStart) {
+        row = { windowStart, posts: 0, created: 0 };
+        rate.set(key, row);
+      }
+      row.posts += 1;
+      if (isNewSession) row.created += 1;
+      if (rate.size > 10_000) {
+        for (const [id, value] of rate) {
+          if (value.windowStart !== windowStart) rate.delete(id);
+        }
+      }
+      return row.posts > maxPosts || row.created > maxCreated;
+    },
+    async noteIntro(fromId, toId) {
+      if (!fromId || !toId || fromId === toId) return;
+      intros.set(`${fromId}\n${toId}`, Date.now());
+    },
+    async wasIntroduced(fromId, toId) {
+      const at = intros.get(`${fromId}\n${toId}`);
+      return typeof at === 'number' && Date.now() - at < GRACE_MS;
+    },
     async push(sessionId, payload) {
       const list = inbox.get(sessionId) || [];
       list.push(payload);
@@ -89,6 +121,12 @@ function createMemoryStore() {
       }
       for (const [id, peer] of peers) {
         if (!live(peer, at) && at - Number(peer.closedAt || 0) >= GRACE_MS) peers.delete(id);
+      }
+      for (const [id, value] of rate) {
+        if (at - value.windowStart >= 20_000) rate.delete(id);
+      }
+      for (const [id, seen] of intros) {
+        if (at - seen >= GRACE_MS) intros.delete(id);
       }
     },
     visible(peer, at = Date.now()) {
@@ -165,6 +203,41 @@ function createPgStore(pool) {
       );
       return rows.map((row) => row.id);
     },
+    async hitRate(ip, isNewSession, windowMs, maxPosts, maxCreated) {
+      const key = rateKey(ip);
+      const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
+      const created = isNewSession ? 1 : 0;
+      const { rows } = await pool.query(
+        `insert into signal_rate (ip, window_start, posts, created)
+         values ($1, $2, 1, $3)
+         on conflict (ip) do update set
+           posts = case when signal_rate.window_start = excluded.window_start then signal_rate.posts + 1 else 1 end,
+           created = case when signal_rate.window_start = excluded.window_start then signal_rate.created + excluded.created else excluded.created end,
+           window_start = excluded.window_start
+         returning posts, created`,
+        [key, windowStart, created],
+      );
+      const row = rows[0] || { posts: 1, created };
+      return row.posts > maxPosts || row.created > maxCreated;
+    },
+    async noteIntro(fromId, toId) {
+      if (!fromId || !toId || fromId === toId) return;
+      await pool.query(
+        `insert into signal_intro (from_id, to_id, last_seen)
+         values ($1, $2, now())
+         on conflict (from_id, to_id) do update set last_seen = now()`,
+        [fromId, toId],
+      );
+    },
+    async wasIntroduced(fromId, toId) {
+      const { rows } = await pool.query(
+        `select 1 from signal_intro
+         where from_id = $1 and to_id = $2
+           and last_seen > now() - interval '2 minutes'`,
+        [fromId, toId],
+      );
+      return rows.length > 0;
+    },
     async push(sessionId, payload) {
       await pool.query('insert into signal_inbox (session_id, payload) values ($1, $2)', [sessionId, payload]);
     },
@@ -183,6 +256,8 @@ function createPgStore(pool) {
       await pool.query('update signal_peers set session_id = null, closed_at = now() where session_id is not null and session_id not in (select id from signal_sessions)');
       await pool.query("delete from signal_peers where session_id is null and closed_at < now() - interval '2 minutes'");
       await pool.query("delete from signal_inbox where created_at < now() - interval '2 minutes'");
+      await pool.query("delete from signal_intro where last_seen < now() - interval '2 minutes'");
+      await pool.query("delete from signal_rate where window_start < (extract(epoch from now()) * 1000 - 20000)::bigint");
     },
     visible(peer, at = Date.now()) {
       return live(peer, at);
