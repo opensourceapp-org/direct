@@ -447,7 +447,7 @@ public final class DeliveryEngine {
 
     /// Seals a story or profile photo/video to every accepted contact.
     @discardableResult
-    public func queueFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String) throws -> FeedItem {
+    public func queueFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String, tags: [String] = []) throws -> FeedItem {
         guard let (keys, _) = identity() else { throw DeliveryRejected(message: "Create an identity before sending.") }
         guard FeedNotes.channels.contains(channel) else { throw DeliveryRejected(message: "That post type is not supported.") }
         guard FeedNotes.kinds.contains(kind) else { throw DeliveryRejected(message: "Stories and posts take a photo or a video.") }
@@ -467,9 +467,11 @@ public final class DeliveryEngine {
         try bytes.write(to: directory.appendingPathComponent(fileName))
         let expiresAt = channel == FeedNotes.story ? now + FeedNotes.storyTtlMs : nil
         let captionText = String(caption.trimmingCharacters(in: .whitespacesAndNewlines).prefix(FeedNotes.maxCaption))
+        let allowed = Set(store.contacts().filter { $0.accepted && !$0.blocked }.map(\.directId))
+        let tagIds = FeedNotes.sanitizeTags(tags).filter { allowed.contains($0) }
         let item = FeedItem(
             id: id, ownerId: keys.directId, channel: channel, kind: kind, mime: mime, name: name,
-            caption: captionText, createdAt: now, expiresAt: expiresAt, mediaFile: fileName, seen: true
+            caption: captionText, createdAt: now, expiresAt: expiresAt, mediaFile: fileName, seen: true, tags: tagIds
         )
         store.putFeed(item)
         enqueueFeed(item)
@@ -995,7 +997,7 @@ public final class DeliveryEngine {
         let job = FeedNotes.Job(
             id: item.id, channel: item.channel, kind: item.kind, mime: item.mime, name: item.name,
             caption: item.caption, createdAt: item.createdAt, expiresAt: item.expiresAt,
-            parts: parts, nextPart: 0, fileName: item.mediaFile
+            parts: parts, nextPart: 0, fileName: item.mediaFile, tags: item.tags
         )
         let contacts = targets ?? store.contacts().filter { $0.accepted && !$0.blocked }
         for contact in contacts {
@@ -1088,7 +1090,7 @@ public final class DeliveryEngine {
                 FeedNotes.Part(
                     id: job.id, channel: job.channel, kind: job.kind, mime: job.mime, name: job.name,
                     caption: job.caption, createdAt: job.createdAt, expiresAt: job.expiresAt,
-                    part: part, parts: parts.count
+                    part: part, parts: parts.count, tags: job.tags
                 ),
                 parts[part]
             )
@@ -1152,7 +1154,7 @@ public final class DeliveryEngine {
         store.putFeed(FeedItem(
             id: header.id, ownerId: peerId, channel: header.channel, kind: header.kind, mime: header.mime, name: header.name,
             caption: header.caption, createdAt: header.createdAt, expiresAt: header.expiresAt, mediaFile: fileName, seen: seen,
-            likes: existing?.likes ?? [], comments: existing?.comments ?? []
+            likes: existing?.likes ?? [], comments: existing?.comments ?? [], tags: header.tags
         ))
         try store.save()
         return already ? .duplicate : .stored

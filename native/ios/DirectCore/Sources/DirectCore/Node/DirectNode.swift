@@ -513,10 +513,10 @@ public final class DirectNode {
     }
 
     @discardableResult
-    public func publishFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String = "") throws -> FeedItem {
+    public func publishFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String = "", tags: [String] = []) throws -> FeedItem {
         let item: FeedItem
         do {
-            item = try requireEngine().queueFeed(channel: channel, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption)
+            item = try requireEngine().queueFeed(channel: channel, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption, tags: tags)
         } catch let error as DeliveryRejected {
             throw DirectError(.rejected, error.message)
         }

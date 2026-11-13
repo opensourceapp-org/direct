@@ -46,6 +46,34 @@ func feedOwnerJpeg(_ state: NodeState, _ ownerId: String) -> String? {
     return state.contacts.first { $0.directId == ownerId }?.avatarJpegBase64
 }
 
+func feedTaggedLine(_ state: NodeState, _ ids: [String]) -> String {
+    let names = ids.map { feedOwnerName(state, $0) }
+    guard let first = names.first else { return "" }
+    if names.count == 1 { return "with \(first)" }
+    if names.count == 2 { return "with \(first) and \(names[1])" }
+    return "with \(names.dropLast().joined(separator: ", ")) and \(names.last!)"
+}
+
+func feedPoster(bytes: Data, kind: String) -> UIImage? {
+    if kind != "video" { return UIImage(data: bytes) }
+    return videoPoster(bytes)
+}
+
+func videoPoster(_ data: Data) -> UIImage? {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("direct-thumb-\(UUID().uuidString).mp4")
+    defer { try? FileManager.default.removeItem(at: url) }
+    do {
+        try data.write(to: url)
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 720, height: 720)
+        let cg = try generator.copyCGImage(at: .zero, actualTime: nil)
+        return UIImage(cgImage: cg)
+    } catch {
+        return nil
+    }
+}
+
 func formatFeedTime(_ ms: Int64) -> String {
     let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
     let formatter = RelativeDateTimeFormatter()
@@ -185,6 +213,11 @@ struct FeedPostCard: View {
                     Text(item.caption)
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if !item.tags.isEmpty {
+                    Text(feedTaggedLine(model.state, item.tags))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 FeedActions(item: item, onComments: onOpen)
                 if !item.comments.isEmpty {
@@ -544,6 +577,7 @@ struct ProfilePosts: View {
     @State private var item: PhotosPickerItem?
     @State private var picking = false
     @State private var mediaId: String?
+    @State private var draft: FeedDraft?
 
     var body: some View {
         let posts = profilePosts(model.state, ownerId: ownerId)
@@ -564,7 +598,9 @@ struct ProfilePosts: View {
                 guard let picked else { return }
                 do {
                     let prepared = try await loadFeedMedia(picked, fallbackKind: "image")
-                    model.publishFeed(channel: FeedNotes.post, kind: prepared.kind, mime: prepared.mime, name: prepared.name, bytes: prepared.bytes)
+                    await MainActor.run {
+                        draft = FeedDraft(kind: prepared.kind, mime: prepared.mime, name: prepared.name, bytes: prepared.bytes)
+                    }
                 } catch {
                     await MainActor.run { model.toast = (error as? PrepError)?.message ?? "That post was not added." }
                 }
@@ -572,6 +608,10 @@ struct ProfilePosts: View {
             }
         }
         .photosPicker(isPresented: $picking, selection: $item, matching: .any(of: [.images, .videos]))
+        .sheet(item: $draft) { next in
+            FeedComposer(draft: next) { draft = nil }
+                .environmentObject(model)
+        }
         .fullScreenCover(isPresented: Binding(
             get: { mediaId != nil },
             set: { if !$0 { mediaId = nil } }
@@ -659,12 +699,15 @@ private enum ProfileTile: Identifiable {
 
 struct SavedPosts: View {
     @EnvironmentObject private var model: AppModel
+    var showsHeading: Bool = true
     @State private var mediaId: String?
 
     var body: some View {
         let posts = savedFeed(model.state)
         VStack(alignment: .leading, spacing: 12) {
-            Text("Saved").font(.headline)
+            if showsHeading {
+                Text("Saved").font(.headline)
+            }
             if posts.isEmpty {
                 Text("Save a post and it stays here.")
                     .font(.subheadline)
@@ -800,7 +843,7 @@ struct FeedThumb: View {
     @EnvironmentObject private var model: AppModel
     let item: FeedItem
     var cornerRadius: CGFloat = 16
-    @State private var bytes: Data?
+    @State private var poster: UIImage?
 
     var body: some View {
         Color(uiColor: .tertiarySystemFill)
@@ -808,8 +851,8 @@ struct FeedThumb: View {
             .frame(maxWidth: .infinity)
             .overlay {
                 GeometryReader { geo in
-                    if let bytes, let image = UIImage(data: bytes) {
-                        Image(uiImage: image)
+                    if let poster {
+                        Image(uiImage: poster)
                             .resizable()
                             .scaledToFill()
                             .frame(width: geo.size.width, height: geo.size.height)
@@ -827,8 +870,22 @@ struct FeedThumb: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .onAppear { model.loadFeed(item.id) { bytes = $0 } }
-            .onChange(of: item.mediaFile) { _ in model.loadFeed(item.id) { bytes = $0 } }
+            .onAppear { loadPoster() }
+            .onChange(of: item.mediaFile) { _ in loadPoster() }
+    }
+
+    private func loadPoster() {
+        model.loadFeed(item.id) { data in
+            guard let data else { return }
+            if item.kind != "video" {
+                poster = UIImage(data: data)
+                return
+            }
+            Task.detached {
+                let image = videoPoster(data)
+                await MainActor.run { poster = image }
+            }
+        }
     }
 }
 
@@ -896,6 +953,11 @@ struct FeedLightbox: View {
                     }
                     if !item.caption.isEmpty {
                         Text(item.caption).font(.subheadline)
+                    }
+                    if !item.tags.isEmpty {
+                        Text(feedTaggedLine(model.state, item.tags))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                     FeedActions(item: item) { commenting = true }
                 }
@@ -1437,6 +1499,132 @@ private final class ZoomHost: UIScrollView, UIScrollViewDelegate {
         let width = bounds.width / target
         let height = bounds.height / target
         zoom(to: CGRect(x: point.x - width / 2, y: point.y - height / 2, width: width, height: height), animated: true)
+    }
+}
+
+private struct FeedDraft: Identifiable {
+    let id = UUID()
+    let kind: String
+    let mime: String
+    let name: String
+    let bytes: Data
+}
+
+private struct FeedComposer: View {
+    @EnvironmentObject private var model: AppModel
+    let draft: FeedDraft
+    var onClose: () -> Void
+    @State private var caption = ""
+    @State private var tagged: Set<String> = []
+    @State private var poster: UIImage?
+
+    var body: some View {
+        let contacts = model.state.contacts.filter { $0.accepted && !$0.blocked }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color(uiColor: .tertiarySystemFill))
+                        if let poster {
+                            Image(uiImage: poster)
+                                .resizable()
+                                .scaledToFill()
+                        }
+                        if draft.kind == "video" {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 44))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Quote or description").font(.subheadline.weight(.semibold))
+                        TextField("Add a quote or description", text: $caption, axis: .vertical)
+                            .lineLimit(3...6)
+                            .padding(12)
+                            .background(Ink.background, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Ink.line))
+                        Text("\(caption.count)/\(FeedNotes.maxCaption)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    if !contacts.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Tag contacts").font(.subheadline.weight(.semibold))
+                            Text("Tagged people show up on the post.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8)], spacing: 8) {
+                                ForEach(contacts, id: \.directId) { contact in
+                                    let on = tagged.contains(contact.directId)
+                                    Button {
+                                        if on {
+                                            tagged.remove(contact.directId)
+                                        } else if tagged.count < FeedNotes.maxTags {
+                                            tagged.insert(contact.directId)
+                                        }
+                                    } label: {
+                                        Text(contact.name)
+                                            .font(.subheadline.weight(.semibold))
+                                            .lineLimit(1)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .frame(maxWidth: .infinity)
+                                            .background(on ? Ink.accent : Color(uiColor: .tertiarySystemFill), in: Capsule())
+                                            .foregroundStyle(on ? Color.white : Ink.text)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityAddTraits(on ? .isSelected : [])
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(Ink.background)
+            .navigationTitle("New post")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onClose)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Share") { share() }
+                        .fontWeight(.semibold)
+                }
+            }
+            .onAppear {
+                if poster == nil {
+                    Task.detached {
+                        let image = feedPoster(bytes: draft.bytes, kind: draft.kind)
+                        await MainActor.run { poster = image }
+                    }
+                }
+            }
+            .onChange(of: caption) { value in
+                if value.count > FeedNotes.maxCaption {
+                    caption = String(value.prefix(FeedNotes.maxCaption))
+                }
+            }
+        }
+    }
+
+    private func share() {
+        model.publishFeed(
+            channel: FeedNotes.post,
+            kind: draft.kind,
+            mime: draft.mime,
+            name: draft.name,
+            bytes: draft.bytes,
+            caption: caption,
+            tags: Array(tagged)
+        )
+        onClose()
     }
 }
 

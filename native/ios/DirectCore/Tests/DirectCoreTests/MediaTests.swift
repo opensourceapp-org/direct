@@ -78,6 +78,20 @@ final class MediaTests: XCTestCase {
         let shared = MediaNotes.decodePart(MediaNotes.encodePart(posted, bytes))
         XCTAssertEqual("fed_abc", shared?.0.feedId)
         XCTAssertEqual("dir_X", shared?.0.feedOwnerId)
+
+        let tagged = FeedNotes.Part(
+            id: "fed_abc", channel: FeedNotes.post, kind: "image", mime: "image/jpeg", name: "a.jpg",
+            caption: "lake", createdAt: 1, expiresAt: nil, part: 0, parts: 1, tags: ["dir_Bo12", "x", "dir_Bo12"]
+        )
+        XCTAssertEqual(["dir_Bo12"], tagged.tags)
+        let feed = FeedNotes.decodePart(FeedNotes.encodePart(tagged, bytes))
+        XCTAssertEqual(["dir_Bo12"], feed?.0.tags)
+        XCTAssertEqual("lake", feed?.0.caption)
+        let legacy = Encoding.utf8(
+            "DIRECT-FEED/1\n{\"v\":1,\"op\":\"put\",\"id\":\"fed_abc\",\"channel\":\"post\",\"kind\":\"image\",\"mime\":\"image/jpeg\",\"name\":\"a.jpg\",\"caption\":\"hi\",\"createdAt\":1,\"part\":0,\"parts\":1}\n"
+        ) + bytes
+        XCTAssertEqual([], FeedNotes.decodePart(legacy)?.0.tags)
+        XCTAssertEqual("hi", FeedNotes.decodePart(legacy)?.0.caption)
     }
 
     func testAnOlderSnapshotStillOpens() throws {
@@ -238,10 +252,15 @@ final class MediaTests: XCTestCase {
         let bo = Device("Bo", clock, boLinks, chunk: 8)
         ada.know(bo)
         bo.know(ada)
-        let post = try ada.engine.queueFeed(channel: FeedNotes.post, kind: "image", mime: "image/jpeg", name: "pic.jpg", bytes: Data([1, 2, 3, 4, 5]), caption: "lake")
+        let post = try ada.engine.queueFeed(
+            channel: FeedNotes.post, kind: "image", mime: "image/jpeg", name: "pic.jpg",
+            bytes: Data([1, 2, 3, 4, 5]), caption: "lake", tags: [bo.keys.directId, "nope", bo.keys.directId]
+        )
+        XCTAssertEqual([bo.keys.directId], ada.store.feed(post.id)?.tags)
         try await ada.engine.flush()
         for bytes in adaLinks.sent { _ = try bo.engine.receive(ada.keys.directId, bytes) }
         XCTAssertEqual("lake", bo.store.feed(post.id)?.caption)
+        XCTAssertEqual([bo.keys.directId], bo.store.feed(post.id)?.tags)
 
         adaLinks.sent.removeAll()
         boLinks.sent.removeAll()

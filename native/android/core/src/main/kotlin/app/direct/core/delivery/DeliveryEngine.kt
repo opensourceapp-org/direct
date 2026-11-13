@@ -397,7 +397,7 @@ class DeliveryEngine(
      * Seals a story or profile photo/video to every accepted contact.
      * Queued like a receipt: it is not a chat bubble, and it leaves the queue once written.
      */
-    fun queueFeed(channel: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String): FeedItem {
+    fun queueFeed(channel: String, kind: String, mime: String, name: String, bytes: ByteArray, caption: String, tags: List<String> = emptyList()): FeedItem {
         val (keys, _) = identity() ?: throw DeliveryRejected("Create an identity before sending.")
         if (channel !in FeedNotes.CHANNELS) throw DeliveryRejected("That post type is not supported.")
         if (kind !in FeedNotes.KINDS) throw DeliveryRejected("Stories and posts take a photo or a video.")
@@ -415,9 +415,11 @@ class DeliveryEngine(
         directory.mkdirs()
         File(directory, fileName).writeBytes(bytes)
         val expiresAt = if (channel == FeedNotes.STORY) now + FeedNotes.STORY_TTL_MS else null
+        val allowed = store.contacts().filter { it.accepted && !it.blocked }.map { it.directId }.toSet()
+        val tagIds = FeedNotes.sanitizeTags(tags).filter { it in allowed }
         val item = FeedItem(
             id, selfId, channel, kind, mime, name, caption.trim().take(FeedNotes.MAX_CAPTION),
-            now, expiresAt, fileName, seen = true,
+            now, expiresAt, fileName, seen = true, tags = tagIds,
         )
         store.putFeed(item)
         enqueueFeed(item)
@@ -908,7 +910,7 @@ class DeliveryEngine(
         val parts = MediaNotes.split(File(directory, item.mediaFile).readBytes(), mediaChunkBytes).size
         val job = FeedNotes.Job(
             item.id, item.channel, item.kind, item.mime, item.name, item.caption,
-            item.createdAt, item.expiresAt, parts, 0, item.mediaFile,
+            item.createdAt, item.expiresAt, parts, 0, item.mediaFile, item.tags,
         )
         val contacts = targets ?: store.contacts().filter { it.accepted && !it.blocked }
         for (contact in contacts) {
@@ -1000,7 +1002,7 @@ class DeliveryEngine(
         var job = initial
         while (part < parts.size) {
             val plain = FeedNotes.encodePart(
-                FeedNotes.Part(job.id, job.channel, job.kind, job.mime, job.name, job.caption, job.createdAt, job.expiresAt, part, parts.size),
+                FeedNotes.Part(job.id, job.channel, job.kind, job.mime, job.name, job.caption, job.createdAt, job.expiresAt, part, parts.size, job.tags),
                 parts[part],
             )
             val envelope = Envelopes.seal(
@@ -1061,7 +1063,7 @@ class DeliveryEngine(
         val item = FeedItem(
             header.id, peerId, header.channel, header.kind, header.mime, header.name, header.caption,
             header.createdAt, header.expiresAt, fileName, seen = already && existing?.seen == true,
-            likes = existing?.likes.orEmpty(), comments = existing?.comments.orEmpty(),
+            likes = existing?.likes.orEmpty(), comments = existing?.comments.orEmpty(), tags = header.tags,
         )
         store.putFeed(item)
         store.save()

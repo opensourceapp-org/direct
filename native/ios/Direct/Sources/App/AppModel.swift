@@ -196,8 +196,8 @@ final class AppModel: ObservableObject {
         run { try $0.sendMedia(peerId, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption) }
     }
 
-    func publishFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String = "") {
-        run { try $0.publishFeed(channel: channel, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption) }
+    func publishFeed(channel: String, kind: String, mime: String, name: String, bytes: Data, caption: String = "", tags: [String] = []) {
+        run { try $0.publishFeed(channel: channel, kind: kind, mime: mime, name: name, bytes: bytes, caption: caption, tags: tags) }
     }
 
     func deleteFeed(_ id: String) { run { try $0.deleteFeed(id) } }
