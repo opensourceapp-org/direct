@@ -17,6 +17,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,6 +50,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
@@ -70,15 +73,20 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.DynamicFeed
+import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.QrCode
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.WifiTethering
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -122,6 +130,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -665,6 +675,97 @@ private fun NewGroupScreen(node: DirectNode, state: NodeState, back: () -> Unit,
 }
 
 @Composable
+private fun AddGlyph(icon: ImageVector, tint: Color = Ink.accent) {
+    Box(
+        Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(tint.copy(alpha = 0.14f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+private fun AddSectionHeader(icon: ImageVector, title: String, subtitle: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        AddGlyph(icon)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = Ink.foreground)
+            Muted(subtitle)
+        }
+    }
+}
+
+@Composable
+private fun AddSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    leading: ImageVector,
+    singleLine: Boolean = true,
+    minLines: Int = 1,
+    imeAction: ImeAction = ImeAction.Done,
+    onIme: () -> Unit = {},
+) {
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = singleLine,
+        minLines = if (singleLine) 1 else minLines,
+        textStyle = TextStyle(
+            fontFamily = if (singleLine) FontFamily.Monospace else DirectFont,
+            fontSize = 14.sp,
+            color = Ink.foreground,
+            lineHeight = 20.sp,
+        ),
+        cursorBrush = SolidColor(Ink.accent),
+        keyboardOptions = KeyboardOptions(
+            imeAction = imeAction,
+            capitalization = KeyboardCapitalization.None,
+            autoCorrectEnabled = false,
+        ),
+        keyboardActions = KeyboardActions(
+            onSearch = { onIme() },
+            onDone = { onIme() },
+        ),
+        modifier = Modifier.fillMaxWidth(),
+        decorationBox = { inner ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = if (singleLine) 48.dp else 92.dp)
+                    .background(Ink.background, RoundedCornerShape(14.dp))
+                    .border(BorderStroke(1.dp, Ink.border), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 12.dp, vertical = if (singleLine) 0.dp else 12.dp),
+                verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(leading, null, tint = Ink.muted, modifier = Modifier.size(18.dp).padding(top = if (singleLine) 0.dp else 2.dp))
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty()) {
+                        Text(placeholder, color = Ink.muted, fontFamily = if (singleLine) FontFamily.Monospace else DirectFont, fontSize = 14.sp)
+                    }
+                    inner()
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun CompactAction(label: String, enabled: Boolean, onClick: () -> Unit) = Button(
+    onClick = onClick,
+    enabled = enabled,
+    shape = RoundedCornerShape(14.dp),
+    colors = ButtonDefaults.buttonColors(
+        containerColor = Ink.accent,
+        contentColor = Color.White,
+        disabledContainerColor = Ink.border,
+        disabledContentColor = Ink.muted,
+    ),
+    modifier = Modifier.fillMaxWidth().height(46.dp),
+) { Text(label, fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 15.sp) }
+
+@Composable
 private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -692,33 +793,74 @@ private fun ContactsScreen(node: DirectNode, state: NodeState, open: (String) ->
         }
         return
     }
+    fun lookUp() {
+        if (directId.isBlank() || busy) return
+        busy = true
+        scope.attempt({ error = it }) {
+            try {
+                val added = node.addContact(directId)
+                directId = ""
+                open(added.directId)
+            } finally {
+                busy = false
+            }
+        }
+    }
+    fun addBundle() {
+        if (bundle.isBlank()) return
+        scope.attempt({ error = it }) {
+            node.addFromShare(bundle)
+            bundle = ""
+        }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Header("People", "Contacts")
-        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Muted("Looking up a DIRECT ID only works if that person turned on public listing on this server. A scanned QR code also carries that server and saves it on this phone.")
-            SecondaryButton("Scan a QR code", Icons.Outlined.QrCodeScanner) { scanning = true }
-            Field(directId, { directId = it }, "dir_…")
-            PrimaryButton(if (busy) "Looking up" else "Look up", enabled = directId.isNotBlank() && !busy) {
-                busy = true
-                scope.attempt({ error = it }) {
-                    try {
-                        val added = node.addContact(directId)
-                        directId = ""
-                        open(added.directId)
-                    } finally {
-                        busy = false
+        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Card {
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth().clickable(onClickLabel = "Scan a QR code") { scanning = true }.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        AddGlyph(Icons.Outlined.QrCodeScanner)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Scan QR code", fontFamily = DirectFont, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                            Muted("Adds their ID and this server")
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Ink.muted)
+                    }
+                    HorizontalDivider(color = Ink.border, modifier = Modifier.padding(horizontal = 16.dp))
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        AddSectionHeader(Icons.Outlined.PersonAdd, "Add by ID", "Lookup needs public listing on this server")
+                        AddSearchField(
+                            value = directId,
+                            onValueChange = { directId = it },
+                            placeholder = "dir_…",
+                            leading = Icons.Outlined.Search,
+                            imeAction = ImeAction.Search,
+                            onIme = ::lookUp,
+                        )
+                        CompactAction(if (busy) "Looking up…" else "Look up", enabled = directId.isNotBlank() && !busy, onClick = ::lookUp)
+                    }
+                    HorizontalDivider(color = Ink.border, modifier = Modifier.padding(horizontal = 16.dp))
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        AddSectionHeader(Icons.Outlined.ContentPaste, "Identity bundle", "Paste a share card if you have one")
+                        AddSearchField(
+                            value = bundle,
+                            onValueChange = { bundle = it },
+                            placeholder = "{\"v\":1,…}",
+                            leading = Icons.Outlined.Key,
+                            singleLine = false,
+                            minLines = 3,
+                            imeAction = ImeAction.Default,
+                        )
+                        CompactAction("Add from bundle", enabled = bundle.isNotBlank(), onClick = ::addBundle)
                     }
                 }
             }
-            Label("Or paste an identity bundle")
-            Field(bundle, { bundle = it }, "{\"v\":1,…}", singleLine = false, minLines = 3)
-            SecondaryButton("Add from bundle or share card", enabled = bundle.isNotBlank()) {
-                scope.attempt({ error = it }) {
-                    node.addFromShare(bundle)
-                    bundle = ""
-                }
-            }
-            error?.let { Text(it, color = Ink.danger, fontSize = 14.sp) }
+            Muted("Lookup by ID needs public listing on this server. A QR code or pasted card works either way, and scanning it saves that address on this phone.")
+            error?.let { Text(it, color = Ink.danger, fontFamily = DirectFont, fontSize = 14.sp) }
         }
         LaunchedEffect(state.bootstrap.isOpen) {
             if (state.bootstrap.isOpen) node.refreshSuggestions()
