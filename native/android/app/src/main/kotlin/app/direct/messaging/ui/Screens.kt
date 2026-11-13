@@ -939,7 +939,6 @@ private fun ProfileHomeScreen(
     val profile = state.profile ?: return
     var error by remember { mutableStateOf<String?>(null) }
     val posts = profilePosts(state, profile.directId)
-    val stories = liveStories(state, profile.directId)
     val people = state.contacts.count { it.accepted && !it.blocked }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Row(
@@ -952,21 +951,15 @@ private fun ProfileHomeScreen(
                 Icon(Icons.Outlined.Settings, "Settings", tint = Ink.foreground)
             }
         }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Avatar(profile.name, jpegBytes(profile.avatarJpegBase64), 88.dp)
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.SpaceEvenly) {
-                ProfileStat("${posts.size}", "Posts")
-                ProfileStat("$people", "Contacts")
-                ProfileStat("${stories.size}", "Stories")
-            }
-        }
+        ProfileIdentityHeader(
+            name = profile.name,
+            jpeg = jpegBytes(profile.avatarJpegBase64),
+            status = profile.status,
+            posts = posts.size,
+            contacts = people,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        )
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(profile.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            if (profile.status.isNotBlank()) Text(profile.status, fontSize = 14.sp)
             SecondaryButton("Edit profile") { onEdit() }
         }
         error?.let { Text(it, color = Ink.danger, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
@@ -1106,14 +1099,6 @@ private fun SettingsScreen(node: DirectNode, state: NodeState, onHowItWorks: () 
                 SecondaryButton("Hide") { phrase = null }
             }
         }
-    }
-}
-
-@Composable
-private fun ProfileStat(value: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-        Text(label, color = Ink.muted, fontSize = 12.sp)
     }
 }
 

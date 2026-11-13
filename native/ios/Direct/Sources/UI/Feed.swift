@@ -726,24 +726,17 @@ struct ContactProfileView: View {
         let postCount = profilePosts(model.state, ownerId: peerId).count
         ScrollView {
             VStack(spacing: 28) {
-                VStack(spacing: 8) {
-                    Button { if !stories.isEmpty { storyOpen = true } } label: {
-                        Avatar(name: name, jpeg: jpeg, size: 108)
-                            .overlay {
-                                Circle().strokeBorder(stories.isEmpty ? Color.clear : Color.accentColor, lineWidth: 2)
-                            }
-                    }
-                    .buttonStyle(.plain)
-                    Text(name).font(.title2.weight(.semibold))
-                    if !about.isEmpty {
-                        Text(about)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    Text(postCount == 1 ? "1 post" : "\(postCount) posts")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                VStack(spacing: 16) {
+                    ProfileHeader(
+                        name: name,
+                        jpeg: jpeg,
+                        status: about,
+                        posts: postCount,
+                        contacts: selfProfile ? model.state.contacts.filter { $0.accepted && !$0.blocked }.count : nil,
+                        stories: !stories.isEmpty,
+                        unseenStories: stories.contains { !$0.seen },
+                        onAvatar: stories.isEmpty ? nil : { storyOpen = true }
+                    )
                     if !selfProfile {
                         HStack(spacing: 12) {
                             profileAction("Message", "bubble.left.fill") {
@@ -761,11 +754,8 @@ struct ContactProfileView: View {
                                 }
                             }
                         }
-                        .padding(.top, 10)
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 8)
                 ProfilePosts(ownerId: peerId, canAdd: selfProfile, showsHeading: true)
             }
             .padding(.horizontal, 16)
